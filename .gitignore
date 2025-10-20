@@ -55,9 +55,11 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-bank statements/
-depot transactions/
-credits/
+# Ignore old data folders with spaces (keep new data/ structure)
+/bank statements/
+/depot transactions/
+/credits/
+# Ignore CSV and PDF files (financial data)
 *.csv
 *.pdf
 

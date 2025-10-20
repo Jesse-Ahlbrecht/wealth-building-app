@@ -460,7 +460,7 @@ def get_transactions():
     parser = BankStatementParser()
 
     # Parse all bank statements
-    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'bank statements')
+    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'bank_statements')
     dkb_folder = os.path.join(base_path, 'dkb')
     yuh_folder = os.path.join(base_path, 'yuh')
 
@@ -488,7 +488,7 @@ def get_summary():
     parser = BankStatementParser()
 
     # Parse all bank statements
-    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'bank statements')
+    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'bank_statements')
     dkb_folder = os.path.join(base_path, 'dkb')
     yuh_folder = os.path.join(base_path, 'yuh')
 
@@ -627,7 +627,7 @@ def get_accounts():
     parser = BankStatementParser()
 
     # Parse all bank statements
-    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'bank statements')
+    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'bank_statements')
     dkb_folder = os.path.join(base_path, 'dkb')
     yuh_folder = os.path.join(base_path, 'yuh')
 
@@ -646,9 +646,9 @@ def get_accounts():
             transactions.extend(parser.parse_yuh(yuh_file))
 
     # Parse broker statements to calculate total invested/current values
-    depot_base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'depot transactions')
-    viac_folder = os.path.join(depot_base_path, 'Viac')
-    ing_diba_folder = os.path.join(depot_base_path, 'ing diba')
+    depot_base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'depot_transactions')
+    viac_folder = os.path.join(depot_base_path, 'viac')
+    ing_diba_folder = os.path.join(depot_base_path, 'ing_diba')
 
     viac_total = 0
     ing_diba_total = 0
