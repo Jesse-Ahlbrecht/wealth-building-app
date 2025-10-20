@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:5001/api/transactions)",
+      "Bash(python3 -c \"import json, sys; data = json.load(sys.stdin); t = [x for x in data if x[''''amount''''] == 5341.77][0]; print(''''Category:'''', t[''''category''''])\")",
+      "Bash(curl -s http://localhost:5001/api/summary)",
+      "Bash(python3 -c \"\nimport json, sys\ndata = json.load(sys.stdin)\nsept = [m for m in data if m[''''month''''] == ''''2025-09''''][0]\nprint(''''September 2025 Internal Transfers:'''')\nprint(f\"\"Total: {sept[''''internal_transfers''''][''''total'''']:.2f}\"\")\nprint(f\"\"Number of transactions: {len(sept[''''internal_transfers''''][''''transactions''''])}\"\")\nprint(''''\\nTransactions:'''')\nfor t in sept[''''internal_transfers''''][''''transactions'''']:\n    print(f\"\"  {t[''''date''''][:10]} - {t[''''account'''']:20} - {t[''''amount'''']:>10.2f} {t[''''currency'''']} - {t[''''recipient'''']}\"\")\n\")",
+      "Bash(curl -s http://localhost:5001/api/accounts)",
+      "Bash(cut -d';' -f2 *.CSV)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

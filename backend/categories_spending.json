@@ -1,0 +1,56 @@
+{
+  "Groceries": [
+    "rewe",
+    "aldi",
+    "lidl",
+    "edeka",
+    "denner",
+    "coop",
+    "migros"
+  ],
+  "Cafeteria": [
+    "tavero"
+  ],
+  "Outsourced Cooking": [
+    "eat unique"
+  ],
+  "Dining": [
+    "cafe",
+    "restaurant",
+    "pizza",
+    "burger",
+    "vom fass"
+  ],
+  "Shopping": [
+    "amazon",
+    "amzn",
+    "digitec",
+    "galaxus",
+    "pixum"
+  ],
+  "Transport": [
+    "oepnv",
+    "logpay",
+    "swiss post",
+    "post"
+  ],
+  "Subscriptions": [
+    "spotify",
+    "netflix",
+    "apple services",
+    "fraenk"
+  ],
+  "Loan Payment": [
+    "kreditanstalt",
+    "studienkredit",
+    "kredit"
+  ],
+  "Rent": [
+    "ubs fund mgt",
+    "credit suisse anlagestiftung"
+  ],
+  "Insurance": [
+    "css kranken-versicherung",
+    "suddeutsche krankenversicherung"
+  ]
+}
