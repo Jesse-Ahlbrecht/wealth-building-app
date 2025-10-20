@@ -363,6 +363,12 @@
   color: #dc2626;
 }
 
+.loan-payment-toggle .chart-toggle-btn.active {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #f59e0b;
+}
+
 .transaction-details {
   flex: 1;
   min-width: 0;

@@ -362,6 +362,7 @@ function App() {
   const [chartView, setChartView] = useState('absolute'); // 'absolute' or 'relative'
   const [timeRange, setTimeRange] = useState('all'); // '3m', '6m', '1y', 'all'
   const [selectedMonth, setSelectedMonth] = useState(null); // For drilldown modal
+  const [includeLoanPayments, setIncludeLoanPayments] = useState(false); // Include loan payments in savings calculation
 
   useEffect(() => {
     fetchSummary();
@@ -483,15 +484,34 @@ function App() {
   }
 
   // Prepare data for the chart (reverse to show oldest to newest)
-  const chartData = [...summary].reverse().map(month => ({
-    month: formatMonth(month.month),
-    savingRate: month.saving_rate,
-    income: month.income,
-    expenses: month.expenses,
-    savings: month.savings * EUR_TO_CHF_RATE, // Convert to CHF
-    savingsEUR: month.savings,
-    monthData: month
-  }));
+  const chartData = [...summary].reverse().map(month => {
+    // Calculate actual loan payments for this month from transaction data
+    let monthlyLoanPayment = 0;
+    if (includeLoanPayments && summary) {
+      // Find the month data to get actual loan payment transactions
+      const monthData = summary.find(m => m.month === month.month);
+      if (monthData && monthData.expense_categories && monthData.expense_categories['Loan Payment']) {
+        // Get the actual loan payment amount from transactions
+        const loanPaymentData = monthData.expense_categories['Loan Payment'];
+        monthlyLoanPayment = loanPaymentData.total * EUR_TO_CHF_RATE; // Convert EUR to CHF
+      }
+    }
+
+    // Calculate adjusted savings and savings rate
+    const adjustedSavings = month.savings + monthlyLoanPayment;
+    const adjustedSavingsRate = month.income > 0 ? ((adjustedSavings / month.income) * 100) : 0;
+
+    return {
+      month: formatMonth(month.month),
+      savingRate: includeLoanPayments ? adjustedSavingsRate : month.saving_rate,
+      income: month.income,
+      expenses: month.expenses,
+      savings: adjustedSavings * EUR_TO_CHF_RATE, // Convert to CHF
+      savingsEUR: adjustedSavings,
+      monthData: month,
+      loanPayment: monthlyLoanPayment
+    };
+  });
 
   const renderDetailsTab = () => (
     <>
@@ -545,6 +565,11 @@ function App() {
                       <span style={{ marginLeft: '8px', color: '#999' }}>
                         ({((avgSavings / SAVINGS_GOAL_CHF) * 100).toFixed(0)}% of goal)
                       </span>
+                      {includeLoanPayments && (
+                        <span style={{ marginLeft: '8px', color: '#f59e0b', fontSize: '12px' }}>
+                          (incl. actual loan payments)
+                        </span>
+                      )}
                     </div>
                     <div>
                       Total: <span style={{ fontWeight: 600, color: '#1a1a1a' }}>
@@ -561,6 +586,11 @@ function App() {
                       <span style={{ marginLeft: '8px', color: '#999' }}>
                         ({((avgSavingRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of goal)
                       </span>
+                      {includeLoanPayments && (
+                        <span style={{ marginLeft: '8px', color: '#f59e0b', fontSize: '12px' }}>
+                          (incl. actual loan payments)
+                        </span>
+                      )}
                     </div>
                     <div>
                       Total: <span style={{ fontWeight: 600, color: '#1a1a1a' }}>
@@ -610,6 +640,15 @@ function App() {
                   onClick={() => setChartView('relative')}
                 >
                   Rate
+                </button>
+              </div>
+              <div className="loan-payment-toggle">
+                <button
+                  className={`chart-toggle-btn ${includeLoanPayments ? 'active' : ''}`}
+                  onClick={() => setIncludeLoanPayments(!includeLoanPayments)}
+                  title="Include monthly loan payments in savings calculation"
+                >
+                  Include Loans
                 </button>
               </div>
             </div>
@@ -681,6 +720,15 @@ function App() {
                                 minimumFractionDigits: 2
                               }).format(data.savings)}
                             </p>
+                            {includeLoanPayments && data.loanPayment > 0 && (
+                              <p style={{ margin: 0, marginTop: '2px', color: '#f59e0b', fontSize: '11px' }}>
+                                (includes {new Intl.NumberFormat('de-CH', {
+                                  style: 'currency',
+                                  currency: 'CHF',
+                                  minimumFractionDigits: 2
+                                }).format(data.loanPayment)} loan payment)
+                              </p>
+                            )}
                             <p style={{ margin: 0, marginTop: '4px', color: '#666', fontSize: '12px' }}>
                               {((data.savings / SAVINGS_GOAL_CHF) * 100).toFixed(0)}% of goal
                             </p>
@@ -690,6 +738,11 @@ function App() {
                             <p style={{ margin: 0, color: getColorForPercentage((data.savingRate / SAVINGS_RATE_GOAL) * 100) }}>
                               Savings Rate: {data.savingRate.toFixed(1)}%
                             </p>
+                            {includeLoanPayments && data.loanPayment > 0 && (
+                              <p style={{ margin: 0, marginTop: '2px', color: '#f59e0b', fontSize: '11px' }}>
+                                (includes loan payments)
+                              </p>
+                            )}
                             <p style={{ margin: 0, marginTop: '4px', color: '#666', fontSize: '12px' }}>
                               {((data.savingRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of goal
                             </p>
