@@ -106,7 +106,7 @@ class BankStatementParser:
                     # Determine category from recipient/description
                     recipient = row.get('Zahlungsempfänger*in', '')
                     description = row.get('Verwendungszweck', '')
-                    category = self._categorize_transaction(recipient, description)
+                    category = self._categorize_transaction(recipient, description, date.strftime('%Y-%m-%d'), account_name)
 
                     transactions.append({
                         'date': date.isoformat(),
@@ -191,7 +191,7 @@ class BankStatementParser:
                     # All other transactions affect main YUH balance
                     yuh_main_balance += amount
 
-                    category = self._categorize_transaction(recipient or activity_name, locality)
+                    category = self._categorize_transaction(recipient or activity_name, locality, date.strftime('%Y-%m-%d'), 'YUH')
 
                     transactions.append({
                         'date': date.isoformat(),
@@ -400,7 +400,90 @@ class BankStatementParser:
 
         return holdings
 
-    def _categorize_transaction(self, recipient, description):
+    def parse_kfw(self, filepath):
+        """Parse KfW student loan statements from PDF files"""
+        loans = []
+
+        try:
+            reader = PdfReader(filepath)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text()
+
+            # Extract key information using regex patterns
+            # Date pattern: "Kontoauszug per DD.MM.YYYY"
+            date_match = re.search(r'Kontoauszug per (\d{2}\.\d{2}\.\d{4})', text)
+            if not date_match:
+                return loans
+
+            statement_date = datetime.strptime(date_match.group(1), '%d.%m.%Y')
+
+            # Extract loan program type
+            program_match = re.search(r'Kreditprogramm:\s*(.+)', text)
+            program = program_match.group(1).strip() if program_match else 'Unknown'
+
+            # Extract account number
+            account_match = re.search(r'Darlehenskonto-Nr\.:\s*(\d+)', text)
+            account_number = account_match.group(1) if account_match else ''
+
+            # Extract contract date
+            contract_match = re.search(r'Darlehensvertrag vom:\s*(\d{2}\.\d{2}\.\d{4})', text)
+            contract_date = None
+            if contract_match:
+                contract_date = datetime.strptime(contract_match.group(1), '%d.%m.%Y')
+
+            # Extract current balance - look for the most recent "Kapitalsaldo zum" or "Kontostand per"
+            balance_matches = re.findall(r'(?:Kapitalsaldo zum|Kontostand per)\s+\d{2}\.\d{2}\.\d{4}\s+([\d.,]+)', text)
+            current_balance = 0
+            if balance_matches:
+                # Get the last (most recent) balance
+                balance_str = balance_matches[-1].replace('.', '').replace(',', '.')
+                current_balance = float(balance_str)
+
+            # Extract interest rate
+            interest_match = re.search(r'ab \d{2}\.\d{2}\.\d{4}:\s*([\d.,]+)\s*%', text)
+            interest_rate = 0
+            if interest_match:
+                interest_str = interest_match.group(1).replace(',', '.')
+                interest_rate = float(interest_str)
+
+            # Extract monthly payment if available
+            payment_match = re.search(r'Lastschrift\s+([\d.,]+)', text)
+            monthly_payment = 0
+            if payment_match:
+                payment_str = payment_match.group(1).replace('.', '').replace(',', '.')
+                monthly_payment = float(payment_str)
+
+            # Extract deferred interest if available
+            deferred_interest_match = re.search(r'Aufgeschobene Zinsen:\s*([\d.,]+)\s*EUR', text)
+            deferred_interest = 0
+            if deferred_interest_match:
+                deferred_str = deferred_interest_match.group(1).replace('.', '').replace(',', '.')
+                deferred_interest = float(deferred_str)
+
+            # Create loan record
+            loan_data = {
+                'account_number': account_number,
+                'program': program,
+                'current_balance': current_balance,
+                'interest_rate': interest_rate,
+                'monthly_payment': monthly_payment,
+                'deferred_interest': deferred_interest,
+                'currency': 'EUR',
+                'statement_date': statement_date.isoformat(),
+                'contract_date': contract_date.isoformat() if contract_date else None,
+                'account': f'KfW {program}',
+                'type': 'loan'
+            }
+
+            loans.append(loan_data)
+
+        except Exception as e:
+            print(f"Error parsing KfW PDF {filepath}: {e}")
+
+        return loans
+
+    def _categorize_transaction(self, recipient, description, date=None, account=None):
         """Categorize transaction based on recipient and description"""
         text = f"{recipient} {description}".lower()
 
@@ -408,6 +491,15 @@ class BankStatementParser:
         spending_categories = _load_categories('categories_spending.json')
         income_categories = _load_categories('categories_income.json')
         internal_transfer_config = _load_categories('categories_internal_transfer.json')
+
+        # Check for initial setup transactions first (these should be completely excluded)
+        if internal_transfer_config and date and account:
+            initial_setup_transactions = internal_transfer_config.get('initial_setup', [])
+            for setup_transaction in initial_setup_transactions:
+                if (setup_transaction.get('date') == date and
+                    setup_transaction.get('account') == account and
+                    setup_transaction.get('description', '').lower() in description.lower()):
+                    return 'Internal Transfer'
 
         # Check for internal transfers first (these should be excluded from income/expenses)
         if internal_transfer_config:
@@ -682,6 +774,21 @@ def get_accounts():
             'currency': 'EUR'
         }
 
+    # Add KfW loans to account balances (as negative balances)
+    kfw_base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'credits')
+    kfw_folder = os.path.join(kfw_base_path, 'kfw')
+    
+    if os.path.exists(kfw_folder):
+        kfw_files = glob.glob(os.path.join(kfw_folder, '*.pdf')) + glob.glob(os.path.join(kfw_folder, '*.PDF'))
+        for kfw_file in kfw_files:
+            kfw_loans = parser.parse_kfw(kfw_file)
+            for loan in kfw_loans:
+                # Add loan as negative balance
+                parser.account_balances[loan['account']] = {
+                    'balance': -loan['current_balance'],  # Negative because it's debt
+                    'currency': loan['currency']
+                }
+
     # Track transaction metadata for each account
     account_metadata = defaultdict(lambda: {
         'transaction_count': 0,
@@ -828,6 +935,43 @@ def get_broker():
                 'currency': 'EUR',
                 'account': 'ING DiBa'
             }
+        }
+    })
+
+@app.route('/api/loans')
+def get_loans():
+    parser = BankStatementParser()
+
+    # Parse all KfW loan statements
+    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'credits')
+    kfw_folder = os.path.join(base_path, 'kfw')
+
+    loans = []
+    total_loan_balance = 0
+    total_monthly_payment = 0
+
+    # Parse all KfW PDF files
+    if os.path.exists(kfw_folder):
+        kfw_files = glob.glob(os.path.join(kfw_folder, '*.pdf')) + glob.glob(os.path.join(kfw_folder, '*.PDF'))
+        for kfw_file in kfw_files:
+            file_loans = parser.parse_kfw(kfw_file)
+            loans.extend(file_loans)
+
+            # Calculate totals
+            for loan in file_loans:
+                total_loan_balance += loan['current_balance']
+                total_monthly_payment += loan['monthly_payment']
+
+    # Sort loans by program type
+    loans.sort(key=lambda x: x['program'])
+
+    return jsonify({
+        'loans': loans,
+        'summary': {
+            'total_balance': round(total_loan_balance, 2),
+            'total_monthly_payment': round(total_monthly_payment, 2),
+            'currency': 'EUR',
+            'loan_count': len(loans)
         }
     })
 

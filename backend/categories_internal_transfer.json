@@ -2,9 +2,18 @@
   "keywords": [
     "wise payments",
     "em exchange market",
-    "exchangemarket"
+    "exchangemarket",
+    "terzo vorsorgestiftung"
   ],
   "self_transfer_patterns": [
-    "jesse ahlbrecht"
+    "jesse ahlbrecht",
+    "jesse lennard ahlbrecht"
+  ],
+  "initial_setup": [
+    {
+      "date": "2024-08-05",
+      "account": "YUH",
+      "description": "Überweisung von JESSE LENNARD AHLBRECHT"
+    }
   ]
 }
