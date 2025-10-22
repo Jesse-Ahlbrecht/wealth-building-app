@@ -938,6 +938,141 @@ def get_broker():
         }
     })
 
+@app.route('/api/projection')
+def get_projection():
+    """Get wealth projection data based on current net worth and savings history"""
+    parser = BankStatementParser()
+    
+    # Get current net worth from accounts
+    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'bank_statements')
+    dkb_folder = os.path.join(base_path, 'dkb')
+    yuh_folder = os.path.join(base_path, 'yuh')
+    
+    transactions = []
+    
+    # Parse all DKB CSV files
+    if os.path.exists(dkb_folder):
+        dkb_files = glob.glob(os.path.join(dkb_folder, '*.csv')) + glob.glob(os.path.join(dkb_folder, '*.CSV'))
+        for dkb_file in dkb_files:
+            transactions.extend(parser.parse_dkb(dkb_file))
+    
+    # Parse all YUH CSV files
+    if os.path.exists(yuh_folder):
+        yuh_files = glob.glob(os.path.join(yuh_folder, '*.csv')) + glob.glob(os.path.join(yuh_folder, '*.CSV'))
+        for yuh_file in yuh_files:
+            transactions.extend(parser.parse_yuh(yuh_file))
+    
+    # Get broker data
+    depot_base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'depot_transactions')
+    viac_folder = os.path.join(depot_base_path, 'viac')
+    ing_diba_folder = os.path.join(depot_base_path, 'ing_diba')
+    
+    viac_total = 0
+    ing_diba_total = 0
+    
+    # VIAC - sum up transactions
+    if os.path.exists(viac_folder):
+        viac_files = glob.glob(os.path.join(viac_folder, '*.pdf')) + glob.glob(os.path.join(viac_folder, '*.PDF'))
+        for viac_file in viac_files:
+            viac_transactions = parser.parse_viac(viac_file)
+            for t in viac_transactions:
+                viac_total += abs(t['amount'])
+    
+    # ING DiBa - use current market value from holdings
+    if os.path.exists(ing_diba_folder):
+        ing_files = glob.glob(os.path.join(ing_diba_folder, '*.csv')) + glob.glob(os.path.join(ing_diba_folder, '*.CSV'))
+        for ing_file in ing_files:
+            ing_holdings = parser.parse_ing_diba(ing_file)
+            for holding in ing_holdings:
+                ing_diba_total += holding['current_value']
+    
+    # Add broker accounts to account balances
+    if viac_total > 0:
+        parser.account_balances['VIAC'] = {
+            'balance': viac_total,
+            'currency': 'CHF'
+        }
+    
+    if ing_diba_total > 0:
+        parser.account_balances['ING DiBa'] = {
+            'balance': ing_diba_total,
+            'currency': 'EUR'
+        }
+    
+    # Add KfW loans to account balances (as negative balances)
+    kfw_base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'credits')
+    kfw_folder = os.path.join(kfw_base_path, 'kfw')
+    
+    if os.path.exists(kfw_folder):
+        kfw_files = glob.glob(os.path.join(kfw_folder, '*.pdf')) + glob.glob(os.path.join(kfw_folder, '*.PDF'))
+        for kfw_file in kfw_files:
+            kfw_loans = parser.parse_kfw(kfw_file)
+            for loan in kfw_loans:
+                # Add loan as negative balance
+                parser.account_balances[loan['account']] = {
+                    'balance': -loan['current_balance'],  # Negative because it's debt
+                    'currency': loan['currency']
+                }
+    
+    # Calculate current net worth in CHF
+    EUR_TO_CHF_RATE = 0.9355
+    current_net_worth_chf = 0
+    for account_name, balance_data in parser.account_balances.items():
+        if balance_data['currency'] == 'CHF':
+            current_net_worth_chf += balance_data['balance']
+        elif balance_data['currency'] == 'EUR':
+            current_net_worth_chf += balance_data['balance'] * EUR_TO_CHF_RATE
+    
+    # Calculate savings rate from last 6 months of transaction data
+    monthly_data = defaultdict(lambda: {
+        'income': 0,
+        'expenses': 0,
+        'currency_totals': {'EUR': 0, 'CHF': 0}
+    })
+    
+    for t in transactions:
+        date = datetime.fromisoformat(t['date'])
+        month_key = date.strftime('%Y-%m')
+        
+        # Skip internal transfers
+        if t['category'] == 'Internal Transfer':
+            continue
+            
+        if t['type'] == 'income':
+            monthly_data[month_key]['income'] += abs(t['amount'])
+        else:
+            monthly_data[month_key]['expenses'] += abs(t['amount'])
+        
+        monthly_data[month_key]['currency_totals'][t['currency']] += t['amount']
+    
+    # Get last 6 months of data
+    recent_months = sorted(monthly_data.keys(), reverse=True)[:6]
+    recent_income = 0
+    recent_expenses = 0
+    
+    for month in recent_months:
+        if month in monthly_data:
+            recent_income += monthly_data[month]['income']
+            recent_expenses += monthly_data[month]['expenses']
+    
+    # Calculate average monthly savings and savings rate
+    recent_savings = recent_income - recent_expenses
+    average_monthly_savings = recent_savings / len(recent_months) if recent_months else 0
+    average_monthly_income = recent_income / len(recent_months) if recent_months else 0
+    average_savings_rate = (average_monthly_savings / average_monthly_income * 100) if average_monthly_income > 0 else 0
+    
+    # Convert to CHF
+    average_monthly_savings_chf = average_monthly_savings * EUR_TO_CHF_RATE  # Assuming most income is in EUR
+    average_monthly_income_chf = average_monthly_income * EUR_TO_CHF_RATE
+    
+    return jsonify({
+        'currentNetWorth': round(current_net_worth_chf, 2),
+        'averageMonthlySavings': round(average_monthly_savings_chf, 2),
+        'averageMonthlyIncome': round(average_monthly_income_chf, 2),
+        'averageSavingsRate': round(average_savings_rate, 2),
+        'currency': 'CHF'
+    })
+
 @app.route('/api/loans')
 def get_loans():
     parser = BankStatementParser()
