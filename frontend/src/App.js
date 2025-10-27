@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, Cell } from 'recharts';
 import './App.css';
 
@@ -6,6 +6,7 @@ const SAVINGS_GOAL_CHF = 3000; // Monthly savings goal in CHF
 const SAVINGS_GOAL_EUR = 3000 / 0.9355; // Monthly savings goal in EUR (converted from CHF)
 const SAVINGS_RATE_GOAL = 20; // Target savings rate percentage
 const EUR_TO_CHF_RATE = 0.9355; // Exchange rate: 1 EUR = 0.9355 CHF (update as needed)
+const ESSENTIAL_CATEGORIES = ['Rent', 'Insurance', 'Groceries'];
 
 // Function to get color based on percentage of goal achieved
 const getColorForPercentage = (percentage) => {
@@ -27,6 +28,27 @@ const getColorForPercentage = (percentage) => {
   }
 };
 
+const getTransactionKey = (transaction) => {
+  if (!transaction) return '';
+  const {
+    date = '',
+    account = '',
+    recipient = '',
+    description = '',
+    amount = '',
+    currency = ''
+  } = transaction;
+
+  return [
+    date,
+    account,
+    recipient,
+    description,
+    amount.toString(),
+    currency
+  ].join('|');
+};
+
 // Reusable Month Detail Component
 const MonthDetail = ({
   month,
@@ -37,7 +59,11 @@ const MonthDetail = ({
   getSortedTransactions,
   formatCurrency,
   formatMonth,
-  formatDate
+  formatDate,
+  handleCategoryEdit,
+  pendingCategoryChange,
+  showEssentialSplit,
+  essentialCategories
 }) => {
   const hasExpenses = month.expense_categories && Object.keys(month.expense_categories).length > 0;
   const hasIncome = month.income_categories && Object.keys(month.income_categories).length > 0;
@@ -59,6 +85,33 @@ const MonthDetail = ({
   // Determine primary currency (the one with most activity)
   const primaryCurrency = Math.abs(month.currency_totals.EUR || 0) >
     Math.abs(month.currency_totals.CHF || 0) ? 'EUR' : 'CHF';
+
+  const essentialCategorySet = new Set(essentialCategories || []);
+  const essentialCategoryLabel = (essentialCategories && essentialCategories.length > 0)
+    ? essentialCategories.join(', ')
+    : 'Essential categories';
+  let essentialTotal = 0;
+  let essentialTransactionCount = 0;
+  let nonEssentialTotal = 0;
+  let nonEssentialTransactionCount = 0;
+
+  if (hasExpenses) {
+    Object.entries(month.expense_categories).forEach(([category, categoryData]) => {
+      const categoryTotal = categoryData?.total || 0;
+      const categoryTransactions = categoryData?.transactions || [];
+      if (essentialCategorySet.has(category)) {
+        essentialTotal += categoryTotal;
+        essentialTransactionCount += categoryTransactions.length;
+      } else {
+        nonEssentialTotal += categoryTotal;
+        nonEssentialTransactionCount += categoryTransactions.length;
+      }
+    });
+  }
+
+  const totalTrackedExpenses = essentialTotal + nonEssentialTotal;
+  const essentialShare = totalTrackedExpenses > 0 ? (essentialTotal / totalTrackedExpenses) * 100 : 0;
+  const nonEssentialShare = totalTrackedExpenses > 0 ? (nonEssentialTotal / totalTrackedExpenses) * 100 : 0;
 
   return (
     <div className="month-section">
@@ -99,6 +152,29 @@ const MonthDetail = ({
           </div>
         </div>
 
+        {showEssentialSplit && totalTrackedExpenses > 0 && (
+          <>
+            <div className="stat-card">
+              <div className="stat-label">Essential Spend</div>
+              <div className="stat-value expense">
+                -{formatCurrency(essentialTotal, primaryCurrency)}
+              </div>
+              <div className="stat-footnote">
+                Includes {essentialCategoryLabel}; {essentialTransactionCount} tx; {essentialShare.toFixed(0)}% of spend
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Non-Essential Spend</div>
+              <div className="stat-value expense">
+                -{formatCurrency(nonEssentialTotal, primaryCurrency)}
+              </div>
+              <div className="stat-footnote">
+                Remaining categories; {nonEssentialTransactionCount} tx; {nonEssentialShare.toFixed(0)}% of spend
+              </div>
+            </div>
+          </>
+        )}
+
         {month.currency_totals.EUR !== 0 && month.currency_totals.CHF !== 0 && (
           <div className="stat-card">
             <div className="stat-label">Multi-Currency</div>
@@ -126,6 +202,7 @@ const MonthDetail = ({
                     className="category-item category-item-income"
                     onClick={() => toggleCategory(month.month, `income-${category}`)}
                     style={{ cursor: 'pointer' }}
+                    data-category-key={categoryKey}
                   >
                     <div style={{ flex: 1 }}>
                       <div className="category-name">
@@ -161,29 +238,57 @@ const MonthDetail = ({
                         </button>
                       </div>
                       <div className="transaction-list">
-                        {getSortedTransactions(categoryData.transactions, month.month, `income-${category}`).map((transaction, idx) => (
-                          <div key={idx} className="transaction-item">
-                            <div className="transaction-date">
-                              {formatDate(transaction.date)}
-                              <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
-                                {transaction.account}
-                              </span>
-                            </div>
-                            <div className="transaction-details">
-                              <div className="transaction-recipient">
-                                {transaction.recipient}
+                        {getSortedTransactions(categoryData.transactions, month.month, `income-${category}`).map((transaction) => {
+                          const transactionKey = getTransactionKey(transaction);
+                          const isLocked = pendingCategoryChange?.key === transactionKey;
+                          const isPending = isLocked && pendingCategoryChange?.stage === 'vanishing';
+                          const transactionClassList = ['transaction-item'];
+                          if (isLocked && pendingCategoryChange?.stage === 'pending') {
+                            transactionClassList.push('transaction-pending');
+                          }
+                          if (isPending) {
+                            transactionClassList.push('transaction-flip-out');
+                          }
+                          const transactionClassName = transactionClassList.join(' ');
+
+                          return (
+                            <div
+                              key={transactionKey}
+                              className={transactionClassName}
+                              data-transaction-key={transactionKey}
+                            >
+                              <div className="transaction-date">
+                                {formatDate(transaction.date)}
+                                <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
+                                  {transaction.account}
+                                </span>
                               </div>
-                              {transaction.description && (
-                                <div className="transaction-description">
-                                  {transaction.description}
+                              <div className="transaction-details">
+                                <div className="transaction-recipient">
+                                  {transaction.recipient}
                                 </div>
-                              )}
+                                {transaction.description && (
+                                  <div className="transaction-description">
+                                    {transaction.description}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="transaction-actions">
+                                <button
+                                  className="category-edit-btn"
+                                  onClick={() => handleCategoryEdit(transaction, month.month, `income-${category}`)}
+                                  disabled={isLocked}
+                                  title="Change category"
+                                >
+                                  ✏️
+                                </button>
+                              </div>
+                              <div className="transaction-amount transaction-amount-income">
+                                +{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
+                              </div>
                             </div>
-                            <div className="transaction-amount transaction-amount-income">
-                              +{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -208,6 +313,7 @@ const MonthDetail = ({
                     className="category-item"
                     onClick={() => toggleCategory(month.month, category)}
                     style={{ cursor: 'pointer' }}
+                    data-category-key={categoryKey}
                   >
                     <div style={{ flex: 1 }}>
                       <div className="category-name">
@@ -243,29 +349,57 @@ const MonthDetail = ({
                         </button>
                       </div>
                       <div className="transaction-list">
-                        {getSortedTransactions(categoryData.transactions, month.month, category).map((transaction, idx) => (
-                          <div key={idx} className="transaction-item">
-                            <div className="transaction-date">
-                              {formatDate(transaction.date)}
-                              <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
-                                {transaction.account}
-                              </span>
-                            </div>
-                            <div className="transaction-details">
-                              <div className="transaction-recipient">
-                                {transaction.recipient}
+                        {getSortedTransactions(categoryData.transactions, month.month, category).map((transaction) => {
+                          const transactionKey = getTransactionKey(transaction);
+                          const isLocked = pendingCategoryChange?.key === transactionKey;
+                          const isPending = isLocked && pendingCategoryChange?.stage === 'vanishing';
+                          const transactionClassList = ['transaction-item'];
+                          if (isLocked && pendingCategoryChange?.stage === 'pending') {
+                            transactionClassList.push('transaction-pending');
+                          }
+                          if (isPending) {
+                            transactionClassList.push('transaction-flip-out');
+                          }
+                          const transactionClassName = transactionClassList.join(' ');
+
+                          return (
+                            <div
+                              key={transactionKey}
+                              className={transactionClassName}
+                              data-transaction-key={transactionKey}
+                            >
+                              <div className="transaction-date">
+                                {formatDate(transaction.date)}
+                                <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
+                                  {transaction.account}
+                                </span>
                               </div>
-                              {transaction.description && (
-                                <div className="transaction-description">
-                                  {transaction.description}
+                              <div className="transaction-details">
+                                <div className="transaction-recipient">
+                                  {transaction.recipient}
                                 </div>
-                              )}
+                                {transaction.description && (
+                                  <div className="transaction-description">
+                                    {transaction.description}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="transaction-actions">
+                                <button
+                                  className="category-edit-btn"
+                                  onClick={() => handleCategoryEdit(transaction, month.month, category)}
+                                  disabled={isLocked}
+                                  title="Change category"
+                                >
+                                  ✏️
+                                </button>
+                              </div>
+                              <div className="transaction-amount">
+                                -{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
+                              </div>
                             </div>
-                            <div className="transaction-amount">
-                              -{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -346,6 +480,174 @@ const MonthDetail = ({
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// Category Edit Modal Component
+const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing }) => {
+  const [availableCategories, setAvailableCategories] = useState([]);
+  const [customCategoryName, setCustomCategoryName] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (modal) {
+      setShowCustomInput(false);
+      setCustomCategoryName('');
+      fetchCategories();
+    }
+  }, [modal]);
+
+  const fetchCategories = async () => {
+    try {
+      const response = await fetch('http://localhost:5001/api/categories');
+      const data = await response.json();
+      
+      if (modal) {
+        const categories = modal.isIncome ? data.income : data.expense;
+        setAvailableCategories(categories);
+      }
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      // Fallback to default categories
+      const defaultCategories = modal?.isIncome 
+        ? ['Salary', 'Income', 'Other']
+        : ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Loan Payment', 'Rent', 'Insurance', 'Transfer', 'Other'];
+      setAvailableCategories(defaultCategories);
+    }
+  };
+
+  const handleCreateCustomCategory = async () => {
+    if (!customCategoryName.trim()) return;
+    
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:5001/api/categories', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: customCategoryName.trim(),
+          type: modal.isIncome ? 'income' : 'expense'
+        }),
+      });
+
+      if (response.ok) {
+        // Add the new category to the list
+        setAvailableCategories(prev => [...prev, customCategoryName.trim()]);
+        setCustomCategoryName('');
+        setShowCustomInput(false);
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || 'Failed to create category');
+      }
+    } catch (error) {
+      console.error('Error creating custom category:', error);
+      alert('Failed to create custom category');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!modal) return null;
+
+  const { transaction, currentCategory, isIncome } = modal;
+  
+  const currentCategoryName = isIncome 
+    ? currentCategory.replace('income-', '')
+    : currentCategory;
+
+  const overlayClassName = `modal-overlay ${isClosing ? 'closing' : 'open'}`;
+  const contentClassName = `modal-content ${isClosing ? 'closing' : 'open'}`;
+
+  return (
+    <div className={overlayClassName} onClick={onClose}>
+      <div className={contentClassName} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Change Category</h3>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        
+        <div className="modal-body">
+          <div className="transaction-preview">
+            <div className="transaction-preview-item">
+              <strong>Date:</strong> {new Date(transaction.date).toLocaleDateString()}
+            </div>
+            <div className="transaction-preview-item">
+              <strong>Recipient:</strong> {transaction.recipient}
+            </div>
+            {transaction.description && (
+              <div className="transaction-preview-item">
+                <strong>Description:</strong> {transaction.description}
+              </div>
+            )}
+            <div className="transaction-preview-item">
+              <strong>Amount:</strong> {formatCurrency(Math.abs(transaction.amount), transaction.currency)}
+            </div>
+            <div className="transaction-preview-item">
+              <strong>Current Category:</strong> {currentCategoryName}
+            </div>
+          </div>
+
+          <div className="category-selection">
+            <h4>Select New Category:</h4>
+            <div className="category-grid">
+              {availableCategories.map((category) => (
+                <button
+                  key={category}
+                  className={`category-option ${category === currentCategoryName ? 'selected' : ''}`}
+                  onClick={() => onUpdate(category)}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
+            
+            <div className="custom-category-section">
+              {!showCustomInput ? (
+                <button
+                  className="create-category-btn"
+                  onClick={() => setShowCustomInput(true)}
+                >
+                  + Create New Category
+                </button>
+              ) : (
+                <div className="custom-category-input">
+                  <input
+                    type="text"
+                    placeholder="Enter category name"
+                    value={customCategoryName}
+                    onChange={(e) => setCustomCategoryName(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleCreateCustomCategory()}
+                    className="category-input"
+                    autoFocus
+                  />
+                  <div className="custom-category-actions">
+                    <button
+                      className="save-category-btn"
+                      onClick={handleCreateCustomCategory}
+                      disabled={!customCategoryName.trim() || loading}
+                    >
+                      {loading ? 'Creating...' : 'Create'}
+                    </button>
+                    <button
+                      className="cancel-category-btn"
+                      onClick={() => {
+                        setShowCustomInput(false);
+                        setCustomCategoryName('');
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -582,6 +884,13 @@ function App() {
   const [selectedMonth, setSelectedMonth] = useState(null); // For drilldown modal
   const [includeLoanPayments, setIncludeLoanPayments] = useState(false); // Include loan payments in savings calculation
   const [projectionData, setProjectionData] = useState(null); // Wealth projection data
+  const [categoryEditModal, setCategoryEditModal] = useState(null); // Category edit modal state
+  const [pendingCategoryChange, setPendingCategoryChange] = useState(null); // Track card animation
+  const [isCategoryModalClosing, setIsCategoryModalClosing] = useState(false);
+  const [showEssentialSplit, setShowEssentialSplit] = useState(false);
+
+  const modalCloseTimeoutRef = useRef(null);
+  const categoryAnimationTimeoutRef = useRef(null);
 
   useEffect(() => {
     fetchSummary();
@@ -590,6 +899,21 @@ function App() {
     fetchLoans();
     fetchProjection();
   }, []);
+
+  const closeCategoryModal = useCallback(() => {
+    if (!categoryEditModal || isCategoryModalClosing) {
+      return;
+    }
+    if (modalCloseTimeoutRef.current) {
+      clearTimeout(modalCloseTimeoutRef.current);
+    }
+    setIsCategoryModalClosing(true);
+    modalCloseTimeoutRef.current = setTimeout(() => {
+      setCategoryEditModal(null);
+      setIsCategoryModalClosing(false);
+      modalCloseTimeoutRef.current = null;
+    }, 220);
+  }, [categoryEditModal, isCategoryModalClosing]);
 
   const toggleCategory = (monthKey, category) => {
     const key = `${monthKey}-${category}`;
@@ -620,17 +944,239 @@ function App() {
     return sorted;
   };
 
+  const handleCategoryEdit = (transaction, monthKey, currentCategory) => {
+    if (modalCloseTimeoutRef.current) {
+      clearTimeout(modalCloseTimeoutRef.current);
+      modalCloseTimeoutRef.current = null;
+    }
+    setIsCategoryModalClosing(false);
+    setCategoryEditModal({
+      transaction,
+      monthKey,
+      currentCategory,
+      isIncome: currentCategory.startsWith('income-')
+    });
+  };
+
+ const applyLocalCategoryChange = useCallback(({
+    monthKey,
+    isIncome,
+    normalizedCurrentCategory,
+    newCategoryName,
+    transaction,
+    absoluteAmount,
+    shouldKeepSourceExpanded,
+    currentKey,
+    targetKey
+  }) => {
+    const transactionKey = getTransactionKey(transaction);
+    const categoriesKey = isIncome ? 'income_categories' : 'expense_categories';
+
+    const updateMonth = (monthData) => {
+      if (!monthData || monthData.month !== monthKey) {
+        return monthData;
+      }
+
+      const clonedMonth = { ...monthData };
+      const categories = { ...(clonedMonth[categoriesKey] || {}) };
+
+      const sourceCategoryData = categories[normalizedCurrentCategory];
+      if (sourceCategoryData) {
+        const remainingTransactions = sourceCategoryData.transactions.filter(
+          (tx) => getTransactionKey(tx) !== transactionKey
+        );
+        const removedCount = sourceCategoryData.transactions.length - remainingTransactions.length;
+        const updatedTotal = removedCount > 0
+          ? Number(Math.max((sourceCategoryData.total || 0) - absoluteAmount, 0).toFixed(2))
+          : sourceCategoryData.total || 0;
+
+        if (remainingTransactions.length > 0) {
+          categories[normalizedCurrentCategory] = {
+            ...sourceCategoryData,
+            total: updatedTotal,
+            transactions: remainingTransactions
+          };
+        } else {
+          delete categories[normalizedCurrentCategory];
+        }
+      }
+
+      const destinationCategoryData = categories[newCategoryName] || { total: 0, transactions: [] };
+      const filteredDestinationTransactions = destinationCategoryData.transactions.filter(
+        (tx) => getTransactionKey(tx) !== transactionKey
+      );
+      const removedFromDestination = destinationCategoryData.transactions.length - filteredDestinationTransactions.length;
+      const baseDestinationTotal = removedFromDestination > 0
+        ? Math.max((destinationCategoryData.total || 0) - absoluteAmount, 0)
+        : destinationCategoryData.total || 0;
+
+      const destinationTransactions = [
+        ...filteredDestinationTransactions,
+        { ...transaction }
+      ];
+      destinationTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      categories[newCategoryName] = {
+        ...destinationCategoryData,
+        total: Number((baseDestinationTotal + absoluteAmount).toFixed(2)),
+        transactions: destinationTransactions
+      };
+
+      clonedMonth[categoriesKey] = categories;
+      return clonedMonth;
+    };
+
+    setSummary((prevSummary) => prevSummary.map(updateMonth));
+
+    setSelectedMonth((prevMonth) => {
+      if (prevMonth && prevMonth.month === monthKey) {
+        return updateMonth(prevMonth);
+      }
+      return prevMonth;
+    });
+
+    setExpandedCategories((prev) => {
+      const updated = { ...prev };
+      if (!shouldKeepSourceExpanded) {
+        delete updated[currentKey];
+      }
+      updated[targetKey] = true;
+      return updated;
+    });
+  }, []);
+
+  const handleCategoryUpdate = async (newCategory) => {
+    if (!categoryEditModal) return;
+
+    const { transaction, monthKey, currentCategory, isIncome } = categoryEditModal;
+    const normalizedCurrentCategory = isIncome
+      ? currentCategory.replace('income-', '')
+      : currentCategory;
+    const newCategoryName = newCategory;
+
+    if (normalizedCurrentCategory === newCategoryName) {
+      closeCategoryModal();
+      return;
+    }
+
+    const transactionAmount = transaction.amount;
+    const absoluteAmount = Math.abs(transactionAmount);
+    const currentKey = `${monthKey}-${currentCategory}`;
+    const targetKey = `${monthKey}-${isIncome ? `income-${newCategoryName}` : newCategoryName}`;
+    const transactionKey = getTransactionKey(transaction);
+
+    const monthBeforeChange = summary.find((month) => month.month === monthKey);
+    const sourceCategoryDataBefore = monthBeforeChange
+      ? (isIncome
+          ? monthBeforeChange.income_categories?.[normalizedCurrentCategory]
+          : monthBeforeChange.expense_categories?.[normalizedCurrentCategory])
+      : null;
+    const shouldKeepSourceExpanded =
+      !!(sourceCategoryDataBefore && (sourceCategoryDataBefore.transactions?.length || 0) > 1);
+
+    closeCategoryModal();
+    setPendingCategoryChange({ key: transactionKey, stage: 'pending' });
+
+    try {
+      const response = await fetch('http://localhost:5001/api/update-category', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transaction,
+          newCategory
+        }),
+      });
+
+      if (response.ok) {
+        await response.json();
+
+        const payload = {
+          monthKey,
+          isIncome,
+          normalizedCurrentCategory,
+          newCategoryName,
+          transaction,
+          absoluteAmount,
+          shouldKeepSourceExpanded,
+          currentKey,
+          targetKey
+        };
+
+        setPendingCategoryChange({
+          key: transactionKey,
+          stage: 'vanishing'
+        });
+
+        if (categoryAnimationTimeoutRef.current) {
+          clearTimeout(categoryAnimationTimeoutRef.current);
+        }
+
+        categoryAnimationTimeoutRef.current = setTimeout(() => {
+          applyLocalCategoryChange(payload);
+          setPendingCategoryChange(null);
+          fetchSummary();
+          categoryAnimationTimeoutRef.current = null;
+        }, 500);
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to update category:', errorData);
+        alert('Failed to update category: ' + (errorData.error || 'Unknown error'));
+        if (categoryAnimationTimeoutRef.current) {
+          clearTimeout(categoryAnimationTimeoutRef.current);
+          categoryAnimationTimeoutRef.current = null;
+        }
+        setPendingCategoryChange(null);
+      }
+    } catch (error) {
+      console.error('Error updating category:', error);
+      alert('Error updating category: ' + error.message);
+      if (categoryAnimationTimeoutRef.current) {
+        clearTimeout(categoryAnimationTimeoutRef.current);
+        categoryAnimationTimeoutRef.current = null;
+      }
+      setPendingCategoryChange(null);
+    }
+  };
+
   const fetchSummary = async () => {
     try {
       const response = await fetch('http://localhost:5001/api/summary');
       const data = await response.json();
       setSummary(data);
       setLoading(false);
+      return data;
     } catch (error) {
       console.error('Error fetching summary:', error);
       setLoading(false);
+      return null;
     }
   };
+
+  useEffect(() => {
+    if (!selectedMonth) {
+      return;
+    }
+
+    const updatedMonth = summary.find((month) => month.month === selectedMonth.month);
+    if (updatedMonth && updatedMonth !== selectedMonth) {
+      setSelectedMonth(updatedMonth);
+    }
+  }, [summary, selectedMonth]);
+
+  useEffect(() => {
+    return () => {
+      if (modalCloseTimeoutRef.current) {
+        clearTimeout(modalCloseTimeoutRef.current);
+        modalCloseTimeoutRef.current = null;
+      }
+      if (categoryAnimationTimeoutRef.current) {
+        clearTimeout(categoryAnimationTimeoutRef.current);
+        categoryAnimationTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const fetchAccounts = async () => {
     try {
@@ -745,6 +1291,22 @@ function App() {
 
   const renderDetailsTab = () => (
     <>
+      <div className="details-controls">
+        <div className="chart-toggle">
+          <button
+            className={`chart-toggle-btn ${showEssentialSplit ? '' : 'active'}`}
+            onClick={() => setShowEssentialSplit(false)}
+          >
+            All Categories
+          </button>
+          <button
+            className={`chart-toggle-btn ${showEssentialSplit ? 'active' : ''}`}
+            onClick={() => setShowEssentialSplit(true)}
+          >
+            Essentials Split
+          </button>
+        </div>
+      </div>
       {summary.map((month) => (
         <MonthDetail
           key={month.month}
@@ -757,6 +1319,10 @@ function App() {
           formatCurrency={formatCurrency}
           formatMonth={formatMonth}
           formatDate={formatDate}
+          handleCategoryEdit={handleCategoryEdit}
+          pendingCategoryChange={pendingCategoryChange}
+          showEssentialSplit={showEssentialSplit}
+          essentialCategories={ESSENTIAL_CATEGORIES}
         />
       ))}
     </>
@@ -1059,6 +1625,8 @@ function App() {
             formatCurrency={formatCurrency}
             formatMonth={formatMonth}
             formatDate={formatDate}
+            handleCategoryEdit={handleCategoryEdit}
+            pendingCategoryChange={pendingCategoryChange}
           />
         </div>
       )}
@@ -1814,6 +2382,15 @@ function App() {
         {activeTab === 'loans' && renderLoansTab()}
         {activeTab === 'projection' && renderProjectionTab()}
       </div>
+
+      {/* Category Edit Modal */}
+      <CategoryEditModal
+        modal={categoryEditModal}
+        onClose={closeCategoryModal}
+        onUpdate={handleCategoryUpdate}
+        formatCurrency={formatCurrency}
+        isClosing={isCategoryModalClosing}
+      />
     </div>
   );
 }

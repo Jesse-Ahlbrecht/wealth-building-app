@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import csv
 from datetime import datetime
@@ -11,6 +11,62 @@ from PyPDF2 import PdfReader
 
 app = Flask(__name__)
 CORS(app)
+
+# Global storage for manual category overrides
+# In a real application, this would be stored in a database
+manual_category_overrides = {}
+
+# Global storage for custom categories
+custom_categories = {
+    'income': [],
+    'expense': []
+}
+
+def _load_overrides():
+    """Load manual category overrides from JSON file"""
+    filepath = os.path.join(os.path.dirname(__file__), 'manual_overrides.json')
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        print(f"Error parsing manual_overrides.json: {e}. Using empty overrides.")
+        return {}
+
+def _save_overrides():
+    """Save manual category overrides to JSON file"""
+    filepath = os.path.join(os.path.dirname(__file__), 'manual_overrides.json')
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(manual_category_overrides, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving manual_overrides.json: {e}")
+
+def _load_custom_categories():
+    """Load custom categories from JSON file"""
+    filepath = os.path.join(os.path.dirname(__file__), 'custom_categories.json')
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {'income': [], 'expense': []}
+    except json.JSONDecodeError as e:
+        print(f"Error parsing custom_categories.json: {e}. Using default categories.")
+        return {'income': [], 'expense': []}
+
+def _save_custom_categories():
+    """Save custom categories to JSON file"""
+    filepath = os.path.join(os.path.dirname(__file__), 'custom_categories.json')
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(custom_categories, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving custom_categories.json: {e}")
+
+# Load data on startup
+manual_category_overrides = _load_overrides()
+custom_categories = _load_custom_categories()
 
 def _load_categories(filename):
     """Load category definitions from JSON file"""
@@ -485,7 +541,27 @@ class BankStatementParser:
 
     def _categorize_transaction(self, recipient, description, date=None, account=None):
         """Categorize transaction based on recipient and description"""
-        text = f"{recipient} {description}".lower()
+        recipient = (recipient or '').strip()
+        description = (description or '').strip()
+        if date:
+            date = date.split('T')[0] if 'T' in date else date
+        else:
+            date = ''
+        account = account or ''
+        text = f"{recipient} {description}".strip().lower()
+
+        # Create a unique key for this transaction to check for manual overrides
+        transaction_key = f"{date}_{account}_{recipient}_{description}_{text}"
+        
+        # Debug: print all transaction keys being checked
+        if date and account and recipient:
+            print(f"Checking transaction key: {transaction_key}")
+            print(f"Available overrides: {list(manual_category_overrides.keys())}")
+        
+        # Check for manual category override first
+        if transaction_key in manual_category_overrides:
+            print(f"Found manual override for {transaction_key}: {manual_category_overrides[transaction_key]}")
+            return manual_category_overrides[transaction_key]
 
         # Load categories fresh each time to pick up changes
         spending_categories = _load_categories('categories_spending.json')
@@ -1109,6 +1185,94 @@ def get_loans():
             'loan_count': len(loans)
         }
     })
+
+@app.route('/api/categories', methods=['GET'])
+def get_categories():
+    """Get all available categories including custom ones"""
+    try:
+        # Load default categories
+        spending_categories = _load_categories('categories_spending.json')
+        income_categories = _load_categories('categories_income.json')
+        
+        # Combine default and custom categories
+        all_categories = {
+            'income': list(income_categories.keys()) + custom_categories['income'],
+            'expense': list(spending_categories.keys()) + custom_categories['expense']
+        }
+        
+        return jsonify(all_categories)
+        
+    except Exception as e:
+        print(f"Error getting categories: {e}")
+        return jsonify({'error': 'Failed to get categories'}), 500
+
+@app.route('/api/categories', methods=['POST'])
+def create_custom_category():
+    """Create a new custom category"""
+    try:
+        data = request.get_json()
+        category_name = data.get('name', '').strip()
+        category_type = data.get('type', 'expense')  # 'income' or 'expense'
+        
+        if not category_name:
+            return jsonify({'error': 'Category name is required'}), 400
+        
+        if category_type not in ['income', 'expense']:
+            return jsonify({'error': 'Category type must be income or expense'}), 400
+        
+        # Check if category already exists
+        if category_name in custom_categories[category_type]:
+            return jsonify({'error': 'Category already exists'}), 400
+        
+        # Add the custom category
+        custom_categories[category_type].append(category_name)
+        
+        # Save to file
+        _save_custom_categories()
+        
+        return jsonify({'success': True, 'message': 'Custom category created successfully'})
+        
+    except Exception as e:
+        print(f"Error creating custom category: {e}")
+        return jsonify({'error': 'Failed to create custom category'}), 500
+
+@app.route('/api/update-category', methods=['POST'])
+def update_category():
+    """Update the category of a specific transaction"""
+    try:
+        data = request.get_json()
+        transaction = data.get('transaction') or {}
+        new_category = data.get('newCategory')
+        
+        if not transaction or not new_category:
+            return jsonify({'error': 'Missing transaction or newCategory'}), 400
+
+        # Normalize fields to avoid None values causing mismatched keys
+        recipient = (transaction.get('recipient') or '').strip()
+        description = (transaction.get('description') or '').strip()
+        raw_date = transaction.get('date') or ''
+        # Use consistent YYYY-MM-DD format to match parser usage
+        date = raw_date.split('T')[0] if 'T' in raw_date else raw_date
+        account = transaction.get('account') or ''
+        text = f"{recipient} {description}".strip().lower()
+        transaction_key = f"{date}_{account}_{recipient}_{description}_{text}"
+        
+        print(f"Updating category for transaction key: {transaction_key}")
+        print(f"New category: {new_category}")
+        
+        # Store the manual override
+        manual_category_overrides[transaction_key] = new_category
+        
+        # Save to file
+        _save_overrides()
+        
+        print(f"Manual overrides now contains {len(manual_category_overrides)} entries")
+        
+        return jsonify({'success': True, 'message': 'Category updated successfully'})
+        
+    except Exception as e:
+        print(f"Error updating category: {e}")
+        return jsonify({'error': 'Failed to update category'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001, use_reloader=True, reloader_type='stat')
