@@ -7,6 +7,22 @@ const SAVINGS_GOAL_EUR = 3000 / 0.9355; // Monthly savings goal in EUR (converte
 const SAVINGS_RATE_GOAL = 20; // Target savings rate percentage
 const EUR_TO_CHF_RATE = 0.9355; // Exchange rate: 1 EUR = 0.9355 CHF (update as needed)
 const ESSENTIAL_CATEGORIES = ['Rent', 'Insurance', 'Groceries'];
+const TAB_ITEMS = [
+  { key: 'details', label: 'Details' },
+  { key: 'charts', label: 'Savings Statistics' },
+  { key: 'accounts', label: 'Accounts' },
+  { key: 'broker', label: 'Broker' },
+  { key: 'loans', label: 'Loans' },
+  { key: 'projection', label: 'Wealth Projection' }
+];
+const TAB_DESCRIPTIONS = {
+  details: 'Drill into categories, transactions, and internal transfers',
+  charts: 'Track savings progress and rates over time',
+  accounts: 'Review balances across cash and savings accounts',
+  broker: 'Inspect performance of your investment accounts',
+  loans: 'Stay on top of loan balances and payments',
+  projection: 'Model future net worth using your current savings rate'
+};
 
 // Function to get color based on percentage of goal achieved
 const getColorForPercentage = (percentage) => {
@@ -1245,15 +1261,21 @@ function App() {
   }
 
   if (summary.length === 0) {
+    const fallbackTab = TAB_ITEMS.find(tab => tab.key === activeTab);
     return (
       <div className="app">
-        <div className="header">
-          <h1>Wealth Tracker</h1>
-          <p>Track your savings and spending</p>
-        </div>
-        <div className="empty-state">
-          <p>No transaction data found.</p>
-          <p>Make sure your bank statements are in the correct location.</p>
+        <div className="app-layout">
+          {renderSidebar()}
+          <main className="main-content">
+            <div className="content-header">
+              <h2>{fallbackTab?.label || 'Wealth Tracker'}</h2>
+              <p>Track your savings and spending</p>
+            </div>
+            <div className="empty-state">
+              <p>No transaction data found.</p>
+              <p>Make sure your bank statements are in the correct location.</p>
+            </div>
+          </main>
         </div>
       </div>
     );
@@ -2328,59 +2350,48 @@ function App() {
     );
   };
 
+  const renderSidebar = () => (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <h1 className="sidebar-title">Wealth Tracker</h1>
+        <p className="sidebar-tagline">Your monthly savings and spending dashboard</p>
+      </div>
+      <nav className="sidebar-nav">
+        {TAB_ITEMS.map(({ key, label }) => (
+          <button
+            key={key}
+            className={`sidebar-tab ${activeTab === key ? 'active' : ''}`}
+            onClick={() => setActiveTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+    </aside>
+  );
+
+  const activeTabConfig = TAB_ITEMS.find(tab => tab.key === activeTab);
+  const tabDescription = TAB_DESCRIPTIONS[activeTab] || '';
+
   return (
     <div className="app">
-      <div className="header">
-        <h1>Wealth Tracker</h1>
-        <p>Your monthly savings and spending breakdown</p>
-      </div>
+      <div className="app-layout">
+        {renderSidebar()}
 
-      <div className="tabs">
-        <button
-          className={`tab ${activeTab === 'details' ? 'active' : ''}`}
-          onClick={() => setActiveTab('details')}
-        >
-          Details
-        </button>
-        <button
-          className={`tab ${activeTab === 'charts' ? 'active' : ''}`}
-          onClick={() => setActiveTab('charts')}
-        >
-          Savings Statistics
-        </button>
-        <button
-          className={`tab ${activeTab === 'accounts' ? 'active' : ''}`}
-          onClick={() => setActiveTab('accounts')}
-        >
-          Accounts
-        </button>
-        <button
-          className={`tab ${activeTab === 'broker' ? 'active' : ''}`}
-          onClick={() => setActiveTab('broker')}
-        >
-          Broker
-        </button>
-        <button
-          className={`tab ${activeTab === 'loans' ? 'active' : ''}`}
-          onClick={() => setActiveTab('loans')}
-        >
-          Loans
-        </button>
-        <button
-          className={`tab ${activeTab === 'projection' ? 'active' : ''}`}
-          onClick={() => setActiveTab('projection')}
-        >
-          Wealth Projection
-        </button>
-      </div>
-
-      <div className="tab-content">
-        {activeTab === 'details' && renderDetailsTab()}
-        {activeTab === 'charts' && renderChartsTab()}
-        {activeTab === 'accounts' && renderAccountsTab()}
-        {activeTab === 'broker' && renderBrokerTab()}
-        {activeTab === 'loans' && renderLoansTab()}
-        {activeTab === 'projection' && renderProjectionTab()}
+        <main className="main-content">
+          <div className="content-header">
+            <h2>{activeTabConfig?.label || ''}</h2>
+            {tabDescription && <p>{tabDescription}</p>}
+          </div>
+          <div className="tab-content">
+            {activeTab === 'details' && renderDetailsTab()}
+            {activeTab === 'charts' && renderChartsTab()}
+            {activeTab === 'accounts' && renderAccountsTab()}
+            {activeTab === 'broker' && renderBrokerTab()}
+            {activeTab === 'loans' && renderLoansTab()}
+            {activeTab === 'projection' && renderProjectionTab()}
+          </div>
+        </main>
       </div>
 
       {/* Category Edit Modal */}
