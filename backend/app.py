@@ -727,9 +727,9 @@ def get_broker():
     parser = BankStatementParser()
 
     # Parse all broker statements
-    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'depot transactions')
-    viac_folder = os.path.join(base_path, 'Viac')
-    ing_diba_folder = os.path.join(base_path, 'ing diba')
+    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'depot_transactions')
+    viac_folder = os.path.join(base_path, 'viac')
+    ing_diba_folder = os.path.join(base_path, 'ing_diba')
 
     transactions = []
     holdings_dict = {}

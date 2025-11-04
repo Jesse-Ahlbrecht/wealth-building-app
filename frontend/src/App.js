@@ -153,8 +153,10 @@ function App() {
           : [];
 
         // Determine primary currency (the one with most activity)
-        const primaryCurrency = Math.abs(month.currency_totals.EUR || 0) >
-          Math.abs(month.currency_totals.CHF || 0) ? 'EUR' : 'CHF';
+        const primaryCurrency = month.currency_totals ? (
+          Math.abs(month.currency_totals.EUR || 0) >
+          Math.abs(month.currency_totals.CHF || 0) ? 'EUR' : 'CHF'
+        ) : 'EUR';
 
         return (
           <div key={month.month} className="month-section">
@@ -195,7 +197,7 @@ function App() {
                 </div>
               </div>
 
-              {month.currency_totals.EUR !== 0 && month.currency_totals.CHF !== 0 && (
+              {month.currency_totals && month.currency_totals.EUR !== 0 && month.currency_totals.CHF !== 0 && (
                 <div className="stat-card">
                   <div className="stat-label">Multi-Currency</div>
                   <div style={{ fontSize: '14px', marginTop: '8px' }}>
@@ -563,12 +565,12 @@ function App() {
       );
     }
 
-    const hasEUR = accounts.totals.EUR !== 0;
-    const hasCHF = accounts.totals.CHF !== 0;
+    const hasEUR = accounts && accounts.totals ? accounts.totals.EUR !== 0 : false;
+    const hasCHF = accounts && accounts.totals ? accounts.totals.CHF !== 0 : false;
 
     // Calculate total in CHF
-    const eurInChf = accounts.totals.EUR * EUR_TO_CHF_RATE;
-    const totalInChf = accounts.totals.CHF + eurInChf;
+    const eurInChf = accounts && accounts.totals ? accounts.totals.EUR * EUR_TO_CHF_RATE : 0;
+    const totalInChf = accounts && accounts.totals ? accounts.totals.CHF + eurInChf : 0;
 
     return (
       <div className="accounts-container">
@@ -592,7 +594,7 @@ function App() {
         <div className="accounts-list-section">
           <h3 className="accounts-title">Account Balances</h3>
           <div className="accounts-grid">
-            {accounts.accounts.map((account) => (
+            {accounts && accounts.accounts && accounts.accounts.map((account) => (
               <div key={account.account} className="account-card">
                 <div className="account-header">
                   <div className="account-name">{account.account}</div>
@@ -636,17 +638,17 @@ function App() {
     let cumulativeInvestedEUR = 0;
 
     // Get ING DiBa purchase date and total from holdings
-    const ingDibaHoldings = broker.holdings.filter(h => h.account === 'ING DiBa');
+    const ingDibaHoldings = broker && broker.holdings ? broker.holdings.filter(h => h.account === 'ING DiBa') : [];
     const ingDibaPurchaseDate = ingDibaHoldings.length > 0 && ingDibaHoldings[0].purchase_date
       ? new Date(ingDibaHoldings[0].purchase_date)
       : null;
-    const ingDibaTotalCost = broker.summary.ing_diba ? broker.summary.ing_diba.total_invested : 0;
-    const ingDibaCurrentValue = broker.summary.ing_diba ? broker.summary.ing_diba.total_current_value : 0;
+    const ingDibaTotalCost = broker && broker.summary && broker.summary.ing_diba ? broker.summary.ing_diba.total_invested : 0;
+    const ingDibaCurrentValue = broker && broker.summary && broker.summary.ing_diba ? broker.summary.ing_diba.total_current_value : 0;
 
     // Sort transactions by date
-    const sortedTransactions = [...broker.transactions].sort((a, b) =>
+    const sortedTransactions = broker && broker.transactions ? [...broker.transactions].sort((a, b) =>
       new Date(a.date) - new Date(b.date)
-    );
+    ) : [];
 
     // Start from ING DiBa purchase date if available
     if (ingDibaPurchaseDate) {
@@ -689,7 +691,7 @@ function App() {
     });
 
     // Add current value as final point (today)
-    const viacTotal = broker.summary.viac ? broker.summary.viac.total_invested : 0;
+    const viacTotal = broker && broker.summary && broker.summary.viac ? broker.summary.viac.total_invested : 0;
     const totalInvestedCHF = viacTotal + (ingDibaTotalCost * EUR_TO_CHF_RATE);
     const totalCurrentValueInCHF = viacTotal + (ingDibaCurrentValue * EUR_TO_CHF_RATE);
 
@@ -704,7 +706,7 @@ function App() {
         <div className="accounts-summary">
           <h3 className="accounts-title">Broker Summary</h3>
           <div className="totals-grid">
-            {broker.summary.viac && (
+            {broker && broker.summary && broker.summary.viac && (
               <div className="total-card">
                 <div className="total-label">VIAC</div>
                 <div className="total-amount positive">
@@ -715,7 +717,7 @@ function App() {
                 </div>
               </div>
             )}
-            {broker.summary.ing_diba && (
+            {broker && broker.summary && broker.summary.ing_diba && (
               <div className="total-card">
                 <div className="total-label">ING DiBa</div>
                 <div className="total-amount positive">
@@ -820,7 +822,7 @@ function App() {
         </div>
 
         {/* ING DiBa Holdings */}
-        {broker.holdings.filter(h => h.account === 'ING DiBa').length > 0 && (
+        {broker && broker.holdings && broker.holdings.filter(h => h.account === 'ING DiBa').length > 0 && (
           <div className="accounts-list-section">
             <h3 className="accounts-title">ING DiBa Holdings</h3>
             <div className="accounts-grid">
@@ -879,7 +881,7 @@ function App() {
         )}
 
         {/* Säule 3a Holdings */}
-        {broker.holdings.filter(h => h.account === 'VIAC').length > 0 && (
+        {broker && broker.holdings && broker.holdings.filter(h => h.account === 'VIAC').length > 0 && (
           <div className="accounts-list-section">
             <h3 className="accounts-title">Säule 3a Holdings</h3>
             <div className="accounts-grid">
@@ -940,7 +942,7 @@ function App() {
         <div className="accounts-list-section">
           <h3 className="accounts-title">Transaction History</h3>
           <div className="transaction-list">
-            {broker.transactions.map((transaction, idx) => (
+            {broker && broker.transactions && broker.transactions.map((transaction, idx) => (
               <div key={idx} className="transaction-item">
                 <div className="transaction-date">
                   {formatDate(transaction.date)}
