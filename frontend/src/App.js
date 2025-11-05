@@ -8,6 +8,7 @@ const SAVINGS_RATE_GOAL = 20; // Target savings rate percentage
 const EUR_TO_CHF_RATE = 0.9355; // Exchange rate: 1 EUR = 0.9355 CHF (update as needed)
 const ESSENTIAL_CATEGORIES = ['Rent', 'Insurance', 'Groceries'];
 const TAB_ITEMS = [
+  { key: 'current-month', label: 'Current Month' },
   { key: 'details', label: 'Details' },
   { key: 'charts', label: 'Savings Statistics' },
   { key: 'accounts', label: 'Accounts' },
@@ -21,7 +22,22 @@ const TAB_DESCRIPTIONS = {
   accounts: 'Review balances across cash and savings accounts',
   broker: 'Inspect performance of your investment accounts',
   loans: 'Stay on top of loan balances and payments',
+  'current-month': 'Track progress against your monthly savings target',
   projection: 'Model future net worth using your current savings rate'
+};
+
+const getPrimaryCurrencyForMonth = (month = {}) => {
+  const eurTotal = Math.abs(month.currency_totals?.EUR || 0);
+  const chfTotal = Math.abs(month.currency_totals?.CHF || 0);
+  return eurTotal >= chfTotal ? 'EUR' : 'CHF';
+};
+
+const convertAmountToCurrency = (amount, currency) => {
+  if (!Number.isFinite(amount)) return 0;
+  if (currency === 'CHF') {
+    return amount * EUR_TO_CHF_RATE;
+  }
+  return amount;
 };
 
 // Function to get color based on percentage of goal achieved
@@ -99,8 +115,7 @@ const MonthDetail = ({
     : [];
 
   // Determine primary currency (the one with most activity)
-  const primaryCurrency = Math.abs(month.currency_totals.EUR || 0) >
-    Math.abs(month.currency_totals.CHF || 0) ? 'EUR' : 'CHF';
+  const primaryCurrency = getPrimaryCurrencyForMonth(month);
 
   const essentialCategorySet = new Set(essentialCategories || []);
   const essentialCategoryLabel = (essentialCategories && essentialCategories.length > 0)
@@ -1350,6 +1365,235 @@ function App() {
     </>
   );
 
+  const renderCurrentMonthTab = () => {
+    if (!summary.length) {
+      return (
+        <div className="current-month-container">
+          <div className="loading">No transaction data available.</div>
+        </div>
+      );
+    }
+
+    const latestMonth = summary.reduce((latest, month) => {
+      if (!latest) return month;
+      return new Date(month.month) > new Date(latest.month) ? month : latest;
+    }, null);
+
+    if (!latestMonth) {
+      return (
+        <div className="current-month-container">
+          <div className="loading">Unable to determine the current month summary.</div>
+        </div>
+      );
+    }
+
+    const primaryCurrency = getPrimaryCurrencyForMonth(latestMonth);
+    const formatForPrimary = (amount) => formatCurrency(convertAmountToCurrency(amount, primaryCurrency), primaryCurrency);
+    const monthLabel = formatMonth(latestMonth.month);
+    const targetSavings = SAVINGS_GOAL_EUR;
+    const income = latestMonth.income || 0;
+    let essentialSpend = 0;
+    let nonEssentialSpend = 0;
+    let essentialCount = 0;
+    let nonEssentialCount = 0;
+
+    Object.entries(latestMonth.expense_categories || {}).forEach(([category, categoryData]) => {
+      const total = categoryData?.total || 0;
+      const count = categoryData?.transactions?.length || 0;
+      if (ESSENTIAL_CATEGORIES.includes(category)) {
+        essentialSpend += total;
+        essentialCount += count;
+      } else {
+        nonEssentialSpend += total;
+        nonEssentialCount += count;
+      }
+    });
+
+    const totalTrackedExpenses = essentialSpend + nonEssentialSpend;
+    const spendableBudget = Math.max(income - targetSavings, 0);
+    const remainingSpend = Math.max(spendableBudget - totalTrackedExpenses, 0);
+    const overspendAmount = Math.max(totalTrackedExpenses - spendableBudget, 0);
+    const actualSavings = Math.max(latestMonth.savings, 0);
+    const totalPlanned = totalTrackedExpenses + targetSavings;
+    const isOverBudget = totalPlanned > income + 0.01;
+    const savingsGap = Math.max(targetSavings - actualSavings, 0);
+    const savingsProgressPercentage = targetSavings > 0
+      ? Math.min(Math.max((actualSavings / targetSavings) * 100, 0), 200)
+      : 0;
+    const essentialShare = totalTrackedExpenses > 0 ? (essentialSpend / totalTrackedExpenses) * 100 : 0;
+    const nonEssentialShare = totalTrackedExpenses > 0 ? (nonEssentialSpend / totalTrackedExpenses) * 100 : 0;
+
+    return (
+      <div className="current-month-container">
+        <div className="current-month-header">
+          <div>
+            <h3>{monthLabel}</h3>
+            <p>
+              Income {formatForPrimary(latestMonth.income)} • Expenses {formatForPrimary(latestMonth.expenses)}
+            </p>
+          </div>
+          <div className="current-month-target">
+            <div className="target-label">Savings target</div>
+            <div className="target-amount">{formatForPrimary(targetSavings)}</div>
+          </div>
+        </div>
+
+        {income > 0 ? (
+          <div className="current-month-chart">
+            <div className="chart-header">
+              <span>Income allocation</span>
+              <strong>{formatForPrimary(income)}</strong>
+            </div>
+            <ResponsiveContainer width="100%" height={140}>
+              <BarChart
+                data={[
+                  {
+                    name: 'Allocation',
+                    essential: essentialSpend,
+                    nonEssential: nonEssentialSpend,
+                    savings: targetSavings
+                  }
+                ]}
+                layout="vertical"
+                margin={{ top: 20, right: 40, left: 20, bottom: 0 }}
+              >
+                <XAxis
+                  type="number"
+                  domain={[0, Math.max(income, totalPlanned)]}
+                  tickFormatter={(value) => formatForPrimary(value)}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis type="category" dataKey="name" hide />
+                <Tooltip
+                  formatter={(value, key) => {
+                    const label =
+                      key === 'essential'
+                        ? 'Essential spend'
+                        : key === 'nonEssential'
+                          ? 'Non-essential spend'
+                          : 'Savings goal';
+                    return [formatForPrimary(value), label];
+                  }}
+                />
+                <ReferenceLine
+                  x={income}
+                  stroke="#0f172a"
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  label={{
+                    value: `Income ${formatForPrimary(income)}`,
+                    position: 'top',
+                    fill: '#0f172a',
+                    fontSize: 12
+                  }}
+                />
+                <Bar
+                  dataKey="essential"
+                  stackId="allocation"
+                  fill="url(#segmentEssential)"
+                  barSize={24}
+                  radius={[12, 12, 12, 12]}
+                />
+                <Bar
+                  dataKey="nonEssential"
+                  stackId="allocation"
+                  fill="url(#segmentNonEssential)"
+                />
+                <Bar
+                  dataKey="savings"
+                  stackId="allocation"
+                  fill={isOverBudget ? 'url(#segmentSavingsOver)' : 'url(#segmentSavings)'}
+                />
+                <defs>
+                  <linearGradient id="segmentEssential" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#4c4c4c" />
+                    <stop offset="100%" stopColor="#5f5f5f" />
+                  </linearGradient>
+                  <linearGradient id="segmentNonEssential" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#9e9e9e" />
+                    <stop offset="100%" stopColor="#b5b5b5" />
+                  </linearGradient>
+                  <linearGradient id="segmentSavings" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#2db14c" />
+                    <stop offset="100%" stopColor="#3ad364" />
+                  </linearGradient>
+                  <linearGradient id="segmentSavingsOver" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#e0453a" />
+                    <stop offset="100%" stopColor="#f0624f" />
+                  </linearGradient>
+                </defs>
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="chart-summary">
+              <div className="chart-summary-item">
+                <span className="summary-dot essential" />
+                Essential spend: {formatForPrimary(essentialSpend)}
+              </div>
+              <div className="chart-summary-item">
+                <span className="summary-dot non-essential" />
+                Non-essential spend: {formatForPrimary(nonEssentialSpend)}
+              </div>
+              <div className="chart-summary-item">
+                <span className="summary-dot savings" style={{ background: isOverBudget ? '#ef4444' : '#10b981' }} />
+                Savings goal: {formatForPrimary(targetSavings)} (saved {formatForPrimary(actualSavings)})
+              </div>
+              <div className="chart-summary-item">
+                <span className={`summary-dot ${overspendAmount > 0 ? 'negative' : 'positive'}`} />
+                {overspendAmount > 0 ? 'Overspend' : 'Still available'}: {formatForPrimary(overspendAmount > 0 ? overspendAmount : remainingSpend)}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="current-month-highlight">
+            <div className="current-month-remaining negative">
+              <span>No income recorded for this month</span>
+              <strong>{formatForPrimary(0)}</strong>
+            </div>
+          </div>
+        )}
+
+        <div className="current-month-grid">
+          <div className="current-month-card">
+            <div className="card-label">Savings progress</div>
+            <div className="progress-value">
+              {latestMonth.savings >= 0 ? '+' : ''}{formatForPrimary(latestMonth.savings)}
+              <span className="progress-percentage">
+                ({savingsProgressPercentage.toFixed(0)}% of goal)
+              </span>
+            </div>
+            <div className="progress-bar">
+              <div
+                className="progress-bar-fill"
+                style={{ width: `${Math.min(savingsProgressPercentage, 200)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="current-month-card">
+            <div className="card-label">Essential spend</div>
+            <div className="card-value">
+              -{formatForPrimary(essentialSpend)}
+            </div>
+            <div className="card-meta">
+              {ESSENTIAL_CATEGORIES.join(', ')} • {essentialCount} tx • {essentialShare.toFixed(0)}% of spend
+            </div>
+          </div>
+
+          <div className="current-month-card">
+            <div className="card-label">Non-essential spend</div>
+            <div className="card-value">
+              -{formatForPrimary(nonEssentialSpend)}
+            </div>
+            <div className="card-meta">
+              Remaining categories • {nonEssentialCount} tx • {nonEssentialShare.toFixed(0)}% of spend
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderChartsTab = () => {
     // Filter data based on time range
     const getFilteredData = () => {
@@ -2384,6 +2628,7 @@ function App() {
             {tabDescription && <p>{tabDescription}</p>}
           </div>
           <div className="tab-content">
+            {activeTab === 'current-month' && renderCurrentMonthTab()}
             {activeTab === 'details' && renderDetailsTab()}
             {activeTab === 'charts' && renderChartsTab()}
             {activeTab === 'accounts' && renderAccountsTab()}
