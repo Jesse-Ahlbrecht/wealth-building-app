@@ -95,7 +95,9 @@ const MonthDetail = ({
   handleCategoryEdit,
   pendingCategoryChange,
   showEssentialSplit,
-  essentialCategories
+  essentialCategories,
+  categoryEditModal,
+  getTransactionKey
 }) => {
   const hasExpenses = month.expense_categories && Object.keys(month.expense_categories).length > 0;
   const hasIncome = month.income_categories && Object.keys(month.income_categories).length > 0;
@@ -306,12 +308,16 @@ const MonthDetail = ({
                               </div>
                               <div className="transaction-actions">
                                 <button
-                                  className="category-edit-btn"
+                                  className={`category-edit-btn ${
+                                    categoryEditModal && 
+                                    getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
+                                    ? 'active' : ''
+                                  }`}
                                   onClick={() => handleCategoryEdit(transaction, month.month, `income-${category}`)}
                                   disabled={isLocked}
                                   title="Change category"
                                 >
-                                  ✏️
+                                  <span className="edit-icon">✏️</span>
                                 </button>
                               </div>
                               <div className="transaction-amount transaction-amount-income">
@@ -417,12 +423,16 @@ const MonthDetail = ({
                               </div>
                               <div className="transaction-actions">
                                 <button
-                                  className="category-edit-btn"
+                                  className={`category-edit-btn ${
+                                    categoryEditModal && 
+                                    getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
+                                    ? 'active' : ''
+                                  }`}
                                   onClick={() => handleCategoryEdit(transaction, month.month, category)}
                                   disabled={isLocked}
                                   title="Change category"
                                 >
-                                  ✏️
+                                  <span className="edit-icon">✏️</span>
                                 </button>
                               </div>
                               <div className="transaction-amount">
@@ -2139,6 +2149,7 @@ function App() {
   const [sessionToken, setSessionToken] = useState(null);
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [renderCount, setRenderCount] = useState(0); // Force re-render mechanism
   
   console.log('🎬 RENDER COUNT:', renderCount, 'isAuth:', isAuthenticated, 'authLoad:', authLoading);
@@ -2767,11 +2778,7 @@ function App() {
   };
 
   const renderSidebar = () => (
-    <aside className="sidebar">
-      <div className="sidebar-brand">
-        <h1 className="sidebar-title">Wealth Tracker</h1>
-        <p className="sidebar-tagline">Your monthly savings and spending dashboard</p>
-      </div>
+    <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
       <nav className="sidebar-nav">
         {TAB_ITEMS.map(({ key, label }) => (
           <button
@@ -2783,36 +2790,37 @@ function App() {
           </button>
         ))}
       </nav>
-      <div style={{ 
-        marginTop: 'auto', 
-        padding: '20px', 
-        borderTop: '1px solid rgba(255,255,255,0.1)' 
+      <div style={{
+        marginTop: 'auto',
+        padding: '20px 24px',
+        borderTop: '1px solid rgba(0,0,0,0.06)'
       }}>
         {user && (
-          <div style={{ 
-            color: 'rgba(255,255,255,0.7)', 
-            fontSize: '14px', 
-            marginBottom: '12px' 
+          <div style={{
+            color: '#86868b',
+            fontSize: '15px',
+            marginBottom: '12px',
+            fontWeight: '400'
           }}>
-            Logged in as <strong style={{ color: 'white' }}>{user.id}</strong>
+            Logged in as <strong style={{ color: '#1d1d1f' }}>{user.name || user.email || user.id}</strong>
           </div>
         )}
         <button
           onClick={handleLogout}
           style={{
             width: '100%',
-            padding: '10px',
-            backgroundColor: 'rgba(255,255,255,0.1)',
-            color: 'white',
-            border: '1px solid rgba(255,255,255,0.2)',
+            padding: '10px 14px',
+            backgroundColor: 'rgba(0,0,0,0.04)',
+            color: '#424245',
+            border: 'none',
             borderRadius: '6px',
             cursor: 'pointer',
-            fontSize: '14px',
+            fontSize: '15px',
             fontWeight: '500',
-            transition: 'background-color 0.2s'
+            transition: 'background-color 0.15s'
           }}
-          onMouseOver={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.2)'}
-          onMouseOut={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+          onMouseOver={(e) => e.target.style.backgroundColor = 'rgba(0,0,0,0.08)'}
+          onMouseOut={(e) => e.target.style.backgroundColor = 'rgba(0,0,0,0.04)'}
         >
           Logout
         </button>
@@ -3001,6 +3009,8 @@ function App() {
           pendingCategoryChange={pendingCategoryChange}
           showEssentialSplit={showEssentialSplit}
           essentialCategories={ESSENTIAL_CATEGORIES}
+          categoryEditModal={categoryEditModal}
+          getTransactionKey={getTransactionKey}
         />
       ))}
     </>
@@ -3779,6 +3789,8 @@ function App() {
             formatDate={formatDate}
             handleCategoryEdit={handleCategoryEdit}
             pendingCategoryChange={pendingCategoryChange}
+            categoryEditModal={categoryEditModal}
+            getTransactionKey={getTransactionKey}
           />
         </div>
       )}
@@ -4486,10 +4498,31 @@ function App() {
   const tabDescription = TAB_DESCRIPTIONS[activeTab] || '';
 
   return (
-    <div className="app">
-      <div className="app-layout">
+    <div>
+      {/* Top Header Bar */}
+      <header className="top-header">
+        <button
+          className={`sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+        >
+          <div className="sidebar-toggle-icon">
+            <span></span>
+          </div>
+        </button>
+        <h1 className="top-header-title">Wealth Tracker</h1>
+      </header>
+
+      <div className="app">
+        {/* Sidebar Overlay */}
+        <div
+          className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`}
+          onClick={() => setSidebarOpen(false)}
+        />
+
         {renderSidebar()}
 
+        <div className="app-layout">
         <main className="main-content">
           <div className="content-header">
             <h2>{activeTabConfig?.label || ''}</h2>
@@ -4515,6 +4548,7 @@ function App() {
         formatCurrency={formatCurrency}
         isClosing={isCategoryModalClosing}
       />
+    </div>
     </div>
   );
 }
