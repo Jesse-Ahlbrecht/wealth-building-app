@@ -13,29 +13,34 @@
 
 .sidebar {
   width: 260px;
-  background: #f8fafc;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 16px;
-  padding: 32px 24px;
+  padding: 0;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
   position: sticky;
   top: 32px;
   align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 140px);
+  max-height: calc(100vh - 64px);
 }
 
 .sidebar-brand {
   margin-bottom: 32px;
+  padding: 32px 24px 0;
 }
 
 .sidebar-title {
   font-size: 24px;
   font-weight: 700;
-  color: #1a1a1a;
+  color: #ffffff;
   margin-bottom: 8px;
 }
 
 .sidebar-tagline {
   font-size: 14px;
-  color: #64748b;
+  color: rgba(255, 255, 255, 0.8);
   line-height: 1.5;
 }
 
@@ -43,6 +48,9 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 0 24px;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .sidebar-tab {
@@ -54,20 +62,20 @@
   border-radius: 10px;
   font-size: 15px;
   font-weight: 500;
-  color: #475569;
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .sidebar-tab:hover {
-  background: #e2e8f0;
-  color: #1f2937;
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
 }
 
 .sidebar-tab.active {
-  background: #4b5563;
+  background: rgba(255, 255, 255, 0.25);
   color: #ffffff;
-  box-shadow: 0 10px 20px rgba(75, 85, 99, 0.25);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .main-content {
@@ -150,16 +158,16 @@
   gap: 12px;
 }
 
-.current-month-gauge {
+.current-month-chart {
   background: #f8fafc;
   border-radius: 16px;
-  padding: 24px 28px;
+  padding: 28px 30px;
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-.gauge-header {
+.chart-header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -167,85 +175,160 @@
   color: #475569;
 }
 
-.gauge-header strong {
+.chart-header strong {
   font-size: 26px;
   font-weight: 700;
   color: #0f172a;
 }
 
-.gauge-track {
-  position: relative;
-  height: 20px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(248, 250, 252, 0.6), rgba(226, 232, 240, 0.9));
-  overflow: hidden;
+.chart-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding-top: 8px;
+  color: #64748b;
+  font-size: 13px;
 }
 
-.gauge-expense-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #6366f1, #22d3ee);
-  transition: width 0.3s ease;
+.chart-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.gauge-expense-fill.gauge-expense-over {
-  background: linear-gradient(90deg, #ef4444, #f97316);
+.chart-summary-item-clickable {
+  cursor: pointer;
+  transition: color 0.2s;
 }
 
-.gauge-marker {
-  position: absolute;
-  top: -42px;
-  transform: translateX(-50%);
-  text-align: center;
-  font-size: 12px;
-  color: #475569;
-  line-height: 1.4;
-  font-weight: 500;
-  pointer-events: none;
+.chart-summary-item-clickable:hover {
+  color: #0f172a;
 }
 
-.gauge-marker::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 32px;
-  width: 2px;
-  height: 14px;
+.chart-summary-item-clickable:hover .summary-dot {
+  transform: scale(1.1);
+}
+
+.summary-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
   background: #94a3b8;
-  transform: translateX(-50%);
+  transition: transform 0.2s;
 }
 
-.gauge-marker-goal {
-  color: #10b981;
+.summary-dot.essential {
+  background: #2563eb;
 }
 
-.gauge-marker-goal::before {
+.summary-dot.non-essential {
+  background: #f97316;
+}
+
+.summary-dot.savings {
   background: #10b981;
 }
 
-.gauge-marker-spend {
-  color: #6366f1;
+.summary-dot.unused {
+  background: #d1d5db;
 }
 
-.gauge-marker-spend::before {
-  background: #6366f1;
+.summary-dot.positive {
+  background: #16a34a;
 }
 
-.gauge-marker-spend.warning {
-  color: #ef4444;
+.summary-dot.negative {
+  background: #dc2626;
 }
 
-.gauge-marker-spend.warning::before {
-  background: #ef4444;
-}
-
-.gauge-legend {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+.segment-detail {
+  margin-top: 20px;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 24px 28px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
   gap: 16px;
+}
+
+.segment-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.segment-detail-header h4 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.segment-detail-meta {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.segment-detail-divider {
+  color: #cbd5f5;
+}
+
+.segment-detail-close {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 8px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.segment-detail-close:hover {
+  background: rgba(148, 163, 184, 0.18);
+  color: #0f172a;
+}
+
+.segment-transaction-list {
+  margin: 0;
+  border-left: none;
+  padding-left: 0;
+}
+
+.segment-transaction-list .transaction-item {
+  border-radius: 12px;
+  border: 1px solid #e5eaf0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.segment-transaction-list .transaction-item:hover {
+  border-color: #d4dae5;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.segment-empty {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.transaction-category-tag {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 8px;
+  background: #e0e7ff;
+  color: #4338ca;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .legend-label {
@@ -625,6 +708,44 @@
   margin-bottom: 8px;
 }
 
+.onboarding-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+.onboarding-content {
+  background: white;
+  border-radius: 12px;
+  padding: 40px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.onboarding-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.onboarding-header h2 {
+  font-size: 28px;
+  color: #2d3748;
+  margin-bottom: 12px;
+}
+
+.onboarding-header p {
+  font-size: 16px;
+  color: #718096;
+}
+
+.upload-area:hover {
+  border-color: #764ba2 !important;
+  background-color: #f7fafc !important;
+}
+
+.upload-area:active {
+  transform: scale(0.98);
+}
+
 .currency-badge {
   display: inline-block;
   padding: 4px 8px;
@@ -890,12 +1011,8 @@
     align-items: flex-start;
   }
 
-  .current-month-gauge {
+  .current-month-chart {
     padding: 20px;
-  }
-
-  .gauge-marker {
-    top: -56px;
   }
 }
 

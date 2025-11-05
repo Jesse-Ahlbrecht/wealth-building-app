@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Auth State</title>
+</head>
+<body>
+    <h1>Clearing Authentication State...</h1>
+    <script>
+        // Clear all storage
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // Clear any cookies
+        document.cookie.split(";").forEach(function(c) { 
+            document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+        });
+        
+        console.log('Cleared all storage');
+        document.body.innerHTML = '<h1>Authentication cleared!</h1><p>Redirecting to app...</p>';
+        
+        setTimeout(function() {
+            window.location.href = 'http://localhost:3000';
+        }, 1000);
+    </script>
+</body>
+</html>

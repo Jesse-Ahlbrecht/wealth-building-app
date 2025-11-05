@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clear Session - Wealth App</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            color: #1a202c;
+            margin-bottom: 10px;
+        }
+        .info {
+            background: #f7fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #4299e1;
+        }
+        .session-info {
+            background: #edf2f7;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        button.success {
+            background: #48bb78;
+        }
+        button.secondary {
+            background: #718096;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+        .result.success {
+            background: #c6f6d5;
+            color: #22543d;
+            border: 1px solid #9ae6b4;
+            display: block;
+        }
+        .result.info {
+            background: #bee3f8;
+            color: #2c5282;
+            border: 1px solid #90cdf4;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Wealth App Session Manager</h1>
+        <p>Use this page to manage your authentication session.</p>
+
+        <div class="info">
+            <strong>Current Session Status:</strong>
+            <div class="session-info" id="sessionInfo">Loading...</div>
+        </div>
+
+        <button onclick="clearSession()">Clear Session</button>
+        <button class="secondary" onclick="refreshApp()">Refresh App</button>
+        <button class="success" onclick="testLogin()">Test Login</button>
+
+        <div id="result" class="result"></div>
+
+        <div class="info" style="margin-top: 30px;">
+            <strong>Troubleshooting Steps:</strong>
+            <ol>
+                <li>Click "Clear Session" to remove cached authentication</li>
+                <li>Click "Refresh App" to reload the main application</li>
+                <li>You should now see the login page</li>
+                <li>Use username: <code>demo</code> and password: <code>demo</code></li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Show current session on load
+        function updateSessionInfo() {
+            const token = localStorage.getItem('sessionToken');
+            const user = localStorage.getItem('user');
+            
+            let html = '';
+            if (token) {
+                html += '<div>✅ Token: <strong>Present</strong> (' + token.substring(0, 30) + '...)</div>';
+            } else {
+                html += '<div>❌ Token: <strong>None</strong></div>';
+            }
+            
+            if (user) {
+                html += '<div>✅ User: <strong>' + user + '</strong></div>';
+            } else {
+                html += '<div>❌ User: <strong>None</strong></div>';
+            }
+            
+            document.getElementById('sessionInfo').innerHTML = html;
+        }
+
+        function clearSession() {
+            localStorage.removeItem('sessionToken');
+            localStorage.removeItem('user');
+            
+            const result = document.getElementById('result');
+            result.className = 'result success';
+            result.innerHTML = '✅ Session cleared successfully! Click "Refresh App" or manually refresh the app to see the login page.';
+            
+            updateSessionInfo();
+        }
+
+        function refreshApp() {
+            window.open('http://localhost:3000', '_blank');
+        }
+
+        async function testLogin() {
+            const result = document.getElementById('result');
+            result.className = 'result info';
+            result.innerHTML = '🔄 Testing login with demo credentials...';
+            
+            try {
+                const response = await fetch('http://localhost:5001/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username: 'demo', password: 'demo' }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    result.className = 'result success';
+                    result.innerHTML = '✅ Login successful! Backend is working correctly. Token: ' + data.session_token.substring(0, 30) + '...';
+                } else {
+                    result.className = 'result';
+                    result.style.display = 'block';
+                    result.style.background = '#fed7d7';
+                    result.style.color = '#742a2a';
+                    result.innerHTML = '❌ Login failed: ' + (data.error || 'Unknown error');
+                }
+            } catch (error) {
+                result.className = 'result';
+                result.style.display = 'block';
+                result.style.background = '#fed7d7';
+                result.style.color = '#742a2a';
+                result.innerHTML = '❌ Network error: ' + error.message + '<br><br>Is the backend running on http://localhost:5001?';
+            }
+        }
+
+        // Update on load
+        updateSessionInfo();
+    </script>
+</body>
+</html>
+

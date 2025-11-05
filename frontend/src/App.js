@@ -522,19 +522,12 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (modal) {
-      setShowCustomInput(false);
-      setCustomCategoryName('');
-      fetchCategories();
-    }
-  }, [modal]);
-
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     try {
       const response = await fetch('http://localhost:5001/api/categories');
-      const data = await response.json();
-      
+      const wrappedData = await response.json();
+      const data = wrappedData.data || wrappedData;
+
       if (modal) {
         const categories = modal.isIncome ? data.income : data.expense;
         setAvailableCategories(categories);
@@ -542,12 +535,20 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
     } catch (error) {
       console.error('Error fetching categories:', error);
       // Fallback to default categories
-      const defaultCategories = modal?.isIncome 
+      const defaultCategories = modal?.isIncome
         ? ['Salary', 'Income', 'Other']
         : ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Loan Payment', 'Rent', 'Insurance', 'Transfer', 'Other'];
       setAvailableCategories(defaultCategories);
     }
-  };
+  }, [modal]);
+
+  useEffect(() => {
+    if (modal) {
+      setShowCustomInput(false);
+      setCustomCategoryName('');
+      fetchCategories();
+    }
+  }, [modal, fetchCategories]);
 
   const handleCreateCustomCategory = async () => {
     if (!customCategoryName.trim()) return;
@@ -684,6 +685,1230 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
 };
 
 // Wealth Projection Calculator Component
+// Login/Register Component
+const LoginPage = ({ onLogin }) => {
+  const [mode, setMode] = useState('login'); // 'login', 'register', 'reset', 'reset-confirm'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    if (mode === 'login') {
+      const result = await onLogin(email, password);
+      if (!result.success) {
+        setError(result.error || 'Login failed');
+        setLoading(false);
+      }
+    } else if (mode === 'register') {
+      if (password !== confirmPassword) {
+        setError('Passwords do not match');
+        setLoading(false);
+        return;
+      }
+      if (password.length < 8) {
+        setError('Password must be at least 8 characters long');
+        setLoading(false);
+        return;
+      }
+      
+      try {
+        const response = await fetch('http://localhost:5001/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, name })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          setSuccess('Registration successful! Please check your email to verify your account.');
+          setMode('login');
+          setPassword('');
+          setConfirmPassword('');
+          setName('');
+        } else {
+          // Show the actual error message from the backend
+          const errorMsg = data.error || 'Registration failed. Please try again.';
+          console.error('Registration error:', errorMsg, data);
+          setError(errorMsg);
+        }
+      } catch (error) {
+        console.error('Registration network error:', error);
+        setError('Network error. Please try again.');
+      }
+      setLoading(false);
+    } else if (mode === 'reset') {
+      try {
+        const response = await fetch('http://localhost:5001/api/auth/request-password-reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          setSuccess('Password reset instructions sent! Check your email.');
+          setTimeout(() => setMode('login'), 3000);
+        } else {
+          setError(data.error || 'Failed to send reset email');
+        }
+      } catch (error) {
+        setError('Network error. Please try again.');
+      }
+      setLoading(false);
+    }
+  };
+
+  const getModeTitle = () => {
+    switch (mode) {
+      case 'register': return 'Create Account';
+      case 'reset': return 'Reset Password';
+      default: return 'Welcome Back';
+    }
+  };
+
+  const getModeSubtitle = () => {
+    switch (mode) {
+      case 'register': return 'Sign up to start tracking your wealth';
+      case 'reset': return 'Enter your email to reset your password';
+      default: return 'Sign in to your account';
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      padding: '20px'
+    }}>
+      <div style={{
+        background: 'white',
+        padding: '2.5rem',
+        borderRadius: '12px',
+        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+        width: '100%',
+        maxWidth: '400px'
+      }}>
+        <h1 style={{
+          fontSize: '2rem',
+          fontWeight: 'bold',
+          marginBottom: '0.5rem',
+          color: '#1a202c',
+          textAlign: 'center'
+        }}>Wealth Manager</h1>
+        <p style={{
+          color: '#718096',
+          textAlign: 'center',
+          marginBottom: '2rem'
+        }}>{getModeSubtitle()}</p>
+
+        {error && (
+          <div
+            role="alert"
+            style={{
+              background: '#FED7D7',
+              color: '#822727',
+              padding: '0.75rem',
+              borderRadius: '6px',
+              border: '1px solid #FEB2B2',
+              marginBottom: '1rem',
+              fontSize: '0.875rem'
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div
+            role="status"
+            style={{
+              background: '#C6F6D5',
+              color: '#22543D',
+              padding: '0.75rem',
+              borderRadius: '6px',
+              border: '1px solid #9AE6B4',
+              marginBottom: '1rem',
+              fontSize: '0.875rem'
+            }}
+          >
+            {success}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          {mode === 'register' && (
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '0.875rem',
+                fontWeight: '500',
+                color: '#4a5568',
+                marginBottom: '0.5rem'
+              }}>Full Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '6px',
+                  fontSize: '1rem',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                  boxSizing: 'border-box'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                required
+                disabled={loading}
+              />
+            </div>
+          )}
+
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{
+              display: 'block',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              color: '#4a5568',
+              marginBottom: '0.5rem'
+            }}>Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                border: '1px solid #e2e8f0',
+                borderRadius: '6px',
+                fontSize: '1rem',
+                outline: 'none',
+                transition: 'border-color 0.2s',
+                boxSizing: 'border-box'
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#667eea'}
+              onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+              required
+              disabled={loading}
+            />
+          </div>
+
+          {mode !== 'reset' && (
+            <div style={{ marginBottom: mode === 'login' ? '0.5rem' : '1rem' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '0.875rem',
+                fontWeight: '500',
+                color: '#4a5568',
+                marginBottom: '0.5rem'
+              }}>Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '6px',
+                  fontSize: '1rem',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                  boxSizing: 'border-box'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                required
+                disabled={loading}
+              />
+            </div>
+          )}
+
+          {mode === 'register' && (
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '0.875rem',
+                fontWeight: '500',
+                color: '#4a5568',
+                marginBottom: '0.5rem'
+              }}>Confirm Password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '6px',
+                  fontSize: '1rem',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                  boxSizing: 'border-box'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                required
+                disabled={loading}
+              />
+            </div>
+          )}
+
+          {mode === 'login' && (
+            <div style={{ textAlign: 'right', marginBottom: '1rem' }}>
+              <button
+                type="button"
+                onClick={() => { setMode('reset'); setError(''); setSuccess(''); }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#667eea',
+                  fontSize: '0.875rem',
+                  cursor: 'pointer',
+                  textDecoration: 'none'
+                }}
+                onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+                onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+              >
+                Forgot password?
+              </button>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: '100%',
+              background: loading ? '#a0aec0' : '#667eea',
+              color: 'white',
+              padding: '0.75rem',
+              borderRadius: '6px',
+              fontSize: '1rem',
+              fontWeight: '600',
+              border: 'none',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'background 0.2s',
+              marginBottom: '1rem',
+              boxSizing: 'border-box'
+            }}
+            onMouseEnter={(e) => !loading && (e.target.style.background = '#5568d3')}
+            onMouseLeave={(e) => !loading && (e.target.style.background = '#667eea')}
+          >
+            {loading ? 
+              (mode === 'register' ? 'Creating account...' : mode === 'reset' ? 'Sending...' : 'Signing in...') : 
+              (mode === 'register' ? 'Create Account' : mode === 'reset' ? 'Send Reset Link' : 'Sign In')}
+          </button>
+        </form>
+
+        <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+          {mode === 'login' && (
+            <>
+              <p style={{ fontSize: '0.875rem', color: '#718096', marginBottom: '0.5rem' }}>
+                Don't have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => { setMode('register'); setError(''); setSuccess(''); }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#667eea',
+                    cursor: 'pointer',
+                    textDecoration: 'none',
+                    fontWeight: '600'
+                  }}
+                  onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+                  onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                >
+                  Sign up
+                </button>
+              </p>
+              <p style={{ fontSize: '0.875rem', color: '#718096' }}>
+                Demo: <strong>demo@demo / demo</strong>
+              </p>
+            </>
+          )}
+          {(mode === 'register' || mode === 'reset') && (
+            <p style={{ fontSize: '0.875rem', color: '#718096' }}>
+              <button
+                type="button"
+                onClick={() => { setMode('login'); setError(''); setSuccess(''); }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#667eea',
+                  cursor: 'pointer',
+                  textDecoration: 'none',
+                  fontWeight: '600'
+                }}
+                onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+                onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+              >
+                ← Back to login
+              </button>
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Onboarding Component for new users
+const OnboardingComponent = ({ onUploadComplete }) => {
+  const [uploading, setUploading] = useState(false);
+  const [uploadStatuses, setUploadStatuses] = useState([]); // Array of status objects for each file
+  const [bankType, setBankType] = useState('auto');
+  const [uploadsComplete, setUploadsComplete] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Debug: Log status changes
+  useEffect(() => {
+    if (uploadStatuses.length > 0) {
+      console.log('🔄 uploadStatuses changed:', uploadStatuses);
+      console.log('🔄 Counts:', {
+        success: uploadStatuses.filter(s => s.type === 'success').length,
+        error: uploadStatuses.filter(s => s.type === 'error').length,
+        uploading: uploadStatuses.filter(s => s.type === 'uploading').length
+      });
+    }
+  }, [uploadStatuses]);
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      handleMultipleUploads(files);
+    }
+  };
+
+  const uploadSingleFile = async (file, index) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('bankType', bankType);
+    
+    // Generate unique upload ID for progress tracking
+    const uploadId = `${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`;
+    formData.append('uploadId', uploadId);
+
+    const token = localStorage.getItem('sessionToken');
+    
+    // Calculate file size and estimated transactions once (used for both progress and timeout)
+    const fileSizeMB = file.size / (1024 * 1024);
+    const estimatedTransactions = Math.max(10, Math.floor(fileSizeMB * 100));
+    const processingTimePerTransaction = estimatedTransactions > 500 ? 50 : 30;
+    
+    // Use XMLHttpRequest for upload progress tracking
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      let processingStartTime = null;
+      let processingInterval = null;
+      let progressPollInterval = null;
+
+      // Track upload progress - Phase 1: Upload (0-100%)
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const uploadProgress = Math.round((e.loaded / e.total) * 100); // Upload phase is 0-100%
+          setUploadStatuses(prev => {
+            const updated = [...prev];
+            updated[index] = {
+              ...updated[index],
+              uploadProgress: uploadProgress,
+              type: 'uploading',
+              phase: 'upload',
+              message: `Uploading... ${uploadProgress}%`
+            };
+            return updated;
+          });
+        }
+      });
+
+      // When upload completes, start Phase 2: Processing (0-100%)
+      xhr.upload.addEventListener('load', () => {
+        processingStartTime = Date.now();
+        
+        setUploadStatuses(prev => {
+          const updated = [...prev];
+          updated[index] = {
+            ...updated[index],
+            uploadProgress: 100, // Upload is complete
+            processingProgress: 0,
+            type: 'uploading',
+            phase: 'processing',
+            message: 'Processing transactions...'
+          };
+          return updated;
+        });
+        
+        // Poll backend for actual progress
+        const pollProgress = async () => {
+          try {
+            console.log(`🔄 Polling progress for ${file.name} (uploadId: ${uploadId})`);
+            const response = await fetch(`http://localhost:5001/api/upload-progress/${uploadId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            });
+            
+            if (response.ok) {
+              const responseData = await response.json();
+              console.log(`📊 Progress response for ${file.name}:`, responseData);
+              
+              // Handle signed response format from authenticate_request decorator
+              // Response structure: { data: {...}, signature: "...", timestamp: "..." }
+              let data = responseData;
+              if (responseData.data) {
+                data = responseData.data;
+              }
+              
+              console.log(`📊 Progress data for ${file.name}:`, data);
+              if (data.success) {
+                const progressPercent = data.progress_percent || 0;
+                const processed = data.processed || 0;
+                const total = data.total || 0;
+                
+                console.log(`📈 Updating progress: ${processed}/${total} (${progressPercent}%)`);
+                
+                setUploadStatuses(prev => {
+                  const updated = [...prev];
+                  if (updated[index] && updated[index].type === 'uploading') {
+                    updated[index] = {
+                      ...updated[index],
+                      processingProgress: Math.min(progressPercent, 99),
+                      phase: 'processing',
+                      message: `Processing ${processed}/${total} transactions... ${progressPercent}%`
+                    };
+                  }
+                  return updated;
+                });
+                
+                // Continue polling if not complete
+                if (data.status !== 'complete' && data.status !== 'error') {
+                  console.log(`⏭️ Continuing to poll (status: ${data.status})`);
+                  progressPollInterval = setTimeout(pollProgress, 500); // Poll every 500ms
+                } else {
+                  // Processing complete, stop polling and update final progress
+                  console.log(`✅ Processing complete (status: ${data.status}), stopping polls`);
+                  if (progressPollInterval) {
+                    clearTimeout(progressPollInterval);
+                    progressPollInterval = null;
+                  }
+                  // Update final progress to 100%
+                  if (data.status === 'complete') {
+                    setUploadStatuses(prev => {
+                      const updated = [...prev];
+                      if (updated[index] && updated[index].type === 'uploading') {
+                        updated[index] = {
+                          ...updated[index],
+                          processingProgress: 100,
+                          phase: 'processing',
+                          message: `Processing complete: ${data.processed}/${data.total} transactions`
+                        };
+                      }
+                      return updated;
+                    });
+                  }
+                }
+              } else {
+                console.warn(`⚠️ Progress response not successful for ${file.name}:`, data);
+                // Continue polling even if response indicates error (might be temporary)
+                progressPollInterval = setTimeout(pollProgress, 1000);
+              }
+            } else {
+              console.warn(`⚠️ Progress response not OK for ${file.name}: status ${response.status}`);
+              // Continue polling even on error (might be temporary network issue)
+              progressPollInterval = setTimeout(pollProgress, 1000);
+            }
+          } catch (error) {
+            console.error(`❌ Error polling progress for ${file.name}:`, error);
+            // Continue polling even on error (might be temporary network issue)
+            progressPollInterval = setTimeout(pollProgress, 1000);
+          }
+        };
+        
+        // Start polling immediately
+        console.log(`🚀 Starting progress polling for ${file.name} (uploadId: ${uploadId})`);
+        progressPollInterval = setTimeout(pollProgress, 500);
+      });
+
+      // Add timeout to detect hanging uploads (dynamic based on file size)
+      let timeout;
+      
+      xhr.addEventListener('load', () => {
+        // Clear processing interval (not needed anymore since we're using real progress)
+        if (processingInterval) {
+          clearInterval(processingInterval);
+          processingInterval = null;
+        }
+        
+        // DON'T clear progress polling here - let it continue until backend reports complete
+        // The polling will stop automatically when status === 'complete' in pollProgress function
+        
+        if (timeout) clearTimeout(timeout);
+        console.log(`📥 Load event for ${file.name}: status=${xhr.status}, readyState=${xhr.readyState}`);
+        try {
+          const responseText = xhr.responseText;
+          console.log(`Upload response for ${file.name} (status ${xhr.status}):`, responseText);
+          
+          // Handle empty responses
+          if (!responseText || responseText.trim() === '') {
+            console.error(`Empty response for ${file.name}`);
+            setUploadStatuses(prev => {
+              const updated = [...prev];
+              if (updated[index]) {
+                updated[index] = {
+                  ...updated[index],
+                  type: 'error',
+                  message: 'Empty response from server',
+                  progress: 100
+                };
+              }
+              return updated;
+            });
+            resolve({
+              index,
+              fileName: file.name,
+              type: 'error',
+              message: 'Empty response from server',
+              progress: 100
+            });
+            return;
+          }
+          
+          const data = JSON.parse(responseText);
+          
+          // Handle signed response format from authenticate_request decorator
+          // Response structure: { data: {...}, signature: "...", timestamp: "..." }
+          let actualData = data;
+          if (data.data) {
+            actualData = data.data;
+          }
+
+          console.log(`Parsed data for ${file.name}:`, actualData);
+          console.log(`Success check: status=${xhr.status}, actualData.success=${actualData.success}, actualData:`, JSON.stringify(actualData));
+
+          // Check for success - handle both 200 and 400 status codes (400 might be returned for 0 transactions)
+          const isSuccess = (xhr.status >= 200 && xhr.status < 300) || (xhr.status === 400 && actualData?.success === true);
+          
+          if (isSuccess && actualData && actualData.success === true) {
+            const result = {
+              index,
+              fileName: file.name,
+              type: 'success',
+              message: `Successfully imported ${actualData.imported || 0} transactions!`,
+              imported: actualData.imported || 0,
+              skipped: actualData.skipped || 0,
+              uploadProgress: 100,
+              processingProgress: 100,
+              progress: 100
+            };
+            console.log(`✅ Upload success for ${file.name}:`, result);
+            
+            // Update status immediately
+            setUploadStatuses(prev => {
+              const updated = [...prev];
+              if (updated[index]) {
+                updated[index] = result;
+              }
+              return updated;
+            });
+            
+            resolve(result);
+          } else {
+            // Handle both error responses and responses with success: false
+            const errorMsg = actualData?.error || actualData?.message || `Upload failed (status: ${xhr.status})`;
+            console.error(`Upload failed for ${file.name}:`, errorMsg, actualData);
+            
+            const errorResult = {
+              index,
+              fileName: file.name,
+              type: 'error',
+              message: errorMsg,
+              progress: 100,
+              imported: actualData?.imported || 0,
+              skipped: actualData?.skipped || 0
+            };
+            
+            // Update status immediately
+            setUploadStatuses(prev => {
+              const updated = [...prev];
+              if (updated[index]) {
+                updated[index] = errorResult;
+              }
+              return updated;
+            });
+            
+            resolve(errorResult);
+          }
+        } catch (error) {
+          console.error(`Error parsing response for ${file.name}:`, error, xhr.responseText);
+          const errorResult = {
+            index,
+            fileName: file.name,
+            type: 'error',
+            message: `Failed to parse response: ${error.message}`,
+            progress: 100
+          };
+          
+          // Update status immediately
+          setUploadStatuses(prev => {
+            const updated = [...prev];
+            if (updated[index]) {
+              updated[index] = errorResult;
+            }
+            return updated;
+          });
+          
+          resolve(errorResult);
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        // Clear processing interval
+        if (processingInterval) {
+          clearInterval(processingInterval);
+          processingInterval = null;
+        }
+        
+        // Clear progress polling
+        if (progressPollInterval) {
+          clearTimeout(progressPollInterval);
+          progressPollInterval = null;
+        }
+        
+        if (timeout) clearTimeout(timeout);
+        console.error(`❌ Network error for ${file.name}`);
+        const errorResult = {
+          index,
+          fileName: file.name,
+          type: 'error',
+          message: 'Upload failed - network error',
+          progress: 100
+        };
+        
+        // Update status immediately
+        setUploadStatuses(prev => {
+          const updated = [...prev];
+          if (updated[index]) {
+            updated[index] = errorResult;
+          }
+          return updated;
+        });
+        
+        resolve(errorResult);
+      });
+
+      xhr.addEventListener('abort', () => {
+        // Clear processing interval
+        if (processingInterval) {
+          clearInterval(processingInterval);
+          processingInterval = null;
+        }
+        
+        // Clear progress polling
+        if (progressPollInterval) {
+          clearTimeout(progressPollInterval);
+          progressPollInterval = null;
+        }
+        
+        if (timeout) clearTimeout(timeout);
+        console.error(`⏹️ Upload aborted for ${file.name}`);
+        const errorResult = {
+          index,
+          fileName: file.name,
+          type: 'error',
+          message: 'Upload cancelled',
+          progress: 100
+        };
+        
+        // Update status immediately
+        setUploadStatuses(prev => {
+          const updated = [...prev];
+          if (updated[index]) {
+            updated[index] = errorResult;
+          }
+          return updated;
+        });
+        
+        resolve(errorResult);
+      });
+
+      xhr.addEventListener('loadend', () => {
+        console.log(`🏁 Loadend event for ${file.name}: status=${xhr.status}, readyState=${xhr.readyState}`);
+        // If we reach loadend but status is still uploading, something went wrong
+        if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 0) {
+          console.error(`⚠️ Loadend with status 0 for ${file.name} - possible CORS or network issue`);
+        }
+      });
+
+      xhr.open('POST', 'http://localhost:5001/api/upload-csv');
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      
+      // Calculate dynamic timeout based on file size
+      // Base timeout: 30 seconds for upload + processing overhead
+      // Add time based on file size: ~2 seconds per MB for upload + processing
+      const estimatedProcessingTime = estimatedTransactions * processingTimePerTransaction;
+      const uploadTimeEstimate = Math.max(5000, fileSizeMB * 2000); // 2 seconds per MB for upload
+      const totalEstimatedTime = uploadTimeEstimate + estimatedProcessingTime;
+      
+      // Set timeout to 2x the estimated time, with minimum 2 minutes and maximum 10 minutes
+      const timeoutDuration = Math.min(
+        Math.max(120000, totalEstimatedTime * 2), // Min 2 minutes, 2x estimated time
+        600000 // Max 10 minutes
+      );
+      
+      console.log(`⏱️ Timeout for ${file.name}: ${Math.round(timeoutDuration / 1000)}s (file: ${fileSizeMB.toFixed(2)}MB, est. ${estimatedTransactions} transactions)`);
+      
+      // Start timeout timer (dynamic based on file size)
+      timeout = setTimeout(() => {
+        // Clear processing interval
+        if (processingInterval) {
+          clearInterval(processingInterval);
+          processingInterval = null;
+        }
+        
+        // Clear progress polling
+        if (progressPollInterval) {
+          clearTimeout(progressPollInterval);
+          progressPollInterval = null;
+        }
+        
+        // Only timeout if request hasn't completed
+        if (xhr.readyState !== XMLHttpRequest.DONE) {
+          console.error(`⏰ Timeout for ${file.name} after ${Math.round(timeoutDuration / 1000)}s - upload took too long`);
+          xhr.abort();
+          const timeoutResult = {
+            index,
+            fileName: file.name,
+            type: 'error',
+            message: `Upload timeout after ${Math.round(timeoutDuration / 1000)}s - file may be too large. Please try uploading smaller files or contact support.`,
+            progress: 100
+          };
+          
+          setUploadStatuses(prev => {
+            const updated = [...prev];
+            if (updated[index]) {
+              updated[index] = timeoutResult;
+            }
+            return updated;
+          });
+          
+          resolve(timeoutResult);
+        } else {
+          // Request completed but timeout fired - clear it
+          console.log(`✅ Request completed for ${file.name} before timeout`);
+        }
+      }, timeoutDuration);
+      
+      xhr.send(formData);
+    });
+  };
+
+  const handleMultipleUploads = async (files) => {
+    setUploading(true);
+    setUploadStatuses([]);
+
+    // Initialize status array with "uploading" status for each file
+    const initialStatuses = files.map((file, index) => ({
+      index,
+      fileName: file.name,
+      type: 'uploading',
+      phase: 'upload',
+      message: 'Preparing upload...',
+      uploadProgress: 0,
+      processingProgress: 0
+    }));
+    setUploadStatuses(initialStatuses);
+
+    try {
+      // Upload all files in parallel
+      const uploadPromises = files.map((file, index) => uploadSingleFile(file, index));
+      const results = await Promise.all(uploadPromises);
+
+      console.log('📊 All uploads completed:', results);
+      console.log('📊 Results summary:', {
+        total: results.length,
+        success: results.filter(r => r.type === 'success').length,
+        error: results.filter(r => r.type === 'error').length,
+        uploading: results.filter(r => r.type === 'uploading').length
+      });
+      console.log('📊 Full results array:', JSON.stringify(results, null, 2));
+
+      // Statuses are already updated in the individual upload handlers
+      // Just ensure we have the final state (in case of any race conditions)
+      setUploadStatuses(results);
+      
+      // Check if all uploads succeeded
+      const allSuccessful = results.every(result => result.type === 'success');
+      const totalImported = results.reduce((sum, result) => sum + (result.imported || 0), 0);
+      const totalSkipped = results.reduce((sum, result) => sum + (result.skipped || 0), 0);
+
+      console.log(`📊 Upload summary: allSuccessful=${allSuccessful}, totalImported=${totalImported}, totalSkipped=${totalSkipped}`);
+
+      // Set uploading to false and mark as complete
+      setUploading(false);
+      
+      if (allSuccessful && totalImported > 0) {
+        console.log('✅ All uploads successful, showing finish button...');
+        // Use setTimeout to ensure state updates are processed
+        setTimeout(() => {
+          setUploadsComplete(true);
+        }, 100);
+      } else {
+        console.log('⚠️ Some uploads failed or no transactions imported');
+      }
+    } catch (error) {
+      console.error('Batch upload error:', error);
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files).filter(file => 
+      file.name.endsWith('.csv') || file.name.endsWith('.CSV')
+    );
+    if (files.length > 0) {
+      handleMultipleUploads(files);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  // Calculate overall progress (combines upload and processing phases)
+  const overallProgress = uploadStatuses.length > 0
+    ? Math.round(
+        uploadStatuses.reduce((sum, status) => {
+          if (status.type === 'success' || status.type === 'error') {
+            return sum + 100; // Completed (success or error) counts as 100%
+          }
+          // For uploading: combine upload (0-50%) and processing (50-100%)
+          const uploadProgress = (status.uploadProgress || 0) * 0.5; // Upload contributes 0-50%
+          const processingProgress = (status.processingProgress || 0) * 0.5; // Processing contributes 50-100%
+          return sum + uploadProgress + processingProgress;
+        }, 0) / uploadStatuses.length
+      )
+    : 0;
+
+  const completedCount = uploadStatuses.filter(s => s.type === 'success').length;
+  const failedCount = uploadStatuses.filter(s => s.type === 'error').length;
+
+  return (
+    <div className="onboarding-container">
+      <div className="onboarding-content">
+        <div className="onboarding-header">
+          <h2>Welcome to Wealth Tracker! 👋</h2>
+          <p>Get started by uploading your bank statements</p>
+        </div>
+
+        <div className="onboarding-upload-section">
+          <div 
+            className="upload-area"
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              border: '2px dashed #667eea',
+              borderRadius: '12px',
+              padding: '60px 40px',
+              textAlign: 'center',
+              cursor: 'pointer',
+              backgroundColor: uploading ? '#f7fafc' : '#fafbfc',
+              transition: 'all 0.3s',
+              opacity: uploading ? 0.6 : 1
+            }}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.CSV"
+              multiple
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
+            
+            {uploading || uploadStatuses.length > 0 ? (
+              <div>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>
+                  {uploading ? '⏳' : uploadsComplete ? '🎉' : completedCount > 0 ? '✅' : '📁'}
+                </div>
+                <p style={{ fontSize: '18px', color: '#667eea', fontWeight: '600' }}>
+                  {uploading 
+                    ? `Uploading ${uploadStatuses.length} file${uploadStatuses.length !== 1 ? 's' : ''}...`
+                    : uploadsComplete 
+                      ? 'Uploads Complete!'
+                      : `${completedCount} file${completedCount !== 1 ? 's' : ''} uploaded successfully`
+                  }
+                </p>
+                {/* Overall Progress Bar */}
+                {uploadStatuses.length > 0 && (
+                  <div style={{ marginTop: '20px', width: '100%', maxWidth: '400px', margin: '20px auto 0' }}>
+                    <div style={{
+                      width: '100%',
+                      height: '8px',
+                      backgroundColor: '#e2e8f0',
+                      borderRadius: '4px',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        width: `${overallProgress}%`,
+                        height: '100%',
+                        backgroundColor: uploadsComplete ? '#22c55e' : '#667eea',
+                        borderRadius: '4px',
+                        transition: 'width 0.3s ease'
+                      }} />
+                    </div>
+                    <p style={{ marginTop: '8px', fontSize: '14px', color: '#4a5568' }}>
+                      {overallProgress}% complete ({completedCount} succeeded{failedCount > 0 ? `, ${failedCount} failed` : ''})
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>📁</div>
+                <p style={{ fontSize: '18px', color: '#667eea', fontWeight: '600', marginBottom: '8px' }}>
+                  Click to upload or drag and drop
+                </p>
+                <p style={{ fontSize: '14px', color: '#718096', marginTop: '8px' }}>
+                  Supports YUH and DKB bank statement CSV files
+                </p>
+                <p style={{ fontSize: '12px', color: '#a0aec0', marginTop: '8px' }}>
+                  You can select multiple files at once
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="bank-type-selector" style={{ marginTop: '24px', textAlign: 'center' }}>
+            <label style={{ display: 'block', marginBottom: '12px', fontSize: '14px', color: '#4a5568', fontWeight: '500' }}>
+              Bank Type (optional - auto-detected if not specified):
+            </label>
+            <select
+              value={bankType}
+              onChange={(e) => setBankType(e.target.value)}
+              disabled={uploading}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                border: '1px solid #e2e8f0',
+                fontSize: '14px',
+                backgroundColor: 'white',
+                cursor: uploading ? 'not-allowed' : 'pointer'
+              }}
+            >
+              <option value="auto">Auto-detect</option>
+              <option value="yuh">YUH (Swiss)</option>
+              <option value="dkb">DKB (German)</option>
+            </select>
+          </div>
+
+          {uploadStatuses.length > 0 && (
+            <div style={{ marginTop: '24px' }}>
+              {uploadStatuses.map((status, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    marginBottom: '12px',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    backgroundColor: status.type === 'success' ? '#f0fdf4' : status.type === 'error' ? '#fef2f2' : '#f7fafc',
+                    border: `1px solid ${
+                      status.type === 'success' ? '#86efac' : 
+                      status.type === 'error' ? '#fca5a5' : 
+                      '#cbd5e0'
+                    }`,
+                    color: status.type === 'success' ? '#166534' : status.type === 'error' ? '#991b1b' : '#4a5568'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <p style={{ margin: 0, fontWeight: '600', fontSize: '14px', flex: 1 }}>
+                      {status.type === 'uploading' && '⏳ '}
+                      {status.type === 'success' && '✅ '}
+                      {status.type === 'error' && '❌ '}
+                      {status.fileName}
+                    </p>
+                  </div>
+                  
+                  {/* Upload Progress Bar */}
+                  {status.type === 'uploading' && (
+                    <div style={{ marginBottom: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          color: '#667eea',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px'
+                        }}>
+                          📤 Upload
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#667eea', fontWeight: '500' }}>
+                          {status.uploadProgress || 0}%
+                        </span>
+                      </div>
+                      <div style={{
+                        width: '100%',
+                        height: '6px',
+                        backgroundColor: '#e2e8f0',
+                        borderRadius: '3px',
+                        overflow: 'hidden'
+                      }}>
+                        <div style={{
+                          width: `${status.uploadProgress || 0}%`,
+                          height: '100%',
+                          backgroundColor: '#667eea',
+                          borderRadius: '3px',
+                          transition: 'width 0.3s ease'
+                        }} />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Processing Progress Bar */}
+                  {status.type === 'uploading' && status.phase === 'processing' && (
+                    <div style={{ marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          color: '#22c55e',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px'
+                        }}>
+                          ⚙️ Processing
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: '500' }}>
+                          {status.processingProgress || 0}%
+                        </span>
+                      </div>
+                      <div style={{
+                        width: '100%',
+                        height: '6px',
+                        backgroundColor: '#e2e8f0',
+                        borderRadius: '3px',
+                        overflow: 'hidden'
+                      }}>
+                        <div style={{
+                          width: `${status.processingProgress || 0}%`,
+                          height: '100%',
+                          backgroundColor: '#22c55e',
+                          borderRadius: '3px',
+                          transition: 'width 0.3s ease'
+                        }} />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {status.type !== 'uploading' && (
+                    <p style={{ margin: '4px 0 0 0', fontSize: '13px' }}>
+                      {status.message}
+                      {status.type === 'success' && status.imported > 0 && (
+                        <span style={{ display: 'block', marginTop: '4px' }}>
+                          Imported: {status.imported} transactions
+                          {status.skipped > 0 && ` | Skipped: ${status.skipped} duplicates`}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  
+                  {/* Show phase message for uploading files */}
+                  {status.type === 'uploading' && status.message && (
+                    <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                      {status.message}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {uploadsComplete && (
+            <div style={{ marginTop: '32px', textAlign: 'center' }}>
+              <div style={{
+                padding: '24px',
+                backgroundColor: '#f0fdf4',
+                borderRadius: '12px',
+                border: '2px solid #86efac',
+                marginBottom: '20px'
+              }}>
+                <div style={{ fontSize: '48px', marginBottom: '12px' }}>🎉</div>
+                <h3 style={{ fontSize: '20px', fontWeight: '600', color: '#166534', marginBottom: '8px' }}>
+                  Setup Complete!
+                </h3>
+                <p style={{ fontSize: '14px', color: '#166534', marginBottom: '0' }}>
+                  Your transactions have been imported successfully. Click the button below to start using Wealth Tracker.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  console.log('🚀 Finish setup clicked, refreshing data...');
+                  if (onUploadComplete) {
+                    await onUploadComplete();
+                  }
+                }}
+                style={{
+                  padding: '14px 32px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  color: 'white',
+                  backgroundColor: '#667eea',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#5568d3';
+                  e.target.style.transform = 'translateY(-2px)';
+                  e.target.style.boxShadow = '0 6px 16px rgba(102, 126, 234, 0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#667eea';
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
+                }}
+              >
+                Finish Setup →
+              </button>
+            </div>
+          )}
+
+          <div className="onboarding-info" style={{ marginTop: '32px', padding: '20px', backgroundColor: '#f7fafc', borderRadius: '8px' }}>
+            <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#2d3748' }}>How to get your bank statements:</h3>
+            <ul style={{ textAlign: 'left', fontSize: '14px', color: '#4a5568', lineHeight: '1.8', paddingLeft: '20px' }}>
+              <li><strong>YUH:</strong> Export your transactions as CSV from the YUH app or website</li>
+              <li><strong>DKB:</strong> Download your DKB bank statement as CSV from the DKB online banking portal</li>
+              <li>You can upload multiple files at once - duplicate transactions will be automatically skipped</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
   const [timeframe, setTimeframe] = useState(10); // years
   const [interestRate, setInterestRate] = useState(5.0); // annual interest rate %
@@ -902,13 +2127,31 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
 };
 
 function App() {
+  console.log('🎬🎬🎬 APP FUNCTION CALLED - Component is rendering!');
+  
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    // Check if there's a stored session - if not, definitely not authenticated
+    const storedToken = localStorage.getItem('sessionToken');
+    console.log('🎬 Initial auth state - has stored token:', !!storedToken);
+    return false; // Always start as not authenticated, let useEffect verify
+  });
+  const [sessionToken, setSessionToken] = useState(null);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [renderCount, setRenderCount] = useState(0); // Force re-render mechanism
+  
+  console.log('🎬 RENDER COUNT:', renderCount, 'isAuth:', isAuthenticated, 'authLoad:', authLoading);
+
+  // App state
   const [summary, setSummary] = useState([]);
   const [accounts, setAccounts] = useState(null);
   const [broker, setBroker] = useState(null);
   const [loans, setLoans] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [forceShowApp, setForceShowApp] = useState(false); // Force show app after upload
   const [expandedCategories, setExpandedCategories] = useState({});
-  const [activeTab, setActiveTab] = useState('details');
+  const [activeTab, setActiveTab] = useState('current-month');
   const [categorySorts, setCategorySorts] = useState({});
   const [chartView, setChartView] = useState('absolute'); // 'absolute' or 'relative'
   const [timeRange, setTimeRange] = useState('all'); // '3m', '6m', '1y', 'all'
@@ -919,17 +2162,267 @@ function App() {
   const [pendingCategoryChange, setPendingCategoryChange] = useState(null); // Track card animation
   const [isCategoryModalClosing, setIsCategoryModalClosing] = useState(false);
   const [showEssentialSplit, setShowEssentialSplit] = useState(false);
+  const [segmentDetail, setSegmentDetail] = useState(null);
+  
+  console.log('🎬 App state defined, about to define refs...');
 
   const modalCloseTimeoutRef = useRef(null);
   const categoryAnimationTimeoutRef = useRef(null);
+  
+  console.log('🎬 Refs defined, about to define useEffect for session verification...');
+
+  // Check for existing session on mount and verify with backend
+  useEffect(() => {
+    let mounted = true;
+    
+    const verifySession = async () => {
+      console.log('🔍 Verifying session...');
+      console.log('📊 localStorage contents:', Object.keys(localStorage));
+      console.log('📊 sessionStorage contents:', Object.keys(sessionStorage));
+      
+      const storedToken = localStorage.getItem('sessionToken');
+      const storedUser = localStorage.getItem('user');
+      
+      console.log('🔑 storedToken:', storedToken ? 'EXISTS' : 'NULL');
+      console.log('👤 storedUser:', storedUser ? 'EXISTS' : 'NULL');
+      
+      if (storedToken && storedUser) {
+        console.log('📦 Found stored credentials, verifying with backend...');
+        // Verify token with backend with timeout
+        try {
+          // Add timeout to prevent hanging
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          
+          const response = await fetch('http://localhost:5001/api/auth/verify', {
+            headers: {
+              'Authorization': `Bearer ${storedToken}`
+            },
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const data = await response.json();
+            const actualData = data.data || data;
+            
+            if (actualData.valid && mounted) {
+              console.log('✅ Session valid! Setting authenticated state...');
+              setSessionToken(storedToken);
+              setUser(JSON.parse(storedUser));
+              setIsAuthenticated(true);
+              setAuthLoading(false);
+              console.log('✅ State updated - should show app');
+              return;
+            }
+          }
+          
+          console.log('❌ Session invalid, clearing...');
+        } catch (error) {
+          console.error('⚠️ Session verification failed:', error.message);
+        }
+        
+        // If we get here, session is invalid - clear it
+        if (mounted) {
+          localStorage.clear();
+        }
+      } else {
+        console.log('📭 No stored credentials found - showing login');
+      }
+      
+      // No valid session - show login page
+      if (mounted) {
+        console.log('🔓 Setting state to show login page...');
+        console.log('🔓 Current isAuthenticated:', isAuthenticated);
+        
+        // Use functional updates to ensure state is set correctly
+        setIsAuthenticated(() => {
+          console.log('⚙️ setIsAuthenticated called with: false');
+          return false;
+        });
+        setAuthLoading(() => {
+          console.log('⚙️ setAuthLoading called with: false');
+          return false;
+        });
+        setLoading(false);
+        console.log('✅ Auth state SET to false, authLoading SET to false');
+        
+        // Force component to re-render by incrementing render count
+        setRenderCount(prev => {
+          console.log('🔄 Incrementing render count from', prev, 'to', prev + 1);
+          return prev + 1;
+        });
+        
+        // Double-check and force another render after delay
+        setTimeout(() => {
+          console.log('⏱️ State check after 100ms - forcing another render');
+          setRenderCount(prev => {
+            console.log('🔄 Second increment from', prev, 'to', prev + 1);
+            return prev + 1;
+          });
+        }, 100);
+      }
+    };
+    
+    verifySession();
+    
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Fetch functions (defined early to avoid use-before-define issues)
+  const fetchSummary = useCallback(async () => {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+
+      const response = await fetch('http://localhost:5001/api/summary', { headers });
+      
+      if (!response.ok) {
+        // Handle error responses
+        if (response.status === 401) {
+          // Authentication failed, clear session and show login
+          localStorage.removeItem('sessionToken');
+          localStorage.removeItem('user');
+          setIsAuthenticated(false);
+          setSessionToken(null);
+          setUser(null);
+        }
+        setLoading(false);
+        setSummary([]);
+        return null;
+      }
+      
+      const wrappedData = await response.json();
+      // Handle double-wrapped response from authenticated endpoints
+      const data = wrappedData.data?.data || wrappedData.data || wrappedData;
+      console.log('📊 fetchSummary response:', {
+        wrappedData,
+        extractedData: data,
+        isArray: Array.isArray(data),
+        length: Array.isArray(data) ? data.length : 'not an array'
+      });
+      setSummary(data || []);
+      setLoading(false);
+      return data;
+    } catch (error) {
+      console.error('Error fetching summary:', error);
+      setLoading(false);
+      setSummary([]);
+      return null;
+    }
+  }, [sessionToken]);
+
+  const fetchAccounts = useCallback(async () => {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+
+      const response = await fetch('http://localhost:5001/api/accounts', { headers });
+      const wrappedData = await response.json();
+      const data = wrappedData.data?.data || wrappedData.data || wrappedData;
+      setAccounts(data);
+    } catch (error) {
+      console.error('Error fetching accounts:', error);
+    }
+  }, [sessionToken]);
+
+  const fetchBroker = useCallback(async () => {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+
+      const response = await fetch('http://localhost:5001/api/broker', { headers });
+      const wrappedData = await response.json();
+      const data = wrappedData.data?.data || wrappedData.data || wrappedData;
+      setBroker(data);
+    } catch (error) {
+      console.error('Error fetching broker:', error);
+    }
+  }, [sessionToken]);
+
+  const fetchLoans = useCallback(async () => {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+
+      const response = await fetch('http://localhost:5001/api/loans', { headers });
+      const wrappedData = await response.json();
+      const data = wrappedData.data?.data || wrappedData.data || wrappedData;
+      setLoans(data);
+    } catch (error) {
+      console.error('Error fetching loans:', error);
+    }
+  }, [sessionToken]);
+
+  const fetchProjection = useCallback(async () => {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+
+      const response = await fetch('http://localhost:5001/api/projection', { headers });
+      const wrappedData = await response.json();
+      const data = wrappedData.data?.data || wrappedData.data || wrappedData;
+      setProjectionData(data);
+    } catch (error) {
+      console.error('Error fetching projection:', error);
+      setProjectionData({
+        currentNetWorth: 0,
+        averageMonthlySavings: 0,
+        averageSavingsRate: 0
+      });
+    }
+  }, [sessionToken]);
+
+  // Fetch data when authenticated and token is available
+  useEffect(() => {
+    if (isAuthenticated && sessionToken) {
+      setLoading(true);
+      fetchSummary();
+      fetchAccounts();
+      fetchBroker();
+      fetchLoans();
+      fetchProjection();
+    } else if (isAuthenticated && !sessionToken) {
+      // If authenticated but no token, set loading to false to show error state
+      setLoading(false);
+    }
+  }, [isAuthenticated, sessionToken, fetchSummary, fetchAccounts, fetchBroker, fetchLoans, fetchProjection]);
 
   useEffect(() => {
-    fetchSummary();
-    fetchAccounts();
-    fetchBroker();
-    fetchLoans();
-    fetchProjection();
-  }, []);
+    setSegmentDetail(null);
+  }, [activeTab, summary]);
+
+  // Debug: Log summary changes
+  useEffect(() => {
+    console.log('📊 Summary state changed:', {
+      length: summary.length,
+      summary: summary,
+      isArray: Array.isArray(summary)
+    });
+  }, [summary]);
 
   const closeCategoryModal = useCallback(() => {
     if (!categoryEditModal || isCategoryModalClosing) {
@@ -1076,6 +2569,66 @@ function App() {
     });
   }, []);
 
+  const handleLogin = async (email, password) => {
+    console.log('🔑 Login attempt for:', email);
+    try {
+      const response = await fetch('http://localhost:5001/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        const token = data.session_token;
+        const userData = data.user;
+        
+        console.log('✅ Login successful!');
+        // Store in localStorage first
+        localStorage.setItem('sessionToken', token);
+        localStorage.setItem('user', JSON.stringify(userData));
+        
+        // Set all state together
+        setSessionToken(token);
+        setUser(userData);
+        setIsAuthenticated(true);
+        
+        return { success: true };
+      } else {
+        return { success: false, error: data.error || 'Login failed' };
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      return { success: false, error: 'Network error' };
+    }
+  };
+
+  const handleLogout = () => {
+    console.log('🚪 Logging out...');
+    
+    // Clear ALL storage immediately
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      
+      // Clear cookies
+      document.cookie.split(";").forEach(function(c) { 
+        document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+      });
+      
+      console.log('✅ Storage cleared');
+    } catch (e) {
+      console.error('Error clearing storage:', e);
+    }
+    
+    // Force hard reload with cache bust - this bypasses ALL caches
+    console.log('🔄 Hard reload with cache bust...');
+    window.location.href = window.location.origin + '?logout=' + Date.now();
+  };
+
   const handleCategoryUpdate = async (newCategory) => {
     if (!categoryEditModal) return;
 
@@ -1171,20 +2724,6 @@ function App() {
     }
   };
 
-  const fetchSummary = async () => {
-    try {
-      const response = await fetch('http://localhost:5001/api/summary');
-      const data = await response.json();
-      setSummary(data);
-      setLoading(false);
-      return data;
-    } catch (error) {
-      console.error('Error fetching summary:', error);
-      setLoading(false);
-      return null;
-    }
-  };
-
   useEffect(() => {
     if (!selectedMonth) {
       return;
@@ -1209,46 +2748,6 @@ function App() {
     };
   }, []);
 
-  const fetchAccounts = async () => {
-    try {
-      const response = await fetch('http://localhost:5001/api/accounts');
-      const data = await response.json();
-      setAccounts(data);
-    } catch (error) {
-      console.error('Error fetching accounts:', error);
-    }
-  };
-
-  const fetchBroker = async () => {
-    try {
-      const response = await fetch('http://localhost:5001/api/broker');
-      const data = await response.json();
-      setBroker(data);
-    } catch (error) {
-      console.error('Error fetching broker:', error);
-    }
-  };
-
-  const fetchLoans = async () => {
-    try {
-      const response = await fetch('http://localhost:5001/api/loans');
-      const data = await response.json();
-      setLoans(data);
-    } catch (error) {
-      console.error('Error fetching loans:', error);
-    }
-  };
-
-  const fetchProjection = async () => {
-    try {
-      const response = await fetch('http://localhost:5001/api/projection');
-      const data = await response.json();
-      setProjectionData(data);
-    } catch (error) {
-      console.error('Error fetching projection:', error);
-    }
-  };
-
   const formatCurrency = (amount, currency = 'EUR') => {
     return new Intl.NumberFormat('de-DE', {
       style: 'currency',
@@ -1267,6 +2766,84 @@ function App() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
+  const renderSidebar = () => (
+    <aside className="sidebar">
+      <div className="sidebar-brand">
+        <h1 className="sidebar-title">Wealth Tracker</h1>
+        <p className="sidebar-tagline">Your monthly savings and spending dashboard</p>
+      </div>
+      <nav className="sidebar-nav">
+        {TAB_ITEMS.map(({ key, label }) => (
+          <button
+            key={key}
+            className={`sidebar-tab ${activeTab === key ? 'active' : ''}`}
+            onClick={() => setActiveTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      <div style={{ 
+        marginTop: 'auto', 
+        padding: '20px', 
+        borderTop: '1px solid rgba(255,255,255,0.1)' 
+      }}>
+        {user && (
+          <div style={{ 
+            color: 'rgba(255,255,255,0.7)', 
+            fontSize: '14px', 
+            marginBottom: '12px' 
+          }}>
+            Logged in as <strong style={{ color: 'white' }}>{user.id}</strong>
+          </div>
+        )}
+        <button
+          onClick={handleLogout}
+          style={{
+            width: '100%',
+            padding: '10px',
+            backgroundColor: 'rgba(255,255,255,0.1)',
+            color: 'white',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: '500',
+            transition: 'background-color 0.2s'
+          }}
+          onMouseOver={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.2)'}
+          onMouseOut={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+        >
+          Logout
+        </button>
+      </div>
+    </aside>
+  );
+
+  console.log('🔥🔥🔥 REACHED END OF FUNCTIONS! About to do auth check...');
+  console.log('🔥 Current state - isAuth:', isAuthenticated, 'authLoad:', authLoading);
+
+  if (!isAuthenticated) {
+    console.log('🎬 AUTH CHECK - user not authenticated, authLoad:', authLoading);
+    if (authLoading) {
+      console.log('⏳⏳⏳ Not authenticated (still loading) - showing loading screen');
+      return (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+        }}>
+          <div style={{ color: 'white', fontSize: '20px' }}>Loading...</div>
+        </div>
+      );
+    }
+
+    console.log('🎯🎯🎯 Not authenticated (auth loaded) - returning LoginPage!');
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
   if (loading) {
     return (
       <div className="app">
@@ -1275,21 +2852,85 @@ function App() {
     );
   }
 
-  if (summary.length === 0) {
-    const fallbackTab = TAB_ITEMS.find(tab => tab.key === activeTab);
+  if (summary.length === 0 && !forceShowApp) {
     return (
       <div className="app">
-        <div className="app-layout">
-          {renderSidebar()}
-          <main className="main-content">
-            <div className="content-header">
-              <h2>{fallbackTab?.label || 'Wealth Tracker'}</h2>
-              <p>Track your savings and spending</p>
-            </div>
-            <div className="empty-state">
-              <p>No transaction data found.</p>
-              <p>Make sure your bank statements are in the correct location.</p>
-            </div>
+        <div className="app-layout" style={{ justifyContent: 'center' }}>
+          <main className="main-content" style={{ maxWidth: '800px', width: '100%' }}>
+            <OnboardingComponent onUploadComplete={async () => {
+              console.log('🚀 Finish setup clicked, fetching data...');
+              setLoading(true);
+              try {
+                // Small delay to ensure backend has finished processing
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const summaryData = await fetchSummary();
+                await fetchAccounts();
+                console.log('✅ Data fetched successfully');
+                console.log('📊 Summary data:', summaryData);
+                console.log('📊 Summary length:', summaryData?.length || 0);
+                
+                // Check if we have accounts even if summary is empty
+                const token = localStorage.getItem('sessionToken');
+                
+                // Also check transactions directly to debug
+                const transactionsResponse = await fetch('http://localhost:5001/api/transactions', {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                }).then(r => r.json()).then(d => d.data?.data || d.data || d).catch(() => null);
+                
+                console.log('📊 Transactions data:', transactionsResponse);
+                console.log('📊 Transactions length:', Array.isArray(transactionsResponse) ? transactionsResponse.length : 'not an array');
+                
+                const accountsData = await fetch('http://localhost:5001/api/accounts', {
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                  }
+                }).then(r => r.json()).then(d => d.data?.data || d.data || d).catch(() => null);
+                
+                console.log('📊 Accounts data:', accountsData);
+                console.log('📊 Accounts length:', accountsData?.accounts?.length || 0);
+                
+                // If we have transactions but no summary, there might be a grouping issue
+                if (Array.isArray(transactionsResponse) && transactionsResponse.length > 0 && (!summaryData || summaryData.length === 0)) {
+                  console.warn('⚠️ Found transactions but no summary - this might be a backend grouping issue');
+                }
+                
+                // If summary is still empty, wait a bit more and retry once
+                if (!summaryData || summaryData.length === 0) {
+                  console.warn('⚠️ No summary data returned, retrying after delay...');
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                  const retryData = await fetchSummary();
+                  console.log('📊 Retry summary data:', retryData);
+                  console.log('📊 Retry summary length:', retryData?.length || 0);
+                  
+                  if (!retryData || retryData.length === 0) {
+                    console.error('❌ Still no data after retry');
+                    // Even if summary is empty, show app if we have accounts
+                    if (accountsData?.accounts && accountsData.accounts.length > 0) {
+                      console.log('✅ Found accounts, showing app anyway');
+                      setForceShowApp(true);
+                    }
+                    setLoading(false);
+                  } else {
+                    setForceShowApp(true);
+                    setLoading(false);
+                  }
+                } else {
+                  // We have data, force show app
+                  setForceShowApp(true);
+                  setLoading(false);
+                }
+              } catch (error) {
+                console.error('❌ Error fetching data after upload:', error);
+                setLoading(false);
+                // Even on error, try to show app if accounts exist
+                setForceShowApp(true);
+              }
+            }} />
           </main>
         </div>
       </div>
@@ -1297,7 +2938,7 @@ function App() {
   }
 
   // Prepare data for the chart (reverse to show oldest to newest)
-  const chartData = [...summary].reverse().map(month => {
+  const chartData = summary && summary.length > 0 ? [...summary].reverse().map(month => {
     // Calculate actual loan payments for this month from transaction data
     let monthlyLoanPayment = 0;
     if (includeLoanPayments && summary) {
@@ -1324,7 +2965,7 @@ function App() {
       monthData: month,
       loanPayment: monthlyLoanPayment
     };
-  });
+  }) : [];
 
   const renderDetailsTab = () => (
     <>
@@ -1392,6 +3033,10 @@ function App() {
     const monthLabel = formatMonth(latestMonth.month);
     const targetSavings = SAVINGS_GOAL_EUR;
     const income = latestMonth.income || 0;
+    const essentialTransactions = [];
+    const nonEssentialTransactions = [];
+    const essentialTxKeys = new Set();
+    const nonEssentialTxKeys = new Set();
     let essentialSpend = 0;
     let nonEssentialSpend = 0;
     let essentialCount = 0;
@@ -1400,26 +3045,113 @@ function App() {
     Object.entries(latestMonth.expense_categories || {}).forEach(([category, categoryData]) => {
       const total = categoryData?.total || 0;
       const count = categoryData?.transactions?.length || 0;
+      const transactions = categoryData?.transactions || [];
       if (ESSENTIAL_CATEGORIES.includes(category)) {
         essentialSpend += total;
         essentialCount += count;
+        transactions.forEach((tx) => {
+          const txKey = getTransactionKey(tx);
+          if (!essentialTxKeys.has(txKey)) {
+            essentialTxKeys.add(txKey);
+            essentialTransactions.push({ ...tx, category });
+          }
+        });
       } else {
         nonEssentialSpend += total;
         nonEssentialCount += count;
+        transactions.forEach((tx) => {
+          const txKey = getTransactionKey(tx);
+          if (!nonEssentialTxKeys.has(txKey)) {
+            nonEssentialTxKeys.add(txKey);
+            nonEssentialTransactions.push({ ...tx, category });
+          }
+        });
       }
     });
 
     const totalTrackedExpenses = essentialSpend + nonEssentialSpend;
     const spendableBudget = Math.max(income - targetSavings, 0);
-    const remainingSpend = Math.max(spendableBudget - totalTrackedExpenses, 0);
     const overspendAmount = Math.max(totalTrackedExpenses - spendableBudget, 0);
     const actualSavings = Math.max(latestMonth.savings, 0);
     const totalPlanned = totalTrackedExpenses + targetSavings;
     const isOverBudget = totalPlanned > income + 0.01;
-    const savingsGap = Math.max(targetSavings - actualSavings, 0);
+    // Savings gap calculation (for future use)
+    // const savingsGap = Math.max(targetSavings - actualSavings, 0);
     const savingsProgressPercentage = targetSavings > 0
       ? Math.min(Math.max((actualSavings / targetSavings) * 100, 0), 200)
       : 0;
+    const unusedCapital = Math.max(income - totalPlanned, 0);
+    const hasUnusedCapital = unusedCapital > 0.01;
+    const essentialRadius = [12, 0, 0, 12];
+    const middleRadius = [0, 0, 0, 0];
+    const savingsRadius = hasUnusedCapital ? middleRadius : [0, 12, 12, 0];
+    const unusedRadius = hasUnusedCapital ? [0, 12, 12, 0] : middleRadius;
+
+    const sortTransactionsByAmount = (transactions) => [...transactions].sort((a, b) => {
+      const diff = Math.abs(b.amount) - Math.abs(a.amount);
+      if (diff !== 0) return diff;
+      return new Date(b.date) - new Date(a.date);
+    });
+
+    const handleSegmentSelect = (segment) => {
+      if (segment === 'essential') {
+        const meta = essentialTransactions.length
+          ? `${essentialTransactions.length} transaction${essentialTransactions.length === 1 ? '' : 's'}`
+          : 'No transactions found in essential categories.';
+        setSegmentDetail({
+          month: latestMonth.month,
+          segment,
+          label: 'Essential spend',
+          total: essentialSpend,
+          type: 'expense',
+          transactions: sortTransactionsByAmount(essentialTransactions),
+          meta,
+          message: essentialTransactions.length ? '' : 'Add more categorised essential expenses to see them here.'
+        });
+      } else if (segment === 'nonEssential') {
+        const meta = nonEssentialTransactions.length
+          ? `${nonEssentialTransactions.length} transaction${nonEssentialTransactions.length === 1 ? '' : 's'}`
+          : 'No transactions found in non-essential categories.';
+        setSegmentDetail({
+          month: latestMonth.month,
+          segment,
+          label: 'Non-essential spend',
+          total: nonEssentialSpend,
+          type: 'expense',
+          transactions: sortTransactionsByAmount(nonEssentialTransactions),
+          meta,
+          message: nonEssentialTransactions.length ? '' : 'Add more categorised non-essential expenses to see them here.'
+        });
+      } else if (segment === 'savings') {
+        const gap = Math.max(targetSavings - actualSavings, 0);
+        const meta = gap > 0
+          ? `Target ${formatForPrimary(targetSavings)} · saved ${formatForPrimary(actualSavings)} · gap ${formatForPrimary(gap)}`
+          : `Target ${formatForPrimary(targetSavings)} · saved ${formatForPrimary(actualSavings)}`;
+        setSegmentDetail({
+          month: latestMonth.month,
+          segment,
+          label: 'Savings goal',
+          total: targetSavings,
+          type: 'info',
+          transactions: [],
+          meta,
+          message: 'Savings goal is derived from income minus spending, so there are no individual transactions.'
+        });
+      } else if (segment === 'unused' && hasUnusedCapital) {
+        setSegmentDetail({
+          month: latestMonth.month,
+          segment,
+          label: 'Unused capital',
+          total: unusedCapital,
+          type: 'info',
+          transactions: [],
+          meta: `Remaining after planned spending: ${formatForPrimary(unusedCapital)}`,
+          message: 'Unused capital represents income that has not been assigned to savings or spending categories.'
+        });
+      }
+    };
+
+    const currentSegmentDetail = segmentDetail && segmentDetail.month === latestMonth.month ? segmentDetail : null;
     const essentialShare = totalTrackedExpenses > 0 ? (essentialSpend / totalTrackedExpenses) * 100 : 0;
     const nonEssentialShare = totalTrackedExpenses > 0 ? (nonEssentialSpend / totalTrackedExpenses) * 100 : 0;
 
@@ -1431,10 +3163,6 @@ function App() {
             <p>
               Income {formatForPrimary(latestMonth.income)} • Expenses {formatForPrimary(latestMonth.expenses)}
             </p>
-          </div>
-          <div className="current-month-target">
-            <div className="target-label">Savings target</div>
-            <div className="target-amount">{formatForPrimary(targetSavings)}</div>
           </div>
         </div>
 
@@ -1451,7 +3179,8 @@ function App() {
                     name: 'Allocation',
                     essential: essentialSpend,
                     nonEssential: nonEssentialSpend,
-                    savings: targetSavings
+                    savings: targetSavings,
+                    unused: unusedCapital
                   }
                 ]}
                 layout="vertical"
@@ -1472,7 +3201,9 @@ function App() {
                         ? 'Essential spend'
                         : key === 'nonEssential'
                           ? 'Non-essential spend'
-                          : 'Savings goal';
+                          : key === 'savings'
+                            ? 'Savings goal'
+                            : 'Unused capital';
                     return [formatForPrimary(value), label];
                   }}
                 />
@@ -1488,31 +3219,14 @@ function App() {
                     fontSize: 12
                   }}
                 />
-                <Bar
-                  dataKey="essential"
-                  stackId="allocation"
-                  fill="url(#segmentEssential)"
-                  barSize={24}
-                  radius={[12, 12, 12, 12]}
-                />
-                <Bar
-                  dataKey="nonEssential"
-                  stackId="allocation"
-                  fill="url(#segmentNonEssential)"
-                />
-                <Bar
-                  dataKey="savings"
-                  stackId="allocation"
-                  fill={isOverBudget ? 'url(#segmentSavingsOver)' : 'url(#segmentSavings)'}
-                />
                 <defs>
                   <linearGradient id="segmentEssential" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#4c4c4c" />
-                    <stop offset="100%" stopColor="#5f5f5f" />
+                    <stop offset="0%" stopColor="#2563eb" />
+                    <stop offset="100%" stopColor="#3b82f6" />
                   </linearGradient>
                   <linearGradient id="segmentNonEssential" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#9e9e9e" />
-                    <stop offset="100%" stopColor="#b5b5b5" />
+                    <stop offset="0%" stopColor="#f97316" />
+                    <stop offset="100%" stopColor="#fb923c" />
                   </linearGradient>
                   <linearGradient id="segmentSavings" x1="0" y1="0" x2="1" y2="0">
                     <stop offset="0%" stopColor="#2db14c" />
@@ -1522,27 +3236,199 @@ function App() {
                     <stop offset="0%" stopColor="#e0453a" />
                     <stop offset="100%" stopColor="#f0624f" />
                   </linearGradient>
+                  <linearGradient id="segmentUnused" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#d1d5db" />
+                    <stop offset="100%" stopColor="#e5e7eb" />
+                  </linearGradient>
                 </defs>
+                <Bar
+                  dataKey="essential"
+                  stackId="allocation"
+                  fill="url(#segmentEssential)"
+                  barSize={24}
+                  radius={essentialRadius}
+                  cursor={essentialTransactions.length ? 'pointer' : 'default'}
+                  onClick={() => {
+                    if (essentialTransactions.length) {
+                      handleSegmentSelect('essential');
+                    }
+                  }}
+                />
+                <Bar
+                  dataKey="nonEssential"
+                  stackId="allocation"
+                  fill="url(#segmentNonEssential)"
+                  radius={middleRadius}
+                  cursor={nonEssentialTransactions.length ? 'pointer' : 'default'}
+                  onClick={() => {
+                    if (nonEssentialTransactions.length) {
+                      handleSegmentSelect('nonEssential');
+                    }
+                  }}
+                />
+                <Bar
+                  dataKey="savings"
+                  stackId="allocation"
+                  fill={isOverBudget ? 'url(#segmentSavingsOver)' : 'url(#segmentSavings)'}
+                  radius={savingsRadius}
+                  cursor="pointer"
+                  onClick={() => handleSegmentSelect('savings')}
+                />
+                <Bar
+                  dataKey="unused"
+                  stackId="allocation"
+                  fill="url(#segmentUnused)"
+                  radius={unusedRadius}
+                  cursor={hasUnusedCapital ? 'pointer' : 'default'}
+                  onClick={() => {
+                    if (hasUnusedCapital) {
+                      handleSegmentSelect('unused');
+                    }
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
             <div className="chart-summary">
-              <div className="chart-summary-item">
+              <div
+                className="chart-summary-item chart-summary-item-clickable"
+                onClick={() => {
+                  if (essentialTransactions.length) {
+                    handleSegmentSelect('essential');
+                  }
+                }}
+                role="button"
+                tabIndex={essentialTransactions.length ? 0 : -1}
+                onKeyDown={(event) => {
+                  if (essentialTransactions.length && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    handleSegmentSelect('essential');
+                  }
+                }}
+              >
                 <span className="summary-dot essential" />
-                Essential spend: {formatForPrimary(essentialSpend)}
+                Essential spend: {formatForPrimary(-essentialSpend)}
               </div>
-              <div className="chart-summary-item">
+              <div
+                className="chart-summary-item chart-summary-item-clickable"
+                onClick={() => {
+                  if (nonEssentialTransactions.length) {
+                    handleSegmentSelect('nonEssential');
+                  }
+                }}
+                role="button"
+                tabIndex={nonEssentialTransactions.length ? 0 : -1}
+                onKeyDown={(event) => {
+                  if (nonEssentialTransactions.length && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    handleSegmentSelect('nonEssential');
+                  }
+                }}
+              >
                 <span className="summary-dot non-essential" />
-                Non-essential spend: {formatForPrimary(nonEssentialSpend)}
+                Non-essential spend: {formatForPrimary(-nonEssentialSpend)}
               </div>
-              <div className="chart-summary-item">
+              <div
+                className="chart-summary-item chart-summary-item-clickable"
+                onClick={() => handleSegmentSelect('savings')}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleSegmentSelect('savings');
+                  }
+                }}
+              >
                 <span className="summary-dot savings" style={{ background: isOverBudget ? '#ef4444' : '#10b981' }} />
                 Savings goal: {formatForPrimary(targetSavings)} (saved {formatForPrimary(actualSavings)})
               </div>
-              <div className="chart-summary-item">
-                <span className={`summary-dot ${overspendAmount > 0 ? 'negative' : 'positive'}`} />
-                {overspendAmount > 0 ? 'Overspend' : 'Still available'}: {formatForPrimary(overspendAmount > 0 ? overspendAmount : remainingSpend)}
+              <div
+                className={`chart-summary-item ${hasUnusedCapital ? 'chart-summary-item-clickable' : ''}`}
+                onClick={() => {
+                  if (hasUnusedCapital) {
+                    handleSegmentSelect('unused');
+                  }
+                }}
+                role="button"
+                tabIndex={hasUnusedCapital ? 0 : -1}
+                onKeyDown={(event) => {
+                  if (hasUnusedCapital && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    handleSegmentSelect('unused');
+                  }
+                }}
+              >
+                <span className={`summary-dot ${overspendAmount > 0 ? 'negative' : 'unused'}`} />
+                {overspendAmount > 0
+                  ? `Overspend: ${formatForPrimary(overspendAmount)}`
+                  : `Unused capital: ${formatForPrimary(unusedCapital)}`}
               </div>
             </div>
+            {currentSegmentDetail && (
+              <div className="segment-detail">
+                <div className="segment-detail-header">
+                  <div>
+                    <h4>{currentSegmentDetail.label}</h4>
+                    <div className="segment-detail-meta">
+                      {currentSegmentDetail.type === 'expense'
+                        ? formatForPrimary(-currentSegmentDetail.total)
+                        : formatForPrimary(currentSegmentDetail.total)}
+                      <span className="segment-detail-divider">·</span>
+                      {currentSegmentDetail.meta}
+                    </div>
+                  </div>
+                  <button
+                    className="segment-detail-close"
+                    onClick={() => setSegmentDetail(null)}
+                    type="button"
+                  >
+                    Close
+                  </button>
+                </div>
+                {currentSegmentDetail.transactions.length > 0 ? (
+                  <div className="transaction-list segment-transaction-list">
+                    {currentSegmentDetail.transactions.map((transaction, index) => {
+                      const transactionKey = `${currentSegmentDetail.segment}-${getTransactionKey(transaction)}-${index}`;
+                      const amountIsExpense = transaction.amount < 0;
+                      const amountDisplay = `${amountIsExpense ? '-' : '+'}${formatCurrency(Math.abs(transaction.amount), transaction.currency)}`;
+                      const accountClass = transaction.account
+                        ? `account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`
+                        : 'account-badge';
+                      return (
+                        <div key={transactionKey} className="transaction-item">
+                          <div className="transaction-date">
+                            {formatDate(transaction.date)}
+                            {transaction.account && (
+                              <span className={accountClass}>{transaction.account}</span>
+                            )}
+                          </div>
+                          <div className="transaction-details">
+                            <div className="transaction-recipient">
+                              {transaction.recipient || 'Unknown recipient'}
+                            </div>
+                            {transaction.description && (
+                              <div className="transaction-description">
+                                {transaction.description}
+                              </div>
+                            )}
+                            <div className="transaction-category-tag">
+                              {transaction.category}
+                            </div>
+                          </div>
+                          <div className={`transaction-amount ${amountIsExpense ? '' : 'transaction-amount-income'}`}>
+                            {amountDisplay}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="segment-empty">
+                    {currentSegmentDetail.message || 'No transaction details available for this segment.'}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="current-month-highlight">
@@ -2594,25 +4480,7 @@ function App() {
     );
   };
 
-  const renderSidebar = () => (
-    <aside className="sidebar">
-      <div className="sidebar-brand">
-        <h1 className="sidebar-title">Wealth Tracker</h1>
-        <p className="sidebar-tagline">Your monthly savings and spending dashboard</p>
-      </div>
-      <nav className="sidebar-nav">
-        {TAB_ITEMS.map(({ key, label }) => (
-          <button
-            key={key}
-            className={`sidebar-tab ${activeTab === key ? 'active' : ''}`}
-            onClick={() => setActiveTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-    </aside>
-  );
+  console.log('✅✅✅ Authenticated - showing main app');
 
   const activeTabConfig = TAB_ITEMS.find(tab => tab.key === activeTab);
   const tabDescription = TAB_DESCRIPTIONS[activeTab] || '';
