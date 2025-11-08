@@ -85,71 +85,9 @@ def require_auth(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Global storage for manual category overrides
-# In a real application, this would be stored in a database
-manual_category_overrides = {}
-
-# Global storage for custom categories
-custom_categories = {
-    'income': [],
-    'expense': []
-}
-
-def _load_overrides():
-    """Load manual category overrides from encrypted JSON file"""
-    filepath = os.path.join(os.path.dirname(__file__), 'manual_overrides.enc')
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            encrypted_data = f.read().strip()
-            if encrypted_data:
-                return decrypt_sensitive_data(encrypted_data)
-            else:
-                return {}
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        print(f"Error loading encrypted manual_overrides.enc: {e}. Using empty overrides.")
-        return {}
-
-def _save_overrides():
-    """Save manual category overrides to encrypted JSON file"""
-    filepath = os.path.join(os.path.dirname(__file__), 'manual_overrides.enc')
-    try:
-        encrypted_data = encrypt_sensitive_data(manual_category_overrides)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(encrypted_data)
-    except Exception as e:
-        print(f"Error saving encrypted manual_overrides.enc: {e}")
-
-def _load_custom_categories():
-    """Load custom categories from encrypted JSON file"""
-    filepath = os.path.join(os.path.dirname(__file__), 'custom_categories.enc')
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            encrypted_data = f.read().strip()
-            if encrypted_data:
-                return decrypt_sensitive_data(encrypted_data)
-            else:
-                return {'income': [], 'expense': []}
-    except FileNotFoundError:
-        return {'income': [], 'expense': []}
-    except Exception as e:
-        print(f"Error loading encrypted custom_categories.enc: {e}. Using default categories.")
-        return {'income': [], 'expense': []}
-
-def _save_custom_categories():
-    """Save custom categories to encrypted JSON file"""
-    filepath = os.path.join(os.path.dirname(__file__), 'custom_categories.enc')
-    try:
-        encrypted_data = encrypt_sensitive_data(custom_categories)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(encrypted_data)
-    except Exception as e:
-        print(f"Error saving encrypted custom_categories.enc: {e}")
-
-# Load data on startup
-manual_category_overrides = _load_overrides()
-custom_categories = _load_custom_categories()
+# Note: Categories are now stored in the database (categories table)
+# Transaction category updates are stored in the database (category_overrides table)
+# No more file-based storage!
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
@@ -878,7 +816,11 @@ class BankStatementParser:
         return loans
 
     def _categorize_transaction(self, recipient, description, date=None, account=None):
-        """Categorize transaction based on recipient and description"""
+        """Categorize transaction based on recipient and description
+        
+        Note: This is only used during initial parsing of bank statements.
+        Category overrides are now stored directly in the database.
+        """
         recipient = (recipient or '').strip()
         description = (description or '').strip()
         if date:
@@ -887,19 +829,6 @@ class BankStatementParser:
             date = ''
         account = account or ''
         text = f"{recipient} {description}".strip().lower()
-
-        # Create a unique key for this transaction to check for manual overrides
-        transaction_key = f"{date}_{account}_{recipient}_{description}_{text}"
-        
-        # Debug: print all transaction keys being checked
-        if date and account and recipient:
-            print(f"Checking transaction key: {transaction_key}")
-            print(f"Available overrides: {list(manual_category_overrides.keys())}")
-        
-        # Check for manual category override first
-        if transaction_key in manual_category_overrides:
-            print(f"Found manual override for {transaction_key}: {manual_category_overrides[transaction_key]}")
-            return manual_category_overrides[transaction_key]
 
         # Load categories fresh each time to pick up changes
         spending_categories = _load_categories('categories_spending.json')
@@ -1007,7 +936,8 @@ def get_summary():
                     'recipient': t.get('recipient', ''),
                     'description': t.get('description', ''),
                     'category': t.get('category', 'Uncategorized'),
-                    'account': t.get('account_name', 'Unknown')
+                    'account': t.get('account_name', 'Unknown'),
+                    'transaction_hash': t.get('transaction_hash', '')
                 })
 
             print(f"Formatted {len(transactions)} transactions for frontend")
@@ -1069,7 +999,8 @@ def get_summary():
                     'currency': t['currency'],
                     'recipient': t['recipient'],
                     'description': t['description'],
-                    'account': t['account']
+                    'account': t['account'],
+                    'transaction_hash': t.get('transaction_hash', '')
                 })
                 monthly_data[month_key]['currency_totals'][t['currency']] += t['amount']
                 continue
@@ -1084,7 +1015,8 @@ def get_summary():
                     'currency': t['currency'],
                     'recipient': t['recipient'],
                     'description': t['description'],
-                    'account': t['account']
+                    'account': t['account'],
+                    'transaction_hash': t.get('transaction_hash', '')
                 })
             else:
                 monthly_data[month_key]['expenses'] += abs(t['amount'])
@@ -1096,7 +1028,8 @@ def get_summary():
                     'currency': t['currency'],
                     'recipient': t['recipient'],
                     'description': t['description'],
-                    'account': t['account']
+                    'account': t['account'],
+                    'transaction_hash': t.get('transaction_hash', '')
                 })
 
             monthly_data[month_key]['currency_totals'][t['currency']] += t['amount']
@@ -1340,19 +1273,26 @@ def get_loans():
 def get_categories():
     """Get all available categories including custom ones"""
     try:
-        # Load default categories
+        tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+        
+        # Load default categories from JSON files
         spending_categories = _load_categories('categories_spending.json')
         income_categories = _load_categories('categories_income.json')
         
-        # Combine default and custom categories
+        # Get tenant-specific custom categories from database
+        db_categories = wealth_db.get_categories(tenant_id)
+        
+        # Combine default and custom categories (return just names)
         all_categories = {
-            'income': list(income_categories.keys()) + custom_categories['income'],
-            'expense': list(spending_categories.keys()) + custom_categories['expense']
+            'income': list(income_categories.keys()) + [c['category_name'] for c in db_categories.get('income', [])],
+            'expense': list(spending_categories.keys()) + [c['category_name'] for c in db_categories.get('expense', [])]
         }
         
         return jsonify(all_categories)
     except Exception as e:
         print(f"Error getting categories: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'income': [], 'expense': []})
 
 
@@ -1362,9 +1302,12 @@ def get_categories():
 def create_custom_category():
     """Create a new custom category"""
     try:
+        tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
         data = request.get_json()
         category_name = data.get('name', '').strip()
-        category_type = data.get('type', 'expense')  # 'income' or 'expense'
+        category_type = data.get('type', 'expense')
+        
+        print(f"Creating custom category for tenant {tenant_id}: {category_name} ({category_type})")
         
         if not category_name:
             return jsonify({'error': 'Category name is required'}), 400
@@ -1372,20 +1315,29 @@ def create_custom_category():
         if category_type not in ['income', 'expense']:
             return jsonify({'error': 'Category type must be income or expense'}), 400
         
-        # Check if category already exists
-        if category_name in custom_categories[category_type]:
-            return jsonify({'error': 'Category already exists'}), 400
+        # Check if category already exists in default categories
+        if category_type == 'expense':
+            default_categories = _load_categories('categories_spending.json')
+        else:
+            default_categories = _load_categories('categories_income.json')
         
-        # Add the custom category
-        custom_categories[category_type].append(category_name)
+        if category_name in default_categories:
+            return jsonify({'error': 'Category already exists as a default category'}), 400
         
-        # Save to file
-        _save_custom_categories()
-        
-        return jsonify({'success': True, 'message': 'Custom category created successfully'})
+        # Create category in database
+        try:
+            wealth_db.create_custom_category(tenant_id, category_name, category_type)
+            print(f"✓ Custom category created successfully")
+            return jsonify({'success': True, 'message': 'Custom category created successfully'})
+        except ValueError as e:
+            # Duplicate category
+            print(f"Category already exists: {e}")
+            return jsonify({'error': str(e)}), 400
         
     except Exception as e:
         print(f"Error creating custom category: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Failed to create custom category'}), 500
 
 @app.route('/api/update-category', methods=['POST'])
@@ -1394,39 +1346,48 @@ def create_custom_category():
 def update_category():
     """Update the category of a specific transaction"""
     try:
+        tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
         data = request.get_json()
         transaction = data.get('transaction') or {}
         new_category = data.get('newCategory')
 
-        if not transaction or not new_category:
-            return jsonify({'error': 'Missing transaction or newCategory'}), 400
+        print(f"=== UPDATE CATEGORY ===")
+        print(f"Tenant: {tenant_id}, New category: {new_category}")
+        print(f"Transaction data: {transaction}")
 
-        # Normalize fields to avoid None values causing mismatched keys
-        recipient = (transaction.get('recipient') or '').strip()
-        description = (transaction.get('description') or '').strip()
-        raw_date = transaction.get('date') or ''
-        # Use consistent YYYY-MM-DD format to match parser usage
-        date = raw_date.split('T')[0] if 'T' in raw_date else raw_date
-        account = transaction.get('account') or ''
-        text = f"{recipient} {description}".strip().lower()
-        transaction_key = f"{date}_{account}_{recipient}_{description}_{text}"
+        if not transaction:
+            print("ERROR: No transaction data provided")
+            return jsonify({'error': 'Missing transaction data'}), 400
+            
+        if not new_category:
+            print("ERROR: No new category provided")
+            return jsonify({'error': 'Missing newCategory'}), 400
 
-        print(f"Updating category for transaction key: {transaction_key}")
-        print(f"New category: {new_category}")
+        # Get the transaction hash (should be included in transaction object)
+        transaction_hash = transaction.get('transaction_hash')
+        
+        if not transaction_hash:
+            print(f"ERROR: Missing transaction_hash in transaction object. Keys available: {list(transaction.keys())}")
+            return jsonify({'error': 'Missing transaction_hash - please refresh the page'}), 400
 
-        # Store the manual override
-        manual_category_overrides[transaction_key] = new_category
+        print(f"Updating transaction {transaction_hash} to category: {new_category}")
 
-        # Save to file
-        _save_overrides()
-
-        print(f"Manual overrides now contains {len(manual_category_overrides)} entries")
-
+        # Update the category in the database
+        wealth_db.create_category_override(
+            tenant_id=tenant_id,
+            transaction_hash=transaction_hash,
+            override_category=new_category,
+            reason='Manual user override'
+        )
+        
+        print(f"✓ Category updated successfully")
         return jsonify({'success': True, 'message': 'Category updated successfully'})
 
     except Exception as e:
         print(f"Error updating category: {e}")
-        return jsonify({'error': 'Failed to update category'}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Failed to update category: {str(e)}'}), 500
 
 @app.route('/api/upload-statement', methods=['POST'])
 @authenticate_request

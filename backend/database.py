@@ -358,6 +358,40 @@ class WealthDatabase:
 
             return categories
 
+    def create_custom_category(self, tenant_id: str, category_name: str, 
+                               category_type: str) -> Dict[str, Any]:
+        """Create a custom category for a tenant"""
+        try:
+            tenant_db_id = self.set_tenant_context(tenant_id)
+            print(f"Creating category for tenant_id={tenant_id}, tenant_db_id={tenant_db_id}")
+        except Exception as e:
+            print(f"Error getting tenant_db_id: {e}")
+            raise ValueError(f"Tenant not found: {tenant_id}")
+
+        with self.db.get_cursor() as cursor:
+            try:
+                cursor.execute("""
+                    INSERT INTO categories (
+                        tenant_id, category_name, category_type, active
+                    ) VALUES (%s, %s, %s, TRUE)
+                    RETURNING id, category_name, category_type, created_at
+                """, (tenant_db_id, category_name, category_type))
+                
+                result = cursor.fetchone()
+                print(f"Category created successfully: {result}")
+                return {
+                    'id': result[0],
+                    'category_name': result[1], 
+                    'category_type': result[2],
+                    'created_at': result[3]
+                }
+            except Exception as e:
+                print(f"Database error creating category: {e}")
+                # Handle duplicate category gracefully
+                if 'unique constraint' in str(e).lower():
+                    raise ValueError(f"Category '{category_name}' already exists")
+                raise
+
     def create_category_override(self, tenant_id: str, transaction_hash: str,
                                override_category: str, reason: str = None) -> Dict[str, Any]:
         """Create a category override for a transaction"""
@@ -370,7 +404,7 @@ class WealthDatabase:
                 (transaction_hash,)
             )
             current = cursor.fetchone()
-            original_category = current['category'] if current else None
+            original_category = current[0] if current else None
 
             # Create override
             cursor.execute("""
@@ -389,7 +423,7 @@ class WealthDatabase:
                 (override_category, transaction_hash)
             )
 
-            return dict(result)
+            return {'id': result[0], 'created_at': result[1]}
 
     def create_file_attachment(self, tenant_id: str, file_data: Dict[str, Any],
                              encrypted_data: bytes, encryption_metadata: Dict[str, Any]) -> Dict[str, Any]:

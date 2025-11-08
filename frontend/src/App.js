@@ -526,7 +526,7 @@ const MonthDetail = ({
 };
 
 // Category Edit Modal Component
-const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing }) => {
+const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing, sessionToken }) => {
   const [availableCategories, setAvailableCategories] = useState([]);
   const [customCategoryName, setCustomCategoryName] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
@@ -534,13 +534,29 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
 
   const fetchCategories = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:5001/api/categories');
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+      
+      const response = await fetch('http://localhost:5001/api/categories', { headers });
       const wrappedData = await response.json();
       const data = wrappedData.data || wrappedData;
 
       if (modal) {
         const categories = modal.isIncome ? data.income : data.expense;
-        setAvailableCategories(categories);
+        // Ensure categories is always an array, fallback to default if undefined
+        if (Array.isArray(categories) && categories.length > 0) {
+          setAvailableCategories(categories);
+        } else {
+          // Use default categories if the API response is invalid
+          const defaultCategories = modal.isIncome
+            ? ['Salary', 'Income', 'Other']
+            : ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Loan Payment', 'Rent', 'Insurance', 'Transfer', 'Other'];
+          setAvailableCategories(defaultCategories);
+        }
       }
     } catch (error) {
       console.error('Error fetching categories:', error);
@@ -550,7 +566,7 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
         : ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Loan Payment', 'Rent', 'Insurance', 'Transfer', 'Other'];
       setAvailableCategories(defaultCategories);
     }
-  }, [modal]);
+  }, [modal, sessionToken]);
 
   useEffect(() => {
     if (modal) {
@@ -565,11 +581,16 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
     
     setLoading(true);
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+      
       const response = await fetch('http://localhost:5001/api/categories', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           name: customCategoryName.trim(),
           type: modal.isIncome ? 'income' : 'expense'
@@ -583,11 +604,12 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
         setShowCustomInput(false);
       } else {
         const errorData = await response.json();
+        console.error('Category creation failed:', response.status, errorData);
         alert(errorData.error || 'Failed to create category');
       }
     } catch (error) {
       console.error('Error creating custom category:', error);
-      alert('Failed to create custom category');
+      alert('Failed to create custom category: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -636,7 +658,7 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
           <div className="category-selection">
             <h4>Select New Category:</h4>
             <div className="category-grid">
-              {availableCategories.map((category) => (
+              {(availableCategories || []).map((category) => (
                 <button
                   key={category}
                   className={`category-option ${category === currentCategoryName ? 'selected' : ''}`}
@@ -2673,11 +2695,16 @@ function App() {
     setPendingCategoryChange({ key: transactionKey, stage: 'pending' });
 
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+      
       const response = await fetch('http://localhost:5001/api/update-category', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           transaction,
           newCategory
@@ -4547,6 +4574,7 @@ function App() {
         onUpdate={handleCategoryUpdate}
         formatCurrency={formatCurrency}
         isClosing={isCategoryModalClosing}
+        sessionToken={sessionToken}
       />
     </div>
     </div>
