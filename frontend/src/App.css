@@ -599,6 +599,91 @@
   border-radius: 999px;
 }
 
+/* Metrics Bar Charts */
+.metrics-bar-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 24px;
+}
+
+.metric-bar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metric-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.metric-bar-label {
+  font-size: 13px;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.metric-bar-value {
+  font-size: 24px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.metric-bar-value.positive {
+  color: #16a34a;
+}
+
+.metric-bar-value.negative {
+  color: #ef4444;
+}
+
+.metric-bar-meta {
+  font-size: 16px;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.metric-bar-container {
+  width: 100%;
+  height: 24px;
+  background: #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.metric-bar-fill {
+  height: 100%;
+  border-radius: 8px;
+  transition: width 0.3s ease, opacity 0.2s ease;
+}
+
+.metric-bar-fill:hover {
+  opacity: 0.85;
+}
+
+.metric-bar-fill.positive {
+  background: linear-gradient(90deg, #16a34a, #22c55e);
+}
+
+.metric-bar-fill.negative {
+  background: linear-gradient(90deg, #dc2626, #ef4444);
+}
+
+.metric-bar-footer {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
 .header {
   margin-bottom: 48px;
 }
@@ -1092,6 +1177,21 @@
 
 .category-amount-transfer {
   color: #6b6b6b;
+}
+
+.category-total-row {
+  border-top: 3px solid #1a1a1a;
+  margin-top: 12px;
+  padding-top: 12px;
+  font-weight: 600;
+  background: #f5f5f5;
+  border-radius: 0 0 8px 8px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.category-total-row:hover {
+  background: #e8e8e8;
 }
 
 .transaction-amount-transfer {

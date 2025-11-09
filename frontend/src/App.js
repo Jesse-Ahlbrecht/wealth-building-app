@@ -100,6 +100,53 @@ const MonthDetail = ({
   setShowEssentialCategoriesModal,
   defaultCurrency
 }) => {
+  // State to track which section totals are expanded
+  const [expandedSections, setExpandedSections] = React.useState({});
+  
+  // Refs for scrolling to sections
+  const incomeSectionRef = React.useRef(null);
+  const spendingSectionRef = React.useRef(null);
+  const essentialSectionRef = React.useRef(null);
+  const nonEssentialSectionRef = React.useRef(null);
+  
+  const toggleSection = (sectionKey) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey]
+    }));
+  };
+  
+  const scrollToAndExpandSection = (sectionType) => {
+    const sectionKey = `${month.month}-${sectionType}-section`;
+    
+    // Expand the section if it's not already expanded
+    if (!expandedSections[sectionKey]) {
+      setExpandedSections(prev => ({
+        ...prev,
+        [sectionKey]: true
+      }));
+    }
+    
+    // Scroll to the section with offset to keep header visible
+    setTimeout(() => {
+      let ref = null;
+      if (sectionType === 'income') ref = incomeSectionRef;
+      else if (sectionType === 'spending') ref = spendingSectionRef;
+      else if (sectionType === 'essential') ref = essentialSectionRef;
+      else if (sectionType === 'non-essential') ref = nonEssentialSectionRef;
+      
+      if (ref?.current) {
+        const elementPosition = ref.current.getBoundingClientRect().top + window.pageYOffset;
+        const offsetPosition = elementPosition - 80; // 80px offset to keep header visible
+        
+        window.scrollTo({
+          top: offsetPosition,
+          behavior: 'smooth'
+        });
+      }
+    }, 100);
+  };
+  
   const hasExpenses = month.expense_categories && Object.keys(month.expense_categories).length > 0;
   const hasIncome = month.income_categories && Object.keys(month.income_categories).length > 0;
 
@@ -215,62 +262,101 @@ const MonthDetail = ({
         </div>
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-label">Income</div>
-          <div className="stat-value income">
-            +{formatCurrency(month.income, primaryCurrency)}
+      <div className="metrics-bar-charts">
+        {/* Income Bar */}
+        <div className="metric-bar-item">
+          <div className="metric-bar-header">
+            <div className="metric-bar-label">INCOME</div>
+            <div className="metric-bar-value positive">+{formatCurrency(month.income, primaryCurrency)}</div>
+          </div>
+          <div 
+            className="metric-bar-container"
+            onClick={() => scrollToAndExpandSection('income')}
+            style={{ cursor: 'pointer' }}
+            title="Click to view income details"
+          >
+            <div
+              className="metric-bar-fill positive"
+              style={{ width: '100%' }}
+            />
           </div>
         </div>
 
-        <div className="stat-card">
-          <div className="stat-label">Expenses</div>
-          <div className="stat-value expense">
-            -{formatCurrency(month.expenses, primaryCurrency)}
+        {/* Expenses Bar - Stacked with Essential/Non-Essential */}
+        <div className="metric-bar-item">
+          <div className="metric-bar-header">
+            <div className="metric-bar-label">EXPENSES</div>
+            <div className="metric-bar-value negative">-{formatCurrency(totalTrackedExpenses, primaryCurrency)}</div>
+          </div>
+          <div className="metric-bar-container">
+            <div style={{ display: 'flex', width: `${month.income > 0 ? (totalTrackedExpenses / month.income) * 100 : 0}%`, height: '100%' }}>
+              <div
+                className="metric-bar-fill"
+                onClick={() => scrollToAndExpandSection('essential')}
+                style={{ 
+                  width: `${totalTrackedExpenses > 0 ? (essentialTotal / totalTrackedExpenses) * 100 : 0}%`,
+                  background: 'linear-gradient(90deg, #991b1b, #dc2626)',
+                  borderRadius: essentialTotal === totalTrackedExpenses ? '8px' : '8px 0 0 8px',
+                  cursor: 'pointer'
+                }}
+                title={`Essential: ${formatCurrency(essentialTotal, primaryCurrency)} - Click to view details`}
+              />
+              <div
+                className="metric-bar-fill"
+                onClick={() => scrollToAndExpandSection('non-essential')}
+                style={{ 
+                  width: `${totalTrackedExpenses > 0 ? (nonEssentialTotal / totalTrackedExpenses) * 100 : 0}%`,
+                  background: 'linear-gradient(90deg, #f97316, #fb923c)',
+                  borderRadius: nonEssentialTotal === totalTrackedExpenses ? '8px' : '0 8px 8px 0',
+                  cursor: 'pointer'
+                }}
+                title={`Non-Essential: ${formatCurrency(nonEssentialTotal, primaryCurrency)} - Click to view details`}
+              />
+            </div>
+          </div>
+          <div className="metric-bar-footer" style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #991b1b, #dc2626)', borderRadius: '2px', display: 'inline-block' }}></span>
+              Essential: {formatCurrency(essentialTotal, primaryCurrency)} ({essentialShare.toFixed(0)}%)
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #f97316, #fb923c)', borderRadius: '2px', display: 'inline-block' }}></span>
+              Non-Essential: {formatCurrency(nonEssentialTotal, primaryCurrency)} ({nonEssentialShare.toFixed(0)}%)
+            </span>
           </div>
         </div>
 
-        <div className="stat-card">
-          <div className="stat-label">
-            Savings
-            {includeLoanPayments && monthlyLoanPayment > 0 && (
-              <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666', marginLeft: '8px' }}>
-                (incl. loans)
+        {/* Savings Bar */}
+        <div className="metric-bar-item">
+          <div className="metric-bar-header">
+            <div className="metric-bar-label">
+              SAVINGS {includeLoanPayments && monthlyLoanPayment > 0 && '(INCL. LOANS)'}
+            </div>
+            <div className="metric-bar-value positive">
+              {displaySavings >= 0 ? '+' : ''}{formatCurrency(displaySavings, primaryCurrency)}
+              <span className="metric-bar-meta">
+                {displaySavingsRate.toFixed(1)}%
               </span>
-            )}
+            </div>
           </div>
-          <div className="stat-value">
-            {displaySavings >= 0 ? '+' : ''}{formatCurrency(displaySavings, primaryCurrency)}
+          <div className="metric-bar-container">
+            <div
+              className="metric-bar-fill positive"
+              style={{ width: `${month.income > 0 ? (displaySavings / month.income) * 100 : 0}%` }}
+            />
+          </div>
+          <div className="metric-bar-footer">
+            {((displaySavings / savingsGoal) * 100).toFixed(0)}% of goal
           </div>
         </div>
 
-        {showEssentialSplit && totalTrackedExpenses > 0 && (
-          <>
-            <div className="stat-card">
-              <div className="stat-label">Essential Spend</div>
-              <div className="stat-value expense">
-                -{formatCurrency(essentialTotal, primaryCurrency)}
-              </div>
-              <div className="stat-footnote">
-                Includes {essentialCategoryLabel}; {essentialTransactionCount} tx; {essentialShare.toFixed(0)}% of spend
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Non-Essential Spend</div>
-              <div className="stat-value expense">
-                -{formatCurrency(nonEssentialTotal, primaryCurrency)}
-              </div>
-              <div className="stat-footnote">
-                Remaining categories; {nonEssentialTransactionCount} tx; {nonEssentialShare.toFixed(0)}% of spend
-              </div>
-            </div>
-          </>
-        )}
-
+        {/* Multi-Currency Info */}
         {month.currency_totals.EUR !== 0 && month.currency_totals.CHF !== 0 && (
-          <div className="stat-card">
-            <div className="stat-label">Multi-Currency</div>
-            <div style={{ fontSize: '14px', marginTop: '8px' }}>
+          <div className="metric-bar-item" style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px', marginTop: '8px' }}>
+            <div className="metric-bar-header">
+              <div className="metric-bar-label">MULTI-CURRENCY</div>
+            </div>
+            <div style={{ fontSize: '14px', marginTop: '8px', color: '#64748b' }}>
               <div>EUR: {month.currency_totals.EUR >= 0 ? '+' : ''}{formatCurrency(month.currency_totals.EUR, 'EUR')}</div>
               <div style={{ marginTop: '4px' }}>
                 CHF: {month.currency_totals.CHF >= 0 ? '+' : ''}{formatCurrency(month.currency_totals.CHF, 'CHF')}
@@ -280,11 +366,15 @@ const MonthDetail = ({
         )}
       </div>
 
-      {sortedIncomeCategories.length > 0 && (
-        <div className="categories-section">
+      {sortedIncomeCategories.length > 0 && (() => {
+        const incomeSectionKey = `${month.month}-income-section`;
+        const isIncomeExpanded = expandedSections[incomeSectionKey];
+        
+        return (
+        <div className="categories-section" ref={incomeSectionRef}>
           <h3 className="categories-title">Income by Category</h3>
           <div className="category-list">
-            {sortedIncomeCategories.map(([category, categoryData]) => {
+            {isIncomeExpanded && sortedIncomeCategories.map(([category, categoryData]) => {
               const categoryKey = `${month.month}-income-${category}`;
               const isExpanded = expandedCategories[categoryKey];
 
@@ -391,12 +481,41 @@ const MonthDetail = ({
                 </div>
               );
             })}
+            
+            {/* Income Total - At bottom, always visible and clickable */}
+            <div 
+              className="category-item" 
+              onClick={() => toggleSection(incomeSectionKey)}
+              style={{ 
+                borderTop: '3px solid #1a1a1a', 
+                marginTop: '12px', 
+                paddingTop: '12px',
+                background: '#f5f5f5',
+                fontWeight: '600',
+                borderRadius: '0 0 8px 8px',
+                cursor: 'pointer'
+              }}>
+              <div style={{ flex: 1 }}>
+                <div className="category-name" style={{ fontWeight: '600' }}>
+                  <span className="expand-arrow">{isIncomeExpanded ? '▼' : '▶'}</span>
+                  Total Income
+                </div>
+              </div>
+              <div className="category-amount category-amount-income" style={{ fontWeight: '700', fontSize: '16px' }}>
+                {formatCurrency(month.income, primaryCurrency)}
+              </div>
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
-      {sortedExpenseCategories.length > 0 && !showEssentialSplit && (
-        <div className="categories-section">
+      {sortedExpenseCategories.length > 0 && !showEssentialSplit && (() => {
+        const spendingSectionKey = `${month.month}-spending-section`;
+        const isSpendingExpanded = expandedSections[spendingSectionKey];
+        
+        return (
+        <div className="categories-section" ref={spendingSectionRef}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
             <h3 className="categories-title" style={{ margin: 0 }}>Spending by Category</h3>
             <button
@@ -408,7 +527,7 @@ const MonthDetail = ({
             </button>
           </div>
           <div className="category-list">
-            {sortedExpenseCategories.map(([category, categoryData]) => {
+            {isSpendingExpanded && sortedExpenseCategories.map(([category, categoryData]) => {
               const categoryKey = `${month.month}-${category}`;
               const isExpanded = expandedCategories[categoryKey];
 
@@ -515,9 +634,34 @@ const MonthDetail = ({
                 </div>
               );
             })}
+            
+            {/* Spending Total - At bottom, always visible and clickable */}
+            <div 
+              className="category-item" 
+              onClick={() => toggleSection(spendingSectionKey)}
+              style={{ 
+                borderTop: '3px solid #1a1a1a', 
+                marginTop: '12px', 
+                paddingTop: '12px',
+                background: '#f5f5f5',
+                fontWeight: '600',
+                borderRadius: '0 0 8px 8px',
+                cursor: 'pointer'
+              }}>
+              <div style={{ flex: 1 }}>
+                <div className="category-name" style={{ fontWeight: '600' }}>
+                  <span className="expand-arrow">{isSpendingExpanded ? '▼' : '▶'}</span>
+                  Total Spending
+                </div>
+              </div>
+              <div className="category-amount" style={{ fontWeight: '700', fontSize: '16px' }}>
+                {formatCurrency(totalTrackedExpenses, primaryCurrency)}
+              </div>
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {showEssentialSplit && sortedExpenseCategories.length > 0 && (() => {
         const essentialCats = sortedExpenseCategories.filter(([category]) => {
@@ -535,9 +679,16 @@ const MonthDetail = ({
           return !essentialCategories.includes(category) && !isLoanPayment;
         });
 
-        const renderCategorySection = (categories, title, barClassName) => (
-          categories.length > 0 && (
-            <div className="categories-section">
+        const renderCategorySection = (categories, title, barClassName) => {
+          if (categories.length === 0) return null;
+          
+          const sectionKey = `${month.month}-${title.includes('(Essential)') ? 'essential' : 'non-essential'}-section`;
+          const isSectionExpanded = expandedSections[sectionKey];
+          const totalAmount = categories.reduce((sum, [, categoryData]) => sum + categoryData.total, 0);
+          const sectionRef = title.includes('(Essential)') ? essentialSectionRef : nonEssentialSectionRef;
+          
+          return (
+            <div className="categories-section" ref={sectionRef}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
                 <h3 className="categories-title" style={{ margin: 0 }}>{title}</h3>
                 {title.includes('Essential') && (
@@ -551,7 +702,7 @@ const MonthDetail = ({
                 )}
               </div>
               <div className="category-list">
-                {categories.map(([category, categoryData]) => {
+                {isSectionExpanded && categories.map(([category, categoryData]) => {
                   const categoryKey = `${month.month}-${category}`;
                   const isExpanded = expandedCategories[categoryKey];
 
@@ -658,10 +809,34 @@ const MonthDetail = ({
                     </div>
                   );
                 })}
+                
+                {/* Section Total - At bottom, always visible and clickable */}
+                <div 
+                  className="category-item" 
+                  onClick={() => toggleSection(sectionKey)}
+                  style={{ 
+                    borderTop: '3px solid #1a1a1a', 
+                    marginTop: '12px', 
+                    paddingTop: '12px',
+                    background: '#f5f5f5',
+                    fontWeight: '600',
+                    borderRadius: '0 0 8px 8px',
+                    cursor: 'pointer'
+                  }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="category-name" style={{ fontWeight: '600' }}>
+                      <span className="expand-arrow">{isSectionExpanded ? '▼' : '▶'}</span>
+                      {title.includes('(Essential)') ? 'Total Essential' : 'Total Non-Essential'}
+                    </div>
+                  </div>
+                  <div className="category-amount" style={{ fontWeight: '700', fontSize: '16px' }}>
+                    {formatCurrency(totalAmount, primaryCurrency)}
+                  </div>
+                </div>
               </div>
             </div>
-          )
-        );
+          );
+        };
 
         return (
           <>
@@ -3198,7 +3373,10 @@ function App() {
           <button
             key={key}
             className={`sidebar-tab ${activeTab === key ? 'active' : ''}`}
-            onClick={() => setActiveTab(key)}
+            onClick={() => {
+              setActiveTab(key);
+              setSidebarOpen(false);
+            }}
           >
             {label}
           </button>
@@ -3255,9 +3433,9 @@ function App() {
           justifyContent: 'center',
           alignItems: 'center',
           minHeight: '100vh',
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+          background: '#fafafa'
         }}>
-          <div style={{ color: 'white', fontSize: '20px' }}>Loading...</div>
+          <div style={{ color: '#1a1a1a', fontSize: '20px' }}>Loading...</div>
         </div>
       );
     }
@@ -4002,69 +4180,85 @@ function App() {
           </div>
         )}
 
-        <div className="current-month-grid">
-          <div className="current-month-card">
-            <div className="card-label">
-              Savings progress
-              {includeLoanPayments && monthlyLoanPayment > 0 && (
-                <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666', marginLeft: '8px' }}>
-                  (incl. loans)
-                </span>
-              )}
+        <div className="metrics-bar-charts">
+          {/* Income Bar */}
+          <div className="metric-bar-item">
+            <div className="metric-bar-header">
+              <div className="metric-bar-label">INCOME</div>
+              <div className="metric-bar-value positive">+{formatForPrimary(income)}</div>
             </div>
-            <div className="progress-value">
-              {displaySavings >= 0 ? '+' : ''}{formatForPrimary(displaySavings)}
-              <span className="progress-percentage">
-                ({savingsProgressPercentage.toFixed(0)}% of goal)
-              </span>
-            </div>
-            <div className="progress-bar">
+            <div className="metric-bar-container">
               <div
-                className="progress-bar-fill"
-                style={{ width: `${Math.min(savingsProgressPercentage, 200)}%` }}
+                className="metric-bar-fill positive"
+                style={{ width: '100%' }}
               />
             </div>
           </div>
 
-          <div className="current-month-card">
-            <div className="card-label">
-              Savings rate
-              {includeLoanPayments && monthlyLoanPayment > 0 && (
-                <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666', marginLeft: '8px' }}>
-                  (incl. loans)
+          {/* Expenses Bar - Stacked with Essential/Non-Essential */}
+          <div className="metric-bar-item">
+            <div className="metric-bar-header">
+              <div className="metric-bar-label">EXPENSES</div>
+              <div className="metric-bar-value negative">-{formatForPrimary(totalTrackedExpenses)}</div>
+            </div>
+            <div className="metric-bar-container">
+              <div style={{ display: 'flex', width: `${income > 0 ? (totalTrackedExpenses / income) * 100 : 0}%`, height: '100%' }}>
+                <div
+                  className="metric-bar-fill"
+                  style={{ 
+                    width: `${totalTrackedExpenses > 0 ? (essentialSpend / totalTrackedExpenses) * 100 : 0}%`,
+                    background: 'linear-gradient(90deg, #991b1b, #dc2626)',
+                    borderRadius: essentialSpend === totalTrackedExpenses ? '8px' : '8px 0 0 8px'
+                  }}
+                  title={`Essential: ${formatForPrimary(essentialSpend)}`}
+                />
+                <div
+                  className="metric-bar-fill"
+                  style={{ 
+                    width: `${totalTrackedExpenses > 0 ? (nonEssentialSpend / totalTrackedExpenses) * 100 : 0}%`,
+                    background: 'linear-gradient(90deg, #f97316, #fb923c)',
+                    borderRadius: nonEssentialSpend === totalTrackedExpenses ? '8px' : '0 8px 8px 0'
+                  }}
+                  title={`Non-Essential: ${formatForPrimary(nonEssentialSpend)}`}
+                />
+              </div>
+            </div>
+            <div className="metric-bar-footer" style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #991b1b, #dc2626)', borderRadius: '2px', display: 'inline-block' }}></span>
+                Essential: {formatForPrimary(essentialSpend)} ({essentialShare.toFixed(0)}%)
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #f97316, #fb923c)', borderRadius: '2px', display: 'inline-block' }}></span>
+                Non-Essential: {formatForPrimary(nonEssentialSpend)} ({nonEssentialShare.toFixed(0)}%)
+              </span>
+            </div>
+          </div>
+
+          {/* Savings Bar */}
+          <div className="metric-bar-item">
+            <div className="metric-bar-header">
+              <div className="metric-bar-label">
+                SAVINGS {includeLoanPayments && monthlyLoanPayment > 0 && '(INCL. LOANS)'}
+              </div>
+              <div className="metric-bar-value positive">
+                +{formatForPrimary(displaySavings)}
+                <span className="metric-bar-meta">
+                  {displaySavingsRate.toFixed(1)}%
                 </span>
-              )}
+              </div>
             </div>
-            <div className="card-value" style={{ fontSize: '24px', fontWeight: '600' }}>
-              {displaySavingsRate >= 0 ? '+' : ''}{displaySavingsRate.toFixed(1)}%
+            <div className="metric-bar-container">
+              <div
+                className="metric-bar-fill positive"
+                style={{ width: `${income > 0 ? (displaySavings / income) * 100 : 0}%` }}
+              />
             </div>
-            <div className="card-meta">
-              {((displaySavingsRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of {SAVINGS_RATE_GOAL}% goal
-            </div>
+            <div className="metric-bar-footer">
+              {savingsProgressPercentage.toFixed(0)}% of goal • 
+            {((displaySavingsRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of {SAVINGS_RATE_GOAL}% savings rate
           </div>
-
-          <div className="current-month-card">
-            <div className="card-label">Essential spend</div>
-            <div className="card-value">
-              -{formatForPrimary(essentialSpend)}
-            </div>
-            <div className="card-meta">
-              {(() => {
-                // Use user's customized essential categories list
-                return essentialCategories.join(', ');
-              })()} • {essentialCount} tx • {essentialShare.toFixed(0)}% of spend
-            </div>
-          </div>
-
-          <div className="current-month-card">
-            <div className="card-label">Non-essential spend</div>
-            <div className="card-value">
-              -{formatForPrimary(nonEssentialSpend)}
-            </div>
-            <div className="card-meta">
-              Remaining categories • {nonEssentialCount} tx • {nonEssentialShare.toFixed(0)}% of spend
-            </div>
-          </div>
+        </div>
         </div>
       </div>
     );
