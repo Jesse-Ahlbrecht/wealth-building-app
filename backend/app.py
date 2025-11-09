@@ -1379,7 +1379,7 @@ def update_category():
             override_category=new_category,
             reason='Manual user override'
         )
-        
+
         print(f"✓ Category updated successfully")
         return jsonify({'success': True, 'message': 'Category updated successfully'})
 
@@ -1770,6 +1770,42 @@ def download_statement(file_id):
     except Exception as e:
         print(f"Error downloading statement {file_id}: {e}")
         return jsonify({'error': 'Failed to retrieve file'}), 500
+
+@app.route('/api/essential-categories', methods=['GET'])
+@authenticate_request
+def get_essential_categories():
+    """Get user's essential categories preferences"""
+    try:
+        tenant_id = g.session_claims.get('tenant')
+        if not tenant_id:
+            return jsonify({'error': 'Tenant ID not found'}), 400
+        
+        categories = wealth_db.get_essential_categories(tenant_id)
+        return jsonify({'categories': categories}), 200
+    except Exception as e:
+        print(f"Error fetching essential categories: {e}")
+        return jsonify({'error': 'Failed to fetch essential categories'}), 500
+
+@app.route('/api/essential-categories', methods=['POST'])
+@authenticate_request
+def save_essential_categories():
+    """Save user's essential categories preferences"""
+    try:
+        tenant_id = g.session_claims.get('tenant')
+        if not tenant_id:
+            return jsonify({'error': 'Tenant ID not found'}), 400
+        
+        data = request.get_json()
+        categories = data.get('categories', [])
+        
+        if not isinstance(categories, list):
+            return jsonify({'error': 'Categories must be an array'}), 400
+        
+        wealth_db.save_essential_categories(tenant_id, categories)
+        return jsonify({'success': True, 'categories': categories}), 200
+    except Exception as e:
+        print(f"Error saving essential categories: {e}")
+        return jsonify({'error': 'Failed to save essential categories'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001, use_reloader=True, reloader_type='stat')

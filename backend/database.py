@@ -520,6 +520,94 @@ class WealthDatabase:
 
             return summaries
 
+    def get_essential_categories(self, tenant_id: str) -> List[str]:
+        """Get user's essential categories preferences"""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if table exists and create it if needed
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS essential_categories (
+                        tenant_id TEXT PRIMARY KEY,
+                        categories TEXT NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+                
+                cursor.execute(
+                    "SELECT categories FROM essential_categories WHERE tenant_id = %s",
+                    (tenant_id,)
+                )
+                result = cursor.fetchone()
+                
+                if result:
+                    # Parse JSON array from database
+                    import json
+                    return json.loads(result[0])
+                else:
+                    # Return default essential categories
+                    return ['Rent', 'Insurance', 'Groceries', 'Utilities']
+        except Exception as e:
+            print(f"Error in get_essential_categories: {e}")
+            import traceback
+            traceback.print_exc()
+            # Return default on error
+            return ['Rent', 'Insurance', 'Groceries', 'Utilities']
+
+    def save_essential_categories(self, tenant_id: str, categories: List[str]) -> None:
+        """Save user's essential categories preferences"""
+        try:
+            print(f"Saving essential categories for tenant {tenant_id}: {categories}")
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if table exists and create it if needed
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS essential_categories (
+                        tenant_id TEXT PRIMARY KEY,
+                        categories TEXT NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+                print("Table created/verified")
+                
+                # Convert list to JSON string for storage
+                import json
+                categories_json = json.dumps(categories)
+                print(f"Categories JSON: {categories_json}")
+                
+                # Check if record exists
+                cursor.execute(
+                    "SELECT tenant_id FROM essential_categories WHERE tenant_id = %s",
+                    (tenant_id,)
+                )
+                exists = cursor.fetchone()
+                
+                if exists:
+                    print("Updating existing record")
+                    cursor.execute("""
+                        UPDATE essential_categories 
+                        SET categories = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE tenant_id = %s
+                    """, (categories_json, tenant_id))
+                else:
+                    print("Inserting new record")
+                    cursor.execute("""
+                        INSERT INTO essential_categories (tenant_id, categories, updated_at)
+                        VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    """, (tenant_id, categories_json))
+                
+                conn.commit()
+                print("✓ Essential categories saved successfully")
+        except Exception as e:
+            print(f"Error in save_essential_categories: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
 
 # Global instance
 _wealth_db = None

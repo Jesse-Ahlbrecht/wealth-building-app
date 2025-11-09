@@ -6,10 +6,9 @@ const SAVINGS_GOAL_CHF = 3000; // Monthly savings goal in CHF
 const SAVINGS_GOAL_EUR = 3000 / 0.9355; // Monthly savings goal in EUR (converted from CHF)
 const SAVINGS_RATE_GOAL = 20; // Target savings rate percentage
 const EUR_TO_CHF_RATE = 0.9355; // Exchange rate: 1 EUR = 0.9355 CHF (update as needed)
-const ESSENTIAL_CATEGORIES = ['Rent', 'Insurance', 'Groceries'];
+const DEFAULT_ESSENTIAL_CATEGORIES = ['Rent', 'Insurance', 'Groceries', 'Utilities'];
 const TAB_ITEMS = [
-  { key: 'current-month', label: 'Current Month' },
-  { key: 'details', label: 'Details' },
+  { key: 'monthly-overview', label: 'Monthly Overview' },
   { key: 'charts', label: 'Savings Statistics' },
   { key: 'accounts', label: 'Accounts' },
   { key: 'broker', label: 'Broker' },
@@ -17,12 +16,11 @@ const TAB_ITEMS = [
   { key: 'projection', label: 'Wealth Projection' }
 ];
 const TAB_DESCRIPTIONS = {
-  details: 'Drill into categories, transactions, and internal transfers',
+  'monthly-overview': 'Track current month progress and review historical spending patterns',
   charts: 'Track savings progress and rates over time',
   accounts: 'Review balances across cash and savings accounts',
   broker: 'Inspect performance of your investment accounts',
   loans: 'Stay on top of loan balances and payments',
-  'current-month': 'Track progress against your monthly savings target',
   projection: 'Model future net worth using your current savings rate'
 };
 
@@ -97,7 +95,10 @@ const MonthDetail = ({
   showEssentialSplit,
   essentialCategories,
   categoryEditModal,
-  getTransactionKey
+  getTransactionKey,
+  includeLoanPayments,
+  setShowEssentialCategoriesModal,
+  defaultCurrency
 }) => {
   const hasExpenses = month.expense_categories && Object.keys(month.expense_categories).length > 0;
   const hasIncome = month.income_categories && Object.keys(month.income_categories).length > 0;
@@ -116,11 +117,47 @@ const MonthDetail = ({
     ? Object.entries(month.income_categories).sort(([, a], [, b]) => b.total - a.total)
     : [];
 
-  // Determine primary currency (the one with most activity)
-  const primaryCurrency = getPrimaryCurrencyForMonth(month);
+  // Use user's preferred default currency instead of auto-detecting
+  const primaryCurrency = defaultCurrency;
+
+  // Calculate savings goal based on currency
+  const savingsGoal = (() => {
+    switch (defaultCurrency) {
+      case 'CHF':
+        return SAVINGS_GOAL_CHF;
+      case 'EUR':
+        return SAVINGS_GOAL_EUR;
+      case 'USD':
+        return SAVINGS_GOAL_CHF * 1.1;
+      default:
+        return SAVINGS_GOAL_CHF;
+    }
+  })();
+
+  // Calculate loan payment amount if needed
+  let monthlyLoanPayment = 0;
+  if (includeLoanPayments && month.expense_categories) {
+    // Find loan payment category (case-insensitive)
+    const loanCategory = Object.keys(month.expense_categories).find(cat => 
+      cat.toLowerCase().includes('loan payment')
+    );
+    if (loanCategory) {
+      const loanPaymentData = month.expense_categories[loanCategory];
+      monthlyLoanPayment = loanPaymentData.total || 0;
+    }
+  }
+
+  // Calculate adjusted savings and savings rate
+  const actualSavings = month.savings || 0;
+  const adjustedSavings = actualSavings + monthlyLoanPayment;
+  const adjustedSavingsRate = month.income > 0 ? ((adjustedSavings / month.income) * 100) : 0;
+  const displaySavings = includeLoanPayments ? adjustedSavings : actualSavings;
+  const displaySavingsRate = includeLoanPayments ? adjustedSavingsRate : (month.saving_rate || 0);
 
   const essentialCategorySet = new Set(essentialCategories || []);
-  const essentialCategoryLabel = (essentialCategories && essentialCategories.length > 0)
+  
+  // Build the essential categories label from user's customized list
+  const essentialCategoryLabel = essentialCategories && essentialCategories.length > 0
     ? essentialCategories.join(', ')
     : 'Essential categories';
   let essentialTotal = 0;
@@ -132,6 +169,16 @@ const MonthDetail = ({
     Object.entries(month.expense_categories).forEach(([category, categoryData]) => {
       const categoryTotal = categoryData?.total || 0;
       const categoryTransactions = categoryData?.transactions || [];
+      
+      // Check if this is a loan payment category (case-insensitive, handle singular/plural)
+      const isLoanPayment = category.toLowerCase().includes('loan payment');
+      
+      // If loan payments are counted as savings, exclude them from spending entirely
+      if (includeLoanPayments && isLoanPayment) {
+        return; // Skip this category
+      }
+      
+      // Check if category is essential based on user's customization
       if (essentialCategorySet.has(category)) {
         essentialTotal += categoryTotal;
         essentialTransactionCount += categoryTransactions.length;
@@ -151,14 +198,19 @@ const MonthDetail = ({
       <div className="month-header">
         <h2 className="month-title">{formatMonth(month.month)}</h2>
         <div className="saving-info">
-          <div className={`saving-amount ${month.savings >= 0 ? 'positive' : 'negative'}`}>
-            {month.savings >= 0 ? '+' : ''}{formatCurrency(month.savings, primaryCurrency)}
+          <div className={`saving-amount ${displaySavings >= 0 ? 'positive' : 'negative'}`}>
+            {displaySavings >= 0 ? '+' : ''}{formatCurrency(displaySavings, primaryCurrency)}
+            {includeLoanPayments && monthlyLoanPayment > 0 && (
+              <span style={{ fontSize: '11px', color: '#666', marginLeft: '4px' }}>
+                (incl. loans)
+              </span>
+            )}
           </div>
-          <div className={`saving-rate-small ${month.saving_rate >= 0 ? 'positive' : 'negative'}`}>
-            {month.saving_rate >= 0 ? '+' : ''}{month.saving_rate.toFixed(1)}%
+          <div className={`saving-rate-small ${displaySavingsRate >= 0 ? 'positive' : 'negative'}`}>
+            {displaySavingsRate >= 0 ? '+' : ''}{displaySavingsRate.toFixed(1)}%
           </div>
-          <div className={`goal-progress ${month.savings >= SAVINGS_GOAL_EUR ? 'goal-achieved' : 'goal-pending'}`}>
-            {((month.savings / SAVINGS_GOAL_EUR) * 100).toFixed(0)}% of goal
+          <div className={`goal-progress ${displaySavings >= savingsGoal ? 'goal-achieved' : 'goal-pending'}`}>
+            {((displaySavings / savingsGoal) * 100).toFixed(0)}% of goal
           </div>
         </div>
       </div>
@@ -179,9 +231,16 @@ const MonthDetail = ({
         </div>
 
         <div className="stat-card">
-          <div className="stat-label">Savings</div>
+          <div className="stat-label">
+            Savings
+            {includeLoanPayments && monthlyLoanPayment > 0 && (
+              <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666', marginLeft: '8px' }}>
+                (incl. loans)
+              </span>
+            )}
+          </div>
           <div className="stat-value">
-            {month.savings >= 0 ? '+' : ''}{formatCurrency(month.savings, primaryCurrency)}
+            {displaySavings >= 0 ? '+' : ''}{formatCurrency(displaySavings, primaryCurrency)}
           </div>
         </div>
 
@@ -317,7 +376,7 @@ const MonthDetail = ({
                                   disabled={isLocked}
                                   title="Change category"
                                 >
-                                  <span className="edit-icon">✏️</span>
+                                  <i className="fa-solid fa-pen-to-square"></i>
                                 </button>
                               </div>
                               <div className="transaction-amount transaction-amount-income">
@@ -336,9 +395,18 @@ const MonthDetail = ({
         </div>
       )}
 
-      {sortedExpenseCategories.length > 0 && (
+      {sortedExpenseCategories.length > 0 && !showEssentialSplit && (
         <div className="categories-section">
-          <h3 className="categories-title">Spending by Category</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+            <h3 className="categories-title" style={{ margin: 0 }}>Spending by Category</h3>
+            <button
+              className="edit-categories-btn"
+              onClick={() => setShowEssentialCategoriesModal(true)}
+              title="Customize essential categories"
+            >
+              <i className="fa-solid fa-pen-to-square"></i> Customize Essential
+            </button>
+          </div>
           <div className="category-list">
             {sortedExpenseCategories.map(([category, categoryData]) => {
               const categoryKey = `${month.month}-${category}`;
@@ -432,7 +500,7 @@ const MonthDetail = ({
                                   disabled={isLocked}
                                   title="Change category"
                                 >
-                                  <span className="edit-icon">✏️</span>
+                                  <i className="fa-solid fa-pen-to-square"></i>
                                 </button>
                               </div>
                               <div className="transaction-amount">
@@ -450,6 +518,158 @@ const MonthDetail = ({
           </div>
         </div>
       )}
+
+      {showEssentialSplit && sortedExpenseCategories.length > 0 && (() => {
+        const essentialCats = sortedExpenseCategories.filter(([category]) => {
+          const isLoanPayment = category.toLowerCase().includes('loan payment');
+          // If loan payments are counted as savings, exclude them entirely
+          if (includeLoanPayments && isLoanPayment) return false;
+          // Check if category is in the essential categories list
+          return essentialCategories.includes(category);
+        });
+        const nonEssentialCats = sortedExpenseCategories.filter(([category]) => {
+          const isLoanPayment = category.toLowerCase().includes('loan payment');
+          // If loan payments are counted as savings, exclude them entirely
+          if (includeLoanPayments && isLoanPayment) return false;
+          // Otherwise, everything that's not essential or loan payment goes here
+          return !essentialCategories.includes(category) && !isLoanPayment;
+        });
+
+        const renderCategorySection = (categories, title, barClassName) => (
+          categories.length > 0 && (
+            <div className="categories-section">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <h3 className="categories-title" style={{ margin: 0 }}>{title}</h3>
+                {title.includes('Essential') && (
+                  <button
+                    className="edit-categories-btn"
+                    onClick={() => setShowEssentialCategoriesModal(true)}
+                    title="Customize essential categories"
+                  >
+                    <i className="fa-solid fa-pen-to-square"></i> Customize
+                  </button>
+                )}
+              </div>
+              <div className="category-list">
+                {categories.map(([category, categoryData]) => {
+                  const categoryKey = `${month.month}-${category}`;
+                  const isExpanded = expandedCategories[categoryKey];
+
+                  return (
+                    <div key={category}>
+                      <div
+                        className="category-item"
+                        onClick={() => toggleCategory(month.month, category)}
+                        style={{ cursor: 'pointer' }}
+                        data-category-key={categoryKey}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div className="category-name">
+                            <span className="expand-arrow">{isExpanded ? '▼' : '▶'}</span>
+                            {category}
+                            <span className="transaction-count">
+                              ({categoryData.transactions.length})
+                            </span>
+                          </div>
+                          <div className="category-bar">
+                            <div
+                              className={`category-bar-fill ${barClassName}`}
+                              style={{ width: `${(categoryData.total / maxExpenseAmount) * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div className="category-amount">
+                          {formatCurrency(categoryData.total, primaryCurrency)}
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="transaction-list-wrapper">
+                          <div className="transaction-list-header">
+                            <button
+                              className="sort-toggle"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSort(month.month, category);
+                              }}
+                            >
+                              Sort by: {(categorySorts[categoryKey] || 'amount') === 'amount' ? 'Amount' : 'Date'}
+                            </button>
+                          </div>
+                          <div className="transaction-list">
+                            {getSortedTransactions(categoryData.transactions, month.month, category).map((transaction) => {
+                              const transactionKey = getTransactionKey(transaction);
+                              const isLocked = pendingCategoryChange?.key === transactionKey;
+                              const isPending = isLocked && pendingCategoryChange?.stage === 'vanishing';
+                              const transactionClassList = ['transaction-item'];
+                              if (isLocked && pendingCategoryChange?.stage === 'pending') {
+                                transactionClassList.push('transaction-pending');
+                              }
+                              if (isPending) {
+                                transactionClassList.push('transaction-flip-out');
+                              }
+                              const transactionClassName = transactionClassList.join(' ');
+
+                              return (
+                                <div
+                                  key={transactionKey}
+                                  className={transactionClassName}
+                                  data-transaction-key={transactionKey}
+                                >
+                                  <div className="transaction-date">
+                                    {formatDate(transaction.date)}
+                                    <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
+                                      {transaction.account}
+                                    </span>
+                                  </div>
+                                  <div className="transaction-details">
+                                    <div className="transaction-recipient">
+                                      {transaction.recipient}
+                                    </div>
+                                    {transaction.description && (
+                                      <div className="transaction-description">
+                                        {transaction.description}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="transaction-actions">
+                                    <button
+                                      className={`category-edit-btn ${
+                                        categoryEditModal && 
+                                        getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
+                                        ? 'active' : ''
+                                      }`}
+                                      onClick={() => handleCategoryEdit(transaction, month.month, category)}
+                                      disabled={isLocked}
+                                      title="Change category"
+                                    >
+                                      <i className="fa-solid fa-pen-to-square"></i>
+                                    </button>
+                                  </div>
+                                  <div className="transaction-amount">
+                                    -{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )
+        );
+
+        return (
+          <>
+            {renderCategorySection(essentialCats, 'Spending by Category (Essential)', 'bar-essential')}
+            {renderCategorySection(nonEssentialCats, 'Spending by Category (Non-Essential)', 'bar-non-essential')}
+          </>
+        );
+      })()}
 
       {month.internal_transfers && (
         <div className="categories-section">
@@ -823,42 +1043,53 @@ const LoginPage = ({ onLogin }) => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: '#ffffff',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       padding: '20px'
     }}>
       <div style={{
-        background: 'white',
-        padding: '2.5rem',
-        borderRadius: '12px',
-        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+        background: '#ffffff',
+        padding: '3rem',
+        borderRadius: '0',
+        border: '1px solid #e5e7eb',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
         width: '100%',
-        maxWidth: '400px'
+        maxWidth: '440px'
       }}>
-        <h1 style={{
-          fontSize: '2rem',
-          fontWeight: 'bold',
-          marginBottom: '0.5rem',
-          color: '#1a202c',
-          textAlign: 'center'
-        }}>Wealth Manager</h1>
-        <p style={{
-          color: '#718096',
-          textAlign: 'center',
+        <div style={{
+          borderBottom: '2px solid #1a1a1a',
+          paddingBottom: '1.5rem',
           marginBottom: '2rem'
-        }}>{getModeSubtitle()}</p>
+        }}>
+          <h1 style={{
+            fontSize: '2rem',
+            fontWeight: '600',
+            marginBottom: '0.5rem',
+            color: '#1a1a1a',
+            textAlign: 'center',
+            letterSpacing: '-0.02em'
+          }}>Wealth Manager</h1>
+          <p style={{
+            color: '#64748b',
+            textAlign: 'center',
+            marginBottom: '0',
+            fontSize: '0.95rem'
+          }}>{getModeSubtitle()}</p>
+        </div>
 
         {error && (
           <div
             role="alert"
             style={{
-              background: '#FED7D7',
-              color: '#822727',
-              padding: '0.75rem',
-              borderRadius: '6px',
-              border: '1px solid #FEB2B2',
-              marginBottom: '1rem',
-              fontSize: '0.875rem'
+              background: '#fafafa',
+              color: '#1a1a1a',
+              padding: '1rem',
+              borderRadius: '0',
+              border: '2px solid #1a1a1a',
+              borderLeft: '4px solid #1a1a1a',
+              marginBottom: '1.5rem',
+              fontSize: '0.875rem',
+              fontWeight: '500'
             }}
           >
             {error}
@@ -869,13 +1100,15 @@ const LoginPage = ({ onLogin }) => {
           <div
             role="status"
             style={{
-              background: '#C6F6D5',
-              color: '#22543D',
-              padding: '0.75rem',
-              borderRadius: '6px',
-              border: '1px solid #9AE6B4',
-              marginBottom: '1rem',
-              fontSize: '0.875rem'
+              background: '#fafafa',
+              color: '#1a1a1a',
+              padding: '1rem',
+              borderRadius: '0',
+              border: '2px solid #1a1a1a',
+              borderLeft: '4px solid #1a1a1a',
+              marginBottom: '1.5rem',
+              fontSize: '0.875rem',
+              fontWeight: '500'
             }}
           >
             {success}
@@ -884,13 +1117,15 @@ const LoginPage = ({ onLogin }) => {
 
         <form onSubmit={handleSubmit}>
           {mode === 'register' && (
-            <div style={{ marginBottom: '1rem' }}>
+            <div style={{ marginBottom: '1.5rem' }}>
               <label style={{
                 display: 'block',
-                fontSize: '0.875rem',
-                fontWeight: '500',
-                color: '#4a5568',
-                marginBottom: '0.5rem'
+                fontSize: '0.8125rem',
+                fontWeight: '600',
+                color: '#1a1a1a',
+                marginBottom: '0.5rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em'
               }}>Full Name</label>
               <input
                 type="text"
@@ -898,29 +1133,39 @@ const LoginPage = ({ onLogin }) => {
                 onChange={(e) => setName(e.target.value)}
                 style={{
                   width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '6px',
+                  padding: '0.875rem',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '0',
                   fontSize: '1rem',
                   outline: 'none',
-                  transition: 'border-color 0.2s',
-                  boxSizing: 'border-box'
+                  transition: 'all 0.2s',
+                  boxSizing: 'border-box',
+                  background: '#ffffff',
+                  color: '#1a1a1a'
                 }}
-                onFocus={(e) => e.target.style.borderColor = '#667eea'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#1a1a1a';
+                  e.target.style.boxShadow = '0 0 0 1px #1a1a1a';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = '#d1d5db';
+                  e.target.style.boxShadow = 'none';
+                }}
                 required
                 disabled={loading}
               />
             </div>
           )}
 
-          <div style={{ marginBottom: '1rem' }}>
+          <div style={{ marginBottom: '1.5rem' }}>
             <label style={{
               display: 'block',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              color: '#4a5568',
-              marginBottom: '0.5rem'
+              fontSize: '0.8125rem',
+              fontWeight: '600',
+              color: '#1a1a1a',
+              marginBottom: '0.5rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em'
             }}>Email</label>
             <input
               type="email"
@@ -928,29 +1173,39 @@ const LoginPage = ({ onLogin }) => {
               onChange={(e) => setEmail(e.target.value)}
               style={{
                 width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #e2e8f0',
-                borderRadius: '6px',
+                padding: '0.875rem',
+                border: '1px solid #d1d5db',
+                borderRadius: '0',
                 fontSize: '1rem',
                 outline: 'none',
-                transition: 'border-color 0.2s',
-                boxSizing: 'border-box'
+                transition: 'all 0.2s',
+                boxSizing: 'border-box',
+                background: '#ffffff',
+                color: '#1a1a1a'
               }}
-              onFocus={(e) => e.target.style.borderColor = '#667eea'}
-              onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#1a1a1a';
+                e.target.style.boxShadow = '0 0 0 1px #1a1a1a';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = '#d1d5db';
+                e.target.style.boxShadow = 'none';
+              }}
               required
               disabled={loading}
             />
           </div>
 
           {mode !== 'reset' && (
-            <div style={{ marginBottom: mode === 'login' ? '0.5rem' : '1rem' }}>
+            <div style={{ marginBottom: mode === 'login' ? '0.75rem' : '1.5rem' }}>
               <label style={{
                 display: 'block',
-                fontSize: '0.875rem',
-                fontWeight: '500',
-                color: '#4a5568',
-                marginBottom: '0.5rem'
+                fontSize: '0.8125rem',
+                fontWeight: '600',
+                color: '#1a1a1a',
+                marginBottom: '0.5rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em'
               }}>Password</label>
               <input
                 type="password"
@@ -958,16 +1213,24 @@ const LoginPage = ({ onLogin }) => {
                 onChange={(e) => setPassword(e.target.value)}
                 style={{
                   width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '6px',
+                  padding: '0.875rem',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '0',
                   fontSize: '1rem',
                   outline: 'none',
-                  transition: 'border-color 0.2s',
-                  boxSizing: 'border-box'
+                  transition: 'all 0.2s',
+                  boxSizing: 'border-box',
+                  background: '#ffffff',
+                  color: '#1a1a1a'
                 }}
-                onFocus={(e) => e.target.style.borderColor = '#667eea'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#1a1a1a';
+                  e.target.style.boxShadow = '0 0 0 1px #1a1a1a';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = '#d1d5db';
+                  e.target.style.boxShadow = 'none';
+                }}
                 required
                 disabled={loading}
               />
@@ -975,13 +1238,15 @@ const LoginPage = ({ onLogin }) => {
           )}
 
           {mode === 'register' && (
-            <div style={{ marginBottom: '1rem' }}>
+            <div style={{ marginBottom: '1.5rem' }}>
               <label style={{
                 display: 'block',
-                fontSize: '0.875rem',
-                fontWeight: '500',
-                color: '#4a5568',
-                marginBottom: '0.5rem'
+                fontSize: '0.8125rem',
+                fontWeight: '600',
+                color: '#1a1a1a',
+                marginBottom: '0.5rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em'
               }}>Confirm Password</label>
               <input
                 type="password"
@@ -989,16 +1254,24 @@ const LoginPage = ({ onLogin }) => {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 style={{
                   width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '6px',
+                  padding: '0.875rem',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '0',
                   fontSize: '1rem',
                   outline: 'none',
-                  transition: 'border-color 0.2s',
-                  boxSizing: 'border-box'
+                  transition: 'all 0.2s',
+                  boxSizing: 'border-box',
+                  background: '#ffffff',
+                  color: '#1a1a1a'
                 }}
-                onFocus={(e) => e.target.style.borderColor = '#667eea'}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#1a1a1a';
+                  e.target.style.boxShadow = '0 0 0 1px #1a1a1a';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = '#d1d5db';
+                  e.target.style.boxShadow = 'none';
+                }}
                 required
                 disabled={loading}
               />
@@ -1006,20 +1279,28 @@ const LoginPage = ({ onLogin }) => {
           )}
 
           {mode === 'login' && (
-            <div style={{ textAlign: 'right', marginBottom: '1rem' }}>
+            <div style={{ textAlign: 'right', marginBottom: '1.5rem' }}>
               <button
                 type="button"
                 onClick={() => { setMode('reset'); setError(''); setSuccess(''); }}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#667eea',
-                  fontSize: '0.875rem',
+                  color: '#64748b',
+                  fontSize: '0.8125rem',
                   cursor: 'pointer',
-                  textDecoration: 'none'
+                  textDecoration: 'none',
+                  fontWeight: '500',
+                  padding: '0'
                 }}
-                onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
-                onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                onMouseEnter={(e) => {
+                  e.target.style.color = '#1a1a1a';
+                  e.target.style.textDecoration = 'underline';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.color = '#64748b';
+                  e.target.style.textDecoration = 'none';
+                }}
               >
                 Forgot password?
               </button>
@@ -1031,20 +1312,22 @@ const LoginPage = ({ onLogin }) => {
             disabled={loading}
             style={{
               width: '100%',
-              background: loading ? '#a0aec0' : '#667eea',
-              color: 'white',
-              padding: '0.75rem',
-              borderRadius: '6px',
-              fontSize: '1rem',
+              background: loading ? '#d1d5db' : '#1a1a1a',
+              color: loading ? '#64748b' : '#ffffff',
+              padding: '1rem',
+              borderRadius: '0',
+              fontSize: '0.875rem',
               fontWeight: '600',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
               border: 'none',
               cursor: loading ? 'not-allowed' : 'pointer',
-              transition: 'background 0.2s',
-              marginBottom: '1rem',
+              transition: 'all 0.2s',
+              marginBottom: '1.5rem',
               boxSizing: 'border-box'
             }}
-            onMouseEnter={(e) => !loading && (e.target.style.background = '#5568d3')}
-            onMouseLeave={(e) => !loading && (e.target.style.background = '#667eea')}
+            onMouseEnter={(e) => !loading && (e.target.style.background = '#000000')}
+            onMouseLeave={(e) => !loading && (e.target.style.background = '#1a1a1a')}
           >
             {loading ? 
               (mode === 'register' ? 'Creating account...' : mode === 'reset' ? 'Sending...' : 'Signing in...') : 
@@ -1052,10 +1335,14 @@ const LoginPage = ({ onLogin }) => {
           </button>
         </form>
 
-        <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+        <div style={{ 
+          textAlign: 'center',
+          paddingTop: '1.5rem',
+          borderTop: '1px solid #e5e7eb'
+        }}>
           {mode === 'login' && (
             <>
-              <p style={{ fontSize: '0.875rem', color: '#718096', marginBottom: '0.5rem' }}>
+              <p style={{ fontSize: '0.8125rem', color: '#64748b', marginBottom: '0.75rem' }}>
                 Don't have an account?{' '}
                 <button
                   type="button"
@@ -1063,37 +1350,46 @@ const LoginPage = ({ onLogin }) => {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#667eea',
+                    color: '#1a1a1a',
                     cursor: 'pointer',
-                    textDecoration: 'none',
-                    fontWeight: '600'
+                    textDecoration: 'underline',
+                    fontWeight: '600',
+                    padding: '0'
                   }}
-                  onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
-                  onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                  onMouseEnter={(e) => e.target.style.opacity = '0.7'}
+                  onMouseLeave={(e) => e.target.style.opacity = '1'}
                 >
                   Sign up
                 </button>
               </p>
-              <p style={{ fontSize: '0.875rem', color: '#718096' }}>
-                Demo: <strong>demo@demo / demo</strong>
+              <p style={{ 
+                fontSize: '0.75rem',
+                color: '#94a3b8',
+                fontFamily: 'monospace',
+                background: '#fafafa',
+                padding: '0.5rem',
+                border: '1px solid #e5e7eb'
+              }}>
+                Demo: <strong style={{color: '#1a1a1a'}}>demo@demo / demo</strong>
               </p>
             </>
           )}
           {(mode === 'register' || mode === 'reset') && (
-            <p style={{ fontSize: '0.875rem', color: '#718096' }}>
+            <p style={{ fontSize: '0.8125rem', color: '#64748b' }}>
               <button
                 type="button"
                 onClick={() => { setMode('login'); setError(''); setSuccess(''); }}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#667eea',
+                  color: '#1a1a1a',
                   cursor: 'pointer',
-                  textDecoration: 'none',
-                  fontWeight: '600'
+                  textDecoration: 'underline',
+                  fontWeight: '600',
+                  padding: '0'
                 }}
-                onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
-                onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                onMouseEnter={(e) => e.target.style.opacity = '0.7'}
+                onMouseLeave={(e) => e.target.style.opacity = '1'}
               >
                 ← Back to login
               </button>
@@ -2184,18 +2480,26 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [forceShowApp, setForceShowApp] = useState(false); // Force show app after upload
   const [expandedCategories, setExpandedCategories] = useState({});
-  const [activeTab, setActiveTab] = useState('current-month');
+  const [activeTab, setActiveTab] = useState('monthly-overview');
   const [categorySorts, setCategorySorts] = useState({});
   const [chartView, setChartView] = useState('absolute'); // 'absolute' or 'relative'
   const [timeRange, setTimeRange] = useState('all'); // '3m', '6m', '1y', 'all'
   const [selectedMonth, setSelectedMonth] = useState(null); // For drilldown modal
-  const [includeLoanPayments, setIncludeLoanPayments] = useState(false); // Include loan payments in savings calculation
+  const [includeLoanPayments, setIncludeLoanPayments] = useState(true); // Include loan payments in savings calculation
   const [projectionData, setProjectionData] = useState(null); // Wealth projection data
   const [categoryEditModal, setCategoryEditModal] = useState(null); // Category edit modal state
   const [pendingCategoryChange, setPendingCategoryChange] = useState(null); // Track card animation
   const [isCategoryModalClosing, setIsCategoryModalClosing] = useState(false);
-  const [showEssentialSplit, setShowEssentialSplit] = useState(false);
+  const [showEssentialSplit, setShowEssentialSplit] = useState(true);
   const [segmentDetail, setSegmentDetail] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [defaultCurrency, setDefaultCurrency] = useState(() => {
+    return localStorage.getItem('defaultCurrency') || 'CHF';
+  });
+  const [essentialCategories, setEssentialCategories] = useState(DEFAULT_ESSENTIAL_CATEGORIES);
+  const [showEssentialCategoriesModal, setShowEssentialCategoriesModal] = useState(false);
+  const [allCategories, setAllCategories] = useState([]);
+  const [categoriesVersion, setCategoriesVersion] = useState(0);
   
   console.log('🎬 App state defined, about to define refs...');
 
@@ -2429,6 +2733,67 @@ function App() {
     }
   }, [sessionToken]);
 
+  // Fetch essential categories
+  const fetchEssentialCategories = useCallback(async () => {
+    if (!sessionToken) return;
+    
+    try {
+      const response = await fetch('http://localhost:5001/api/essential-categories', {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.categories && Array.isArray(data.categories)) {
+          setEssentialCategories(data.categories);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching essential categories:', error);
+    }
+  }, [sessionToken]);
+
+  // Save essential categories
+  const saveEssentialCategories = async (categories) => {
+    if (!sessionToken) return;
+    
+    try {
+      const response = await fetch('http://localhost:5001/api/essential-categories', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ categories })
+      });
+      
+      if (response.ok) {
+        setEssentialCategories(categories);
+        setCategoriesVersion(prev => prev + 1); // Force re-render
+      } else {
+        console.error('Failed to save essential categories');
+      }
+    } catch (error) {
+      console.error('Error saving essential categories:', error);
+    }
+  };
+
+  // Extract all unique categories from summary
+  useEffect(() => {
+    if (summary.length > 0) {
+      const categorySet = new Set();
+      summary.forEach(month => {
+        if (month.expense_categories) {
+          Object.keys(month.expense_categories).forEach(cat => categorySet.add(cat));
+        }
+      });
+      setAllCategories(Array.from(categorySet).sort());
+    }
+  }, [summary]);
+
   // Fetch data when authenticated and token is available
   useEffect(() => {
     if (isAuthenticated && sessionToken) {
@@ -2438,11 +2803,12 @@ function App() {
       fetchBroker();
       fetchLoans();
       fetchProjection();
+      fetchEssentialCategories();
     } else if (isAuthenticated && !sessionToken) {
       // If authenticated but no token, set loading to false to show error state
       setLoading(false);
     }
-  }, [isAuthenticated, sessionToken, fetchSummary, fetchAccounts, fetchBroker, fetchLoans, fetchProjection]);
+  }, [isAuthenticated, sessionToken, fetchSummary, fetchAccounts, fetchBroker, fetchLoans, fetchProjection, fetchEssentialCategories]);
 
   useEffect(() => {
     setSegmentDetail(null);
@@ -2662,6 +3028,12 @@ function App() {
     window.location.href = window.location.origin + '?logout=' + Date.now();
   };
 
+  const handleCurrencyChange = (currency) => {
+    setDefaultCurrency(currency);
+    localStorage.setItem('defaultCurrency', currency);
+    console.log(`💱 Default currency changed to ${currency}`);
+  };
+
   const handleCategoryUpdate = async (newCategory) => {
     if (!categoryEditModal) return;
 
@@ -2786,11 +3158,26 @@ function App() {
     };
   }, []);
 
-  const formatCurrency = (amount, currency = 'EUR') => {
+  const formatCurrency = (amount, currency) => {
+    // Use provided currency, otherwise fall back to user's default currency
+    const displayCurrency = currency || defaultCurrency;
     return new Intl.NumberFormat('de-DE', {
       style: 'currency',
-      currency: currency,
+      currency: displayCurrency,
     }).format(amount);
+  };
+
+  const getSavingsGoal = () => {
+    switch (defaultCurrency) {
+      case 'CHF':
+        return SAVINGS_GOAL_CHF;
+      case 'EUR':
+        return SAVINGS_GOAL_EUR;
+      case 'USD':
+        return SAVINGS_GOAL_CHF * 1.1; // Approximate USD conversion
+      default:
+        return SAVINGS_GOAL_CHF;
+    }
   };
 
   const formatMonth = (monthStr) => {
@@ -3002,6 +3389,107 @@ function App() {
     };
   }) : [];
 
+  const renderMonthlyOverviewTab = () => {
+    if (!summary.length) {
+      return (
+        <div className="current-month-container">
+          <div className="loading">No transaction data available.</div>
+        </div>
+      );
+    }
+
+    // Get latest month (current month) and all previous months
+    const sortedMonths = [...summary].sort((a, b) => new Date(b.month) - new Date(a.month));
+    const latestMonth = sortedMonths[0];
+    const previousMonths = sortedMonths.slice(1);
+
+    if (!latestMonth) {
+      return (
+        <div className="current-month-container">
+          <div className="loading">Unable to determine the current month summary.</div>
+        </div>
+      );
+    }
+
+    // Render current month using the existing logic
+    const currentMonthContent = renderCurrentMonthTab();
+
+    return (
+      <>
+        {/* Controls at the top */}
+        <div className="details-controls">
+          <div className="chart-toggle">
+            <button
+              className={`chart-toggle-btn ${showEssentialSplit ? '' : 'active'}`}
+              onClick={() => setShowEssentialSplit(false)}
+            >
+              All Categories
+            </button>
+            <button
+              className={`chart-toggle-btn ${showEssentialSplit ? 'active' : ''}`}
+              onClick={() => setShowEssentialSplit(true)}
+            >
+              Essentials Split
+            </button>
+          </div>
+          <div className="loan-payment-toggle">
+            <button
+              className={`chart-toggle-btn ${includeLoanPayments ? 'active' : ''}`}
+              onClick={() => setIncludeLoanPayments(!includeLoanPayments)}
+              title="Include monthly loan payments in savings calculation"
+            >
+              Include loans in saving
+            </button>
+          </div>
+        </div>
+
+        {/* Current Month - shown prominently at top */}
+        {currentMonthContent}
+
+        {/* Previous Months - details style */}
+        {previousMonths.length > 0 && (
+          <>
+            <div style={{ 
+              padding: '2rem 0 1rem',
+              borderTop: '2px solid #e5e7eb',
+              marginTop: '2rem'
+            }}>
+              <h3 style={{ 
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1a1a1a',
+                marginBottom: '0.5rem'
+              }}>Previous Months</h3>
+            </div>
+      {previousMonths.map((month) => (
+        <MonthDetail
+          key={`${month.month}-${categoriesVersion}`}
+          month={month}
+          expandedCategories={expandedCategories}
+          toggleCategory={toggleCategory}
+          categorySorts={categorySorts}
+          toggleSort={toggleSort}
+          getSortedTransactions={getSortedTransactions}
+          formatCurrency={formatCurrency}
+          formatMonth={formatMonth}
+          formatDate={formatDate}
+          handleCategoryEdit={handleCategoryEdit}
+          pendingCategoryChange={pendingCategoryChange}
+          showEssentialSplit={showEssentialSplit}
+          essentialCategories={essentialCategories}
+          categoryEditModal={categoryEditModal}
+          includeLoanPayments={includeLoanPayments}
+          setShowEssentialCategoriesModal={setShowEssentialCategoriesModal}
+          defaultCurrency={defaultCurrency}
+          getTransactionKey={getTransactionKey}
+        />
+      ))}
+          </>
+        )}
+      </>
+    );
+  };
+
   const renderDetailsTab = () => (
     <>
       <div className="details-controls">
@@ -3035,8 +3523,11 @@ function App() {
           handleCategoryEdit={handleCategoryEdit}
           pendingCategoryChange={pendingCategoryChange}
           showEssentialSplit={showEssentialSplit}
-          essentialCategories={ESSENTIAL_CATEGORIES}
+          essentialCategories={essentialCategories}
           categoryEditModal={categoryEditModal}
+          includeLoanPayments={includeLoanPayments}
+          setShowEssentialCategoriesModal={setShowEssentialCategoriesModal}
+          defaultCurrency={defaultCurrency}
           getTransactionKey={getTransactionKey}
         />
       ))}
@@ -3065,10 +3556,10 @@ function App() {
       );
     }
 
-    const primaryCurrency = getPrimaryCurrencyForMonth(latestMonth);
+    const primaryCurrency = defaultCurrency;
     const formatForPrimary = (amount) => formatCurrency(convertAmountToCurrency(amount, primaryCurrency), primaryCurrency);
     const monthLabel = formatMonth(latestMonth.month);
-    const targetSavings = SAVINGS_GOAL_EUR;
+    const targetSavings = getSavingsGoal();
     const income = latestMonth.income || 0;
     const essentialTransactions = [];
     const nonEssentialTransactions = [];
@@ -3083,7 +3574,17 @@ function App() {
       const total = categoryData?.total || 0;
       const count = categoryData?.transactions?.length || 0;
       const transactions = categoryData?.transactions || [];
-      if (ESSENTIAL_CATEGORIES.includes(category)) {
+      
+      // Check if this is a loan payment category (case-insensitive, handle singular/plural)
+      const isLoanPayment = category.toLowerCase().includes('loan payment');
+      
+      // If loan payments are counted as savings, exclude them from spending entirely
+      if (includeLoanPayments && isLoanPayment) {
+        return; // Skip this category
+      }
+      
+      // Check if category is essential based on user's customization
+      if (essentialCategories.includes(category)) {
         essentialSpend += total;
         essentialCount += count;
         transactions.forEach((tx) => {
@@ -3109,13 +3610,33 @@ function App() {
     const totalTrackedExpenses = essentialSpend + nonEssentialSpend;
     const spendableBudget = Math.max(income - targetSavings, 0);
     const overspendAmount = Math.max(totalTrackedExpenses - spendableBudget, 0);
+    
+    // Calculate loan payment amount if needed
+    let monthlyLoanPayment = 0;
+    if (includeLoanPayments && latestMonth.expense_categories) {
+      // Find loan payment category (case-insensitive)
+      const loanCategory = Object.keys(latestMonth.expense_categories).find(cat => 
+        cat.toLowerCase().includes('loan payment')
+      );
+      if (loanCategory) {
+        const loanPaymentData = latestMonth.expense_categories[loanCategory];
+        monthlyLoanPayment = loanPaymentData.total || 0;
+      }
+    }
+    
+    // Calculate adjusted savings and savings rate
     const actualSavings = Math.max(latestMonth.savings, 0);
+    const adjustedSavings = actualSavings + monthlyLoanPayment;
+    const adjustedSavingsRate = income > 0 ? ((adjustedSavings / income) * 100) : 0;
+    const displaySavings = includeLoanPayments ? adjustedSavings : actualSavings;
+    const displaySavingsRate = includeLoanPayments ? adjustedSavingsRate : latestMonth.saving_rate;
+    
     const totalPlanned = totalTrackedExpenses + targetSavings;
     const isOverBudget = totalPlanned > income + 0.01;
     // Savings gap calculation (for future use)
     // const savingsGap = Math.max(targetSavings - actualSavings, 0);
     const savingsProgressPercentage = targetSavings > 0
-      ? Math.min(Math.max((actualSavings / targetSavings) * 100, 0), 200)
+      ? Math.min(Math.max((displaySavings / targetSavings) * 100, 0), 200)
       : 0;
     const unusedCapital = Math.max(income - totalPlanned, 0);
     const hasUnusedCapital = unusedCapital > 0.01;
@@ -3160,10 +3681,10 @@ function App() {
           message: nonEssentialTransactions.length ? '' : 'Add more categorised non-essential expenses to see them here.'
         });
       } else if (segment === 'savings') {
-        const gap = Math.max(targetSavings - actualSavings, 0);
+        const gap = Math.max(targetSavings - displaySavings, 0);
         const meta = gap > 0
-          ? `Target ${formatForPrimary(targetSavings)} · saved ${formatForPrimary(actualSavings)} · gap ${formatForPrimary(gap)}`
-          : `Target ${formatForPrimary(targetSavings)} · saved ${formatForPrimary(actualSavings)}`;
+          ? `Target ${formatForPrimary(targetSavings)} · saved ${formatForPrimary(displaySavings)}${includeLoanPayments && monthlyLoanPayment > 0 ? ` (incl. ${formatForPrimary(monthlyLoanPayment)} loans)` : ''} · gap ${formatForPrimary(gap)}`
+          : `Target ${formatForPrimary(targetSavings)} · saved ${formatForPrimary(displaySavings)}${includeLoanPayments && monthlyLoanPayment > 0 ? ` (incl. ${formatForPrimary(monthlyLoanPayment)} loans)` : ''}`;
         setSegmentDetail({
           month: latestMonth.month,
           segment,
@@ -3258,24 +3779,24 @@ function App() {
                 />
                 <defs>
                   <linearGradient id="segmentEssential" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#2563eb" />
-                    <stop offset="100%" stopColor="#3b82f6" />
+                    <stop offset="0%" stopColor="#1a1a1a" />
+                    <stop offset="100%" stopColor="#2d2d2d" />
                   </linearGradient>
                   <linearGradient id="segmentNonEssential" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#f97316" />
-                    <stop offset="100%" stopColor="#fb923c" />
+                    <stop offset="0%" stopColor="#525252" />
+                    <stop offset="100%" stopColor="#6b6b6b" />
                   </linearGradient>
                   <linearGradient id="segmentSavings" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#2db14c" />
-                    <stop offset="100%" stopColor="#3ad364" />
+                    <stop offset="0%" stopColor="#9ca3af" />
+                    <stop offset="100%" stopColor="#b8bfc7" />
                   </linearGradient>
                   <linearGradient id="segmentSavingsOver" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#e0453a" />
-                    <stop offset="100%" stopColor="#f0624f" />
+                    <stop offset="0%" stopColor="#000000" />
+                    <stop offset="100%" stopColor="#1a1a1a" />
                   </linearGradient>
                   <linearGradient id="segmentUnused" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#d1d5db" />
-                    <stop offset="100%" stopColor="#e5e7eb" />
+                    <stop offset="0%" stopColor="#e5e7eb" />
+                    <stop offset="100%" stopColor="#f3f4f6" />
                   </linearGradient>
                 </defs>
                 <Bar
@@ -3377,7 +3898,12 @@ function App() {
                 }}
               >
                 <span className="summary-dot savings" style={{ background: isOverBudget ? '#ef4444' : '#10b981' }} />
-                Savings goal: {formatForPrimary(targetSavings)} (saved {formatForPrimary(actualSavings)})
+                Savings goal: {formatForPrimary(targetSavings)} (saved {formatForPrimary(displaySavings)})
+                {includeLoanPayments && monthlyLoanPayment > 0 && (
+                  <span style={{ fontSize: '11px', color: '#666', marginLeft: '4px' }}>
+                    incl. loans
+                  </span>
+                )}
               </div>
               <div
                 className={`chart-summary-item ${hasUnusedCapital ? 'chart-summary-item-clickable' : ''}`}
@@ -3478,9 +4004,16 @@ function App() {
 
         <div className="current-month-grid">
           <div className="current-month-card">
-            <div className="card-label">Savings progress</div>
+            <div className="card-label">
+              Savings progress
+              {includeLoanPayments && monthlyLoanPayment > 0 && (
+                <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666', marginLeft: '8px' }}>
+                  (incl. loans)
+                </span>
+              )}
+            </div>
             <div className="progress-value">
-              {latestMonth.savings >= 0 ? '+' : ''}{formatForPrimary(latestMonth.savings)}
+              {displaySavings >= 0 ? '+' : ''}{formatForPrimary(displaySavings)}
               <span className="progress-percentage">
                 ({savingsProgressPercentage.toFixed(0)}% of goal)
               </span>
@@ -3494,12 +4027,32 @@ function App() {
           </div>
 
           <div className="current-month-card">
+            <div className="card-label">
+              Savings rate
+              {includeLoanPayments && monthlyLoanPayment > 0 && (
+                <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666', marginLeft: '8px' }}>
+                  (incl. loans)
+                </span>
+              )}
+            </div>
+            <div className="card-value" style={{ fontSize: '24px', fontWeight: '600' }}>
+              {displaySavingsRate >= 0 ? '+' : ''}{displaySavingsRate.toFixed(1)}%
+            </div>
+            <div className="card-meta">
+              {((displaySavingsRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of {SAVINGS_RATE_GOAL}% goal
+            </div>
+          </div>
+
+          <div className="current-month-card">
             <div className="card-label">Essential spend</div>
             <div className="card-value">
               -{formatForPrimary(essentialSpend)}
             </div>
             <div className="card-meta">
-              {ESSENTIAL_CATEGORIES.join(', ')} • {essentialCount} tx • {essentialShare.toFixed(0)}% of spend
+              {(() => {
+                // Use user's customized essential categories list
+                return essentialCategories.join(', ');
+              })()} • {essentialCount} tx • {essentialShare.toFixed(0)}% of spend
             </div>
           </div>
 
@@ -3816,7 +4369,12 @@ function App() {
             formatDate={formatDate}
             handleCategoryEdit={handleCategoryEdit}
             pendingCategoryChange={pendingCategoryChange}
+            showEssentialSplit={showEssentialSplit}
+            essentialCategories={essentialCategories}
             categoryEditModal={categoryEditModal}
+            includeLoanPayments={includeLoanPayments}
+            setShowEssentialCategoriesModal={setShowEssentialCategoriesModal}
+            defaultCurrency={defaultCurrency}
             getTransactionKey={getTransactionKey}
           />
         </div>
@@ -4538,6 +5096,14 @@ function App() {
           </div>
         </button>
         <h1 className="top-header-title">Wealth Tracker</h1>
+        <button
+          className="settings-button"
+          onClick={() => setShowSettings(true)}
+          aria-label="Settings"
+          title="Settings"
+        >
+          <i className="fa-solid fa-gear"></i>
+        </button>
       </header>
 
       <div className="app">
@@ -4556,8 +5122,7 @@ function App() {
             {tabDescription && <p>{tabDescription}</p>}
           </div>
           <div className="tab-content">
-            {activeTab === 'current-month' && renderCurrentMonthTab()}
-            {activeTab === 'details' && renderDetailsTab()}
+            {activeTab === 'monthly-overview' && renderMonthlyOverviewTab()}
             {activeTab === 'charts' && renderChartsTab()}
             {activeTab === 'accounts' && renderAccountsTab()}
             {activeTab === 'broker' && renderBrokerTab()}
@@ -4576,6 +5141,136 @@ function App() {
         isClosing={isCategoryModalClosing}
         sessionToken={sessionToken}
       />
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="modal-overlay open" onClick={() => setShowSettings(false)}>
+          <div className="modal-content settings-modal open" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Settings</h2>
+              <button
+                className="modal-close-btn"
+                onClick={() => setShowSettings(false)}
+                aria-label="Close settings"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="settings-section">
+                <h3 className="settings-section-title">Default Currency</h3>
+                <p className="settings-section-description">
+                  Select your preferred currency for displaying amounts throughout the app.
+                </p>
+                <div className="currency-selector">
+                  <button
+                    className={`currency-option ${defaultCurrency === 'CHF' ? 'active' : ''}`}
+                    onClick={() => handleCurrencyChange('CHF')}
+                  >
+                    <span className="currency-code">CHF</span>
+                    <span className="currency-name">Swiss Franc</span>
+                  </button>
+                  <button
+                    className={`currency-option ${defaultCurrency === 'EUR' ? 'active' : ''}`}
+                    onClick={() => handleCurrencyChange('EUR')}
+                  >
+                    <span className="currency-code">EUR</span>
+                    <span className="currency-name">Euro</span>
+                  </button>
+                  <button
+                    className={`currency-option ${defaultCurrency === 'USD' ? 'active' : ''}`}
+                    onClick={() => handleCurrencyChange('USD')}
+                  >
+                    <span className="currency-code">USD</span>
+                    <span className="currency-name">US Dollar</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Essential Categories Modal */}
+      {showEssentialCategoriesModal && (
+        <div className="modal-overlay open" onClick={() => setShowEssentialCategoriesModal(false)}>
+          <div className="modal-content settings-modal open" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <h2>Customize Essential Categories</h2>
+              <button
+                className="modal-close-btn"
+                onClick={() => setShowEssentialCategoriesModal(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="settings-section">
+                <p className="settings-section-description">
+                  Select which expense categories should be considered essential. Essential categories are used to track your essential vs. non-essential spending.
+                </p>
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                  gap: '12px',
+                  marginTop: '20px'
+                }}>
+                  {allCategories.map(category => {
+                    const isEssential = essentialCategories.includes(category);
+                    
+                    return (
+                      <label
+                        key={category}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '12px',
+                          background: isEssential ? '#1a1a1a' : '#f5f5f5',
+                          color: isEssential ? '#ffffff' : '#1a1a1a',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          border: `2px solid ${isEssential ? '#1a1a1a' : '#e5e7eb'}`
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isEssential}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              saveEssentialCategories([...essentialCategories, category]);
+                            } else {
+                              saveEssentialCategories(essentialCategories.filter(c => c !== category));
+                            }
+                          }}
+                          style={{
+                            marginRight: '8px',
+                            cursor: 'pointer'
+                          }}
+                        />
+                        <span style={{ fontSize: '14px', fontWeight: isEssential ? '600' : '500' }}>
+                          {category}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {allCategories.length === 0 && (
+                  <div style={{ 
+                    textAlign: 'center', 
+                    padding: '40px', 
+                    color: '#999',
+                    fontSize: '14px'
+                  }}>
+                    No expense categories found. Categories will appear here once you have transaction data.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </div>
   );
