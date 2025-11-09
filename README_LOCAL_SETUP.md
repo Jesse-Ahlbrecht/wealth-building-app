@@ -231,3 +231,4 @@ psql -d wealth_app -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO po
 ## 📄 License
 
 This project implements the security architecture described in `wealth.plan.md` for educational and development purposes.
+

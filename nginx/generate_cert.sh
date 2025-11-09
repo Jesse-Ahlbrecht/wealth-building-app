@@ -21,3 +21,4 @@ echo "🔑 Private key:  nginx/key.pem"
 echo ""
 echo "⚠️  This is a self-signed certificate for development only!"
 echo "   Do not use in production."
+

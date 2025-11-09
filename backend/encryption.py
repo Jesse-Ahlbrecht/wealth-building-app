@@ -355,3 +355,4 @@ def decrypt_sensitive_data(encrypted_b64: str, tenant_id: str = 'default') -> Di
     encrypted_dict = json.loads(base64.b64decode(encrypted_b64).decode())
     encrypted_data = EncryptedData.from_dict(encrypted_dict)
     return service.decrypt_json(encrypted_data, tenant_id)
+
