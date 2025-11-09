@@ -24,6 +24,8 @@ const TAB_DESCRIPTIONS = {
   projection: 'Model future net worth using your current savings rate'
 };
 
+const API_BASE_URL = 'http://localhost:5001';
+
 const getPrimaryCurrencyForMonth = (month = {}) => {
   const eurTotal = Math.abs(month.currency_totals?.EUR || 0);
   const chfTotal = Math.abs(month.currency_totals?.CHF || 0);
@@ -98,10 +100,23 @@ const MonthDetail = ({
   getTransactionKey,
   includeLoanPayments,
   setShowEssentialCategoriesModal,
-  defaultCurrency
+  defaultCurrency,
+  handlePredictionClick,
+  handleDismissPrediction,
+  isCurrentMonth = false,
+  allMonthsData = []
 }) => {
   // State to track which section totals are expanded
-  const [expandedSections, setExpandedSections] = React.useState({});
+  // Auto-expand current month sections to show predictions
+  const currentMonth = React.useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+  
+  const [expandedSections, setExpandedSections] = React.useState({
+    [`${currentMonth}-income-section`]: true,
+    [`${currentMonth}-spending-section`]: true
+  });
   
   // Refs for scrolling to sections
   const incomeSectionRef = React.useRef(null);
@@ -225,6 +240,13 @@ const MonthDetail = ({
         return; // Skip this category
       }
       
+      // If loan payments are NOT counted as savings, always treat them as essential
+      if (!includeLoanPayments && isLoanPayment) {
+        essentialTotal += categoryTotal;
+        essentialTransactionCount += categoryTransactions.length;
+        return;
+      }
+      
       // Check if category is essential based on user's customization
       if (essentialCategorySet.has(category)) {
         essentialTotal += categoryTotal;
@@ -240,26 +262,73 @@ const MonthDetail = ({
   const essentialShare = totalTrackedExpenses > 0 ? (essentialTotal / totalTrackedExpenses) * 100 : 0;
   const nonEssentialShare = totalTrackedExpenses > 0 ? (nonEssentialTotal / totalTrackedExpenses) * 100 : 0;
 
+  const predictedEssentialAverage = React.useMemo(() => {
+    if (!allMonthsData || allMonthsData.length === 0) return 0;
+
+    const sortedMonths = [...allMonthsData].sort((a, b) => new Date(b.month) - new Date(a.month));
+    const currentMonthIndex = sortedMonths.findIndex(m => m.month === month.month);
+    const startIndex = currentMonthIndex >= 0 ? currentMonthIndex + 1 : 0;
+    const previousMonths = sortedMonths.slice(startIndex, startIndex + 3);
+
+    if (!previousMonths.length) return 0;
+
+    const totals = previousMonths.map(m => {
+      if (!m || !m.expense_categories) return 0;
+      return Object.entries(m.expense_categories)
+        .filter(([cat]) => {
+          const isLoanPayment = cat.toLowerCase().includes('loan payment');
+          // If loan payments are counted as savings, exclude them
+          if (includeLoanPayments && isLoanPayment) return false;
+          // If loan payments are NOT counted as savings, always include them as essential
+          if (!includeLoanPayments && isLoanPayment) return true;
+          // Otherwise check if category is in essential list
+          return essentialCategorySet.has(cat);
+        })
+        .reduce((sum, [, catData]) => sum + (catData?.total || 0), 0);
+    });
+
+    const sumTotals = totals.reduce((sum, val) => sum + val, 0);
+    return totals.length > 0 ? sumTotals / totals.length : 0;
+  }, [allMonthsData, month.month, includeLoanPayments, essentialCategories?.join('|')]);
+
+  const predictedEssentialDifference = Math.max(predictedEssentialAverage - essentialTotal, 0);
+  // Use the larger of actual essential or predicted essential average
+  const effectiveEssential = predictedEssentialAverage > 0 ? Math.max(essentialTotal, predictedEssentialAverage) : essentialTotal;
+  const totalPredictedExpenses = effectiveEssential + nonEssentialTotal;
+  const expensesShareOfIncome = month.income > 0 ? (totalTrackedExpenses / month.income) * 100 : 0;
+  const predictedExpensesShareOfIncome = month.income > 0 ? (totalPredictedExpenses / month.income) * 100 : 0;
+  const predictedEssentialShareOfIncome = month.income > 0 ? (predictedEssentialAverage / month.income) * 100 : 0;
+  
+  // Calculate predicted savings based on predicted expenses
+  // Note: totalPredictedExpenses already excludes loan when includeLoanPayments is true,
+  // so predictedSavings already includes the loan implicitly
+  const predictedSavings = month.income - totalPredictedExpenses;
+  const predictedSavingsRate = month.income > 0 ? (predictedSavings / month.income) * 100 : 0;
+  const displayPredictedSavings = predictedSavings;
+  const displayPredictedSavingsRate = predictedSavingsRate;
+
   return (
     <div className="month-section">
       <div className="month-header">
         <h2 className="month-title">{formatMonth(month.month)}</h2>
-        <div className="saving-info">
-          <div className={`saving-amount ${displaySavings >= 0 ? 'positive' : 'negative'}`}>
-            {displaySavings >= 0 ? '+' : ''}{formatCurrency(displaySavings, primaryCurrency)}
-            {includeLoanPayments && monthlyLoanPayment > 0 && (
-              <span style={{ fontSize: '11px', color: '#666', marginLeft: '4px' }}>
-                (incl. loans)
-              </span>
-            )}
+        {!isCurrentMonth && (
+          <div className="saving-info">
+            <div className={`saving-amount ${displaySavings >= 0 ? 'positive' : 'negative'}`}>
+              {displaySavings >= 0 ? '+' : ''}{formatCurrency(displaySavings, primaryCurrency)}
+              {includeLoanPayments && monthlyLoanPayment > 0 && (
+                <span style={{ fontSize: '11px', color: '#666', marginLeft: '4px' }}>
+                  (incl. loans)
+                </span>
+              )}
+            </div>
+            <div className={`saving-rate-small ${displaySavingsRate >= 0 ? 'positive' : 'negative'}`}>
+              {displaySavingsRate >= 0 ? '+' : ''}{displaySavingsRate.toFixed(1)}%
+            </div>
+            <div className={`goal-progress ${displaySavings >= savingsGoal ? 'goal-achieved' : 'goal-pending'}`}>
+              {((displaySavings / savingsGoal) * 100).toFixed(0)}% of goal
+            </div>
           </div>
-          <div className={`saving-rate-small ${displaySavingsRate >= 0 ? 'positive' : 'negative'}`}>
-            {displaySavingsRate >= 0 ? '+' : ''}{displaySavingsRate.toFixed(1)}%
-          </div>
-          <div className={`goal-progress ${displaySavings >= savingsGoal ? 'goal-achieved' : 'goal-pending'}`}>
-            {((displaySavings / savingsGoal) * 100).toFixed(0)}% of goal
-          </div>
-        </div>
+        )}
       </div>
 
       <div className="metrics-bar-charts">
@@ -286,44 +355,78 @@ const MonthDetail = ({
         <div className="metric-bar-item">
           <div className="metric-bar-header">
             <div className="metric-bar-label">EXPENSES</div>
-            <div className="metric-bar-value negative">-{formatCurrency(totalTrackedExpenses, primaryCurrency)}</div>
+            <div className="metric-bar-value negative">-{formatCurrency(
+              isCurrentMonth ? totalPredictedExpenses : totalTrackedExpenses, 
+              primaryCurrency
+            )}</div>
           </div>
           <div className="metric-bar-container">
-            <div style={{ display: 'flex', width: `${month.income > 0 ? (totalTrackedExpenses / month.income) * 100 : 0}%`, height: '100%' }}>
+            {showEssentialSplit ? (
+              <div style={{ display: 'flex', width: `${isCurrentMonth ? predictedExpensesShareOfIncome : expensesShareOfIncome}%`, height: '100%' }}>
+                <div
+                  className="metric-bar-fill"
+                  onClick={() => scrollToAndExpandSection('essential')}
+                  style={{ 
+                    width: `${(isCurrentMonth ? totalPredictedExpenses : totalTrackedExpenses) > 0 ? (essentialTotal / (isCurrentMonth ? totalPredictedExpenses : totalTrackedExpenses)) * 100 : 0}%`,
+                    background: 'linear-gradient(90deg, #991b1b, #dc2626)',
+                    borderRadius: '8px 0 0 8px',
+                    cursor: 'pointer'
+                  }}
+                  title={`Essential: ${formatCurrency(essentialTotal, primaryCurrency)} - Click to view details`}
+                />
+                {isCurrentMonth && predictedEssentialAverage > 0 && (
+                  <div
+                    style={{ 
+                      width: `${totalPredictedExpenses > 0 ? ((predictedEssentialAverage - essentialTotal) / totalPredictedExpenses) * 100 : 0}%`,
+                      background: 'linear-gradient(90deg, rgba(220, 38, 38, 0.25), rgba(220, 38, 38, 0.15))',
+                      borderRadius: '0',
+                      minWidth: predictedEssentialAverage > essentialTotal ? '2px' : '0'
+                    }}
+                    title={`Essential avg gap: ${formatCurrency(Math.max(0, predictedEssentialAverage - essentialTotal), primaryCurrency)}`}
+                  />
+                )}
+                <div
+                  className="metric-bar-fill"
+                  onClick={() => scrollToAndExpandSection('non-essential')}
+                  style={{ 
+                    width: `${(isCurrentMonth ? totalPredictedExpenses : totalTrackedExpenses) > 0 ? (nonEssentialTotal / (isCurrentMonth ? totalPredictedExpenses : totalTrackedExpenses)) * 100 : 0}%`,
+                    background: 'linear-gradient(90deg, #f97316, #fb923c)',
+                    borderRadius: '0 8px 8px 0',
+                    cursor: 'pointer'
+                  }}
+                  title={`Non-Essential: ${formatCurrency(nonEssentialTotal, primaryCurrency)} - Click to view details`}
+                />
+              </div>
+            ) : (
               <div
-                className="metric-bar-fill"
-                onClick={() => scrollToAndExpandSection('essential')}
+                className="metric-bar-fill negative"
+                onClick={() => scrollToAndExpandSection('spending-section')}
                 style={{ 
-                  width: `${totalTrackedExpenses > 0 ? (essentialTotal / totalTrackedExpenses) * 100 : 0}%`,
-                  background: 'linear-gradient(90deg, #991b1b, #dc2626)',
-                  borderRadius: essentialTotal === totalTrackedExpenses ? '8px' : '8px 0 0 8px',
+                  width: `${isCurrentMonth ? predictedExpensesShareOfIncome : expensesShareOfIncome}%`,
                   cursor: 'pointer'
                 }}
-                title={`Essential: ${formatCurrency(essentialTotal, primaryCurrency)} - Click to view details`}
+                title={`Expenses: ${formatCurrency(isCurrentMonth ? totalPredictedExpenses : totalTrackedExpenses, primaryCurrency)} - Click to view details`}
               />
-              <div
-                className="metric-bar-fill"
-                onClick={() => scrollToAndExpandSection('non-essential')}
-                style={{ 
-                  width: `${totalTrackedExpenses > 0 ? (nonEssentialTotal / totalTrackedExpenses) * 100 : 0}%`,
-                  background: 'linear-gradient(90deg, #f97316, #fb923c)',
-                  borderRadius: nonEssentialTotal === totalTrackedExpenses ? '8px' : '0 8px 8px 0',
-                  cursor: 'pointer'
-                }}
-                title={`Non-Essential: ${formatCurrency(nonEssentialTotal, primaryCurrency)} - Click to view details`}
-              />
+            )}
+          </div>
+          {showEssentialSplit && (
+            <div className="metric-bar-footer" style={{ display: 'flex', gap: '16px', fontSize: '12px', flexWrap: 'wrap' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #991b1b, #dc2626)', borderRadius: '2px', display: 'inline-block' }}></span>
+                Essential: {formatCurrency(essentialTotal, primaryCurrency)} ({essentialShare.toFixed(0)}%)
+              </span>
+              {isCurrentMonth && predictedEssentialAverage > 0 && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, rgba(220, 38, 38, 0.45), rgba(220, 38, 38, 0.15))', borderRadius: '2px', display: 'inline-block' }}></span>
+                  Essential avg: {formatCurrency(predictedEssentialAverage, primaryCurrency)}
+                </span>
+              )}
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #f97316, #fb923c)', borderRadius: '2px', display: 'inline-block' }}></span>
+                Non-Essential: {formatCurrency(nonEssentialTotal, primaryCurrency)} ({nonEssentialShare.toFixed(0)}%)
+              </span>
             </div>
-          </div>
-          <div className="metric-bar-footer" style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #991b1b, #dc2626)', borderRadius: '2px', display: 'inline-block' }}></span>
-              Essential: {formatCurrency(essentialTotal, primaryCurrency)} ({essentialShare.toFixed(0)}%)
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #f97316, #fb923c)', borderRadius: '2px', display: 'inline-block' }}></span>
-              Non-Essential: {formatCurrency(nonEssentialTotal, primaryCurrency)} ({nonEssentialShare.toFixed(0)}%)
-            </span>
-          </div>
+          )}
         </div>
 
         {/* Savings Bar */}
@@ -333,46 +436,45 @@ const MonthDetail = ({
               SAVINGS {includeLoanPayments && monthlyLoanPayment > 0 && '(INCL. LOANS)'}
             </div>
             <div className="metric-bar-value positive">
-              {displaySavings >= 0 ? '+' : ''}{formatCurrency(displaySavings, primaryCurrency)}
+              {(isCurrentMonth ? displayPredictedSavings : displaySavings) >= 0 ? '+' : ''}{formatCurrency(isCurrentMonth ? displayPredictedSavings : displaySavings, primaryCurrency)}
               <span className="metric-bar-meta">
-                {displaySavingsRate.toFixed(1)}%
+                {(isCurrentMonth ? displayPredictedSavingsRate : displaySavingsRate).toFixed(1)}%
               </span>
             </div>
           </div>
           <div className="metric-bar-container">
             <div
               className="metric-bar-fill positive"
-              style={{ width: `${month.income > 0 ? (displaySavings / month.income) * 100 : 0}%` }}
+              style={{ width: `${month.income > 0 ? ((isCurrentMonth ? displayPredictedSavings : displaySavings) / month.income) * 100 : 0}%` }}
             />
           </div>
           <div className="metric-bar-footer">
-            {((displaySavings / savingsGoal) * 100).toFixed(0)}% of goal
+            {(((isCurrentMonth ? displayPredictedSavings : displaySavings) / savingsGoal) * 100).toFixed(0)}% of goal
           </div>
         </div>
 
-        {/* Multi-Currency Info */}
-        {month.currency_totals.EUR !== 0 && month.currency_totals.CHF !== 0 && (
-          <div className="metric-bar-item" style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px', marginTop: '8px' }}>
-            <div className="metric-bar-header">
-              <div className="metric-bar-label">MULTI-CURRENCY</div>
-            </div>
-            <div style={{ fontSize: '14px', marginTop: '8px', color: '#64748b' }}>
-              <div>EUR: {month.currency_totals.EUR >= 0 ? '+' : ''}{formatCurrency(month.currency_totals.EUR, 'EUR')}</div>
-              <div style={{ marginTop: '4px' }}>
-                CHF: {month.currency_totals.CHF >= 0 ? '+' : ''}{formatCurrency(month.currency_totals.CHF, 'CHF')}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {sortedIncomeCategories.length > 0 && (() => {
         const incomeSectionKey = `${month.month}-income-section`;
         const isIncomeExpanded = expandedSections[incomeSectionKey];
         
+        console.log(`💡 Rendering income section for ${month.month}:`, {
+          sortedIncomeCategories: sortedIncomeCategories.length,
+          isIncomeExpanded,
+          incomeSectionKey
+        });
+        
         return (
         <div className="categories-section" ref={incomeSectionRef}>
-          <h3 className="categories-title">Income by Category</h3>
+          <h3 
+            className="categories-title" 
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+            onClick={() => toggleSection(incomeSectionKey)}
+          >
+            <span className="expand-arrow">{isIncomeExpanded ? '▼' : '▶'}</span>
+            Income by Category
+          </h3>
           <div className="category-list">
             {isIncomeExpanded && sortedIncomeCategories.map(([category, categoryData]) => {
               const categoryKey = `${month.month}-income-${category}`;
@@ -424,7 +526,11 @@ const MonthDetail = ({
                           const transactionKey = getTransactionKey(transaction);
                           const isLocked = pendingCategoryChange?.key === transactionKey;
                           const isPending = isLocked && pendingCategoryChange?.stage === 'vanishing';
+                          const isPredicted = transaction.is_predicted;
                           const transactionClassList = ['transaction-item'];
+                          if (isPredicted) {
+                            transactionClassList.push('transaction-item-predicted');
+                          }
                           if (isLocked && pendingCategoryChange?.stage === 'pending') {
                             transactionClassList.push('transaction-pending');
                           }
@@ -438,36 +544,61 @@ const MonthDetail = ({
                               key={transactionKey}
                               className={transactionClassName}
                               data-transaction-key={transactionKey}
+                              onClick={isPredicted ? () => handlePredictionClick(transaction) : undefined}
+                              style={isPredicted ? { cursor: 'pointer' } : undefined}
                             >
                               <div className="transaction-date">
                                 {formatDate(transaction.date)}
-                                <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
-                                  {transaction.account}
-                                </span>
+                                {isPredicted ? (
+                                  <span className="account-badge account-badge-predicted" title={`${transaction.recurrence_type} prediction - ${(transaction.confidence * 100).toFixed(0)}% confidence. Click to see details.`}>
+                                    Predicted
+                                  </span>
+                                ) : (
+                                  <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
+                                    {transaction.account}
+                                  </span>
+                                )}
                               </div>
                               <div className="transaction-details">
                                 <div className="transaction-recipient">
                                   {transaction.recipient}
                                 </div>
-                                {transaction.description && (
+                                {isPredicted ? (
+                                  <div className="transaction-description" style={{ color: '#6b7eff', fontSize: '12px' }}>
+                                    Predicted based on {transaction.based_on?.length || 0} past payment{(transaction.based_on?.length || 0) !== 1 ? 's' : ''}
+                                  </div>
+                                ) : transaction.description ? (
                                   <div className="transaction-description">
                                     {transaction.description}
                                   </div>
-                                )}
+                                ) : null}
                               </div>
                               <div className="transaction-actions">
-                                <button
-                                  className={`category-edit-btn ${
-                                    categoryEditModal && 
-                                    getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
-                                    ? 'active' : ''
-                                  }`}
-                                  onClick={() => handleCategoryEdit(transaction, month.month, `income-${category}`)}
-                                  disabled={isLocked}
-                                  title="Change category"
-                                >
-                                  <i className="fa-solid fa-pen-to-square"></i>
-                                </button>
+                                {isPredicted ? (
+                                  <button
+                                    className="dismiss-prediction-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDismissPrediction(transaction);
+                                    }}
+                                    title="Dismiss prediction"
+                                  >
+                                    <i className="fa-solid fa-xmark"></i>
+                                  </button>
+                                ) : (
+                                  <button
+                                    className={`category-edit-btn ${
+                                      categoryEditModal && 
+                                      getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
+                                      ? 'active' : ''
+                                    }`}
+                                    onClick={() => handleCategoryEdit(transaction, month.month, `income-${category}`)}
+                                    disabled={isLocked}
+                                    title="Change category"
+                                  >
+                                    <i className="fa-solid fa-pen-to-square"></i>
+                                  </button>
+                                )}
                               </div>
                               <div className="transaction-amount transaction-amount-income">
                                 +{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
@@ -482,22 +613,19 @@ const MonthDetail = ({
               );
             })}
             
-            {/* Income Total - At bottom, always visible and clickable */}
+            {/* Income Total - At bottom, always visible (informational only) */}
             <div 
               className="category-item" 
-              onClick={() => toggleSection(incomeSectionKey)}
               style={{ 
                 borderTop: '3px solid #1a1a1a', 
                 marginTop: '12px', 
                 paddingTop: '12px',
                 background: '#f5f5f5',
                 fontWeight: '600',
-                borderRadius: '0 0 8px 8px',
-                cursor: 'pointer'
+                borderRadius: '0 0 8px 8px'
               }}>
               <div style={{ flex: 1 }}>
                 <div className="category-name" style={{ fontWeight: '600' }}>
-                  <span className="expand-arrow">{isIncomeExpanded ? '▼' : '▶'}</span>
                   Total Income
                 </div>
               </div>
@@ -514,13 +642,30 @@ const MonthDetail = ({
         const spendingSectionKey = `${month.month}-spending-section`;
         const isSpendingExpanded = expandedSections[spendingSectionKey];
         
+        console.log(`💡 Rendering expense section for ${month.month}:`, {
+          sortedExpenseCategories: sortedExpenseCategories.length,
+          isSpendingExpanded,
+          spendingSectionKey,
+          showEssentialSplit
+        });
+        
         return (
         <div className="categories-section" ref={spendingSectionRef}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-            <h3 className="categories-title" style={{ margin: 0 }}>Spending by Category</h3>
+            <h3 
+              className="categories-title" 
+              style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+              onClick={() => toggleSection(spendingSectionKey)}
+            >
+              <span className="expand-arrow">{isSpendingExpanded ? '▼' : '▶'}</span>
+              Spending by Category
+            </h3>
             <button
               className="edit-categories-btn"
-              onClick={() => setShowEssentialCategoriesModal(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowEssentialCategoriesModal(true);
+              }}
               title="Customize essential categories"
             >
               <i className="fa-solid fa-pen-to-square"></i> Customize Essential
@@ -577,7 +722,11 @@ const MonthDetail = ({
                           const transactionKey = getTransactionKey(transaction);
                           const isLocked = pendingCategoryChange?.key === transactionKey;
                           const isPending = isLocked && pendingCategoryChange?.stage === 'vanishing';
+                          const isPredicted = transaction.is_predicted;
                           const transactionClassList = ['transaction-item'];
+                          if (isPredicted) {
+                            transactionClassList.push('transaction-item-predicted');
+                          }
                           if (isLocked && pendingCategoryChange?.stage === 'pending') {
                             transactionClassList.push('transaction-pending');
                           }
@@ -591,36 +740,61 @@ const MonthDetail = ({
                               key={transactionKey}
                               className={transactionClassName}
                               data-transaction-key={transactionKey}
+                              onClick={isPredicted ? () => handlePredictionClick(transaction) : undefined}
+                              style={isPredicted ? { cursor: 'pointer' } : undefined}
                             >
                               <div className="transaction-date">
                                 {formatDate(transaction.date)}
-                                <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
-                                  {transaction.account}
-                                </span>
+                                {isPredicted ? (
+                                  <span className="account-badge account-badge-predicted" title={`${transaction.recurrence_type} prediction - ${(transaction.confidence * 100).toFixed(0)}% confidence. Click to see details.`}>
+                                    Predicted
+                                  </span>
+                                ) : (
+                                  <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
+                                    {transaction.account}
+                                  </span>
+                                )}
                               </div>
                               <div className="transaction-details">
                                 <div className="transaction-recipient">
                                   {transaction.recipient}
                                 </div>
-                                {transaction.description && (
+                                {isPredicted ? (
+                                  <div className="transaction-description" style={{ color: '#6b7eff', fontSize: '12px' }}>
+                                    Predicted based on {transaction.based_on?.length || 0} past payment{(transaction.based_on?.length || 0) !== 1 ? 's' : ''}
+                                  </div>
+                                ) : transaction.description ? (
                                   <div className="transaction-description">
                                     {transaction.description}
                                   </div>
-                                )}
+                                ) : null}
                               </div>
                               <div className="transaction-actions">
-                                <button
-                                  className={`category-edit-btn ${
-                                    categoryEditModal && 
-                                    getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
-                                    ? 'active' : ''
-                                  }`}
-                                  onClick={() => handleCategoryEdit(transaction, month.month, category)}
-                                  disabled={isLocked}
-                                  title="Change category"
-                                >
-                                  <i className="fa-solid fa-pen-to-square"></i>
-                                </button>
+                                {isPredicted ? (
+                                  <button
+                                    className="dismiss-prediction-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDismissPrediction(transaction);
+                                    }}
+                                    title="Dismiss prediction"
+                                  >
+                                    <i className="fa-solid fa-xmark"></i>
+                                  </button>
+                                ) : (
+                                  <button
+                                    className={`category-edit-btn ${
+                                      categoryEditModal && 
+                                      getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
+                                      ? 'active' : ''
+                                    }`}
+                                    onClick={() => handleCategoryEdit(transaction, month.month, category)}
+                                    disabled={isLocked}
+                                    title="Change category"
+                                  >
+                                    <i className="fa-solid fa-pen-to-square"></i>
+                                  </button>
+                                )}
                               </div>
                               <div className="transaction-amount">
                                 -{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
@@ -635,22 +809,19 @@ const MonthDetail = ({
               );
             })}
             
-            {/* Spending Total - At bottom, always visible and clickable */}
+            {/* Spending Total - At bottom, always visible (informational only) */}
             <div 
               className="category-item" 
-              onClick={() => toggleSection(spendingSectionKey)}
               style={{ 
                 borderTop: '3px solid #1a1a1a', 
                 marginTop: '12px', 
                 paddingTop: '12px',
                 background: '#f5f5f5',
                 fontWeight: '600',
-                borderRadius: '0 0 8px 8px',
-                cursor: 'pointer'
+                borderRadius: '0 0 8px 8px'
               }}>
               <div style={{ flex: 1 }}>
                 <div className="category-name" style={{ fontWeight: '600' }}>
-                  <span className="expand-arrow">{isSpendingExpanded ? '▼' : '▶'}</span>
                   Total Spending
                 </div>
               </div>
@@ -668,6 +839,8 @@ const MonthDetail = ({
           const isLoanPayment = category.toLowerCase().includes('loan payment');
           // If loan payments are counted as savings, exclude them entirely
           if (includeLoanPayments && isLoanPayment) return false;
+          // If loan payments are NOT counted as savings, treat them as essential
+          if (!includeLoanPayments && isLoanPayment) return true;
           // Check if category is in the essential categories list
           return essentialCategories.includes(category);
         });
@@ -675,8 +848,10 @@ const MonthDetail = ({
           const isLoanPayment = category.toLowerCase().includes('loan payment');
           // If loan payments are counted as savings, exclude them entirely
           if (includeLoanPayments && isLoanPayment) return false;
-          // Otherwise, everything that's not essential or loan payment goes here
-          return !essentialCategories.includes(category) && !isLoanPayment;
+          // If loan payments are NOT counted as savings, they go to essential, not here
+          if (!includeLoanPayments && isLoanPayment) return false;
+          // Otherwise, everything that's not essential goes here
+          return !essentialCategories.includes(category);
         });
 
         const renderCategorySection = (categories, title, barClassName) => {
@@ -686,15 +861,26 @@ const MonthDetail = ({
           const isSectionExpanded = expandedSections[sectionKey];
           const totalAmount = categories.reduce((sum, [, categoryData]) => sum + categoryData.total, 0);
           const sectionRef = title.includes('(Essential)') ? essentialSectionRef : nonEssentialSectionRef;
+          const predictedAmount = title.includes('(Essential)') ? predictedEssentialAverage : 0;
           
           return (
             <div className="categories-section" ref={sectionRef}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                <h3 className="categories-title" style={{ margin: 0 }}>{title}</h3>
+                <h3 
+                  className="categories-title" 
+                  style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+                  onClick={() => toggleSection(sectionKey)}
+                >
+                  <span className="expand-arrow">{isSectionExpanded ? '▼' : '▶'}</span>
+                  {title}
+                </h3>
                 {title.includes('Essential') && (
                   <button
                     className="edit-categories-btn"
-                    onClick={() => setShowEssentialCategoriesModal(true)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowEssentialCategoriesModal(true);
+                    }}
                     title="Customize essential categories"
                   >
                     <i className="fa-solid fa-pen-to-square"></i> Customize
@@ -752,7 +938,11 @@ const MonthDetail = ({
                               const transactionKey = getTransactionKey(transaction);
                               const isLocked = pendingCategoryChange?.key === transactionKey;
                               const isPending = isLocked && pendingCategoryChange?.stage === 'vanishing';
+                              const isPredicted = transaction.is_predicted;
                               const transactionClassList = ['transaction-item'];
+                              if (isPredicted) {
+                                transactionClassList.push('transaction-item-predicted');
+                              }
                               if (isLocked && pendingCategoryChange?.stage === 'pending') {
                                 transactionClassList.push('transaction-pending');
                               }
@@ -766,36 +956,61 @@ const MonthDetail = ({
                                   key={transactionKey}
                                   className={transactionClassName}
                                   data-transaction-key={transactionKey}
+                                  onClick={isPredicted ? () => handlePredictionClick(transaction) : undefined}
+                                  style={isPredicted ? { cursor: 'pointer' } : undefined}
                                 >
                                   <div className="transaction-date">
                                     {formatDate(transaction.date)}
-                                    <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
-                                      {transaction.account}
-                                    </span>
+                                    {isPredicted ? (
+                                      <span className="account-badge account-badge-predicted" title={`${transaction.recurrence_type} prediction - ${(transaction.confidence * 100).toFixed(0)}% confidence. Click to see details.`}>
+                                        Predicted
+                                      </span>
+                                    ) : (
+                                      <span className={`account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`}>
+                                        {transaction.account}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="transaction-details">
                                     <div className="transaction-recipient">
                                       {transaction.recipient}
                                     </div>
-                                    {transaction.description && (
+                                    {isPredicted ? (
+                                      <div className="transaction-description" style={{ color: '#6b7eff', fontSize: '12px' }}>
+                                        Predicted based on {transaction.based_on?.length || 0} past payment{(transaction.based_on?.length || 0) !== 1 ? 's' : ''}
+                                      </div>
+                                    ) : transaction.description ? (
                                       <div className="transaction-description">
                                         {transaction.description}
                                       </div>
-                                    )}
+                                    ) : null}
                                   </div>
                                   <div className="transaction-actions">
-                                    <button
-                                      className={`category-edit-btn ${
-                                        categoryEditModal && 
-                                        getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
-                                        ? 'active' : ''
-                                      }`}
-                                      onClick={() => handleCategoryEdit(transaction, month.month, category)}
-                                      disabled={isLocked}
-                                      title="Change category"
-                                    >
-                                      <i className="fa-solid fa-pen-to-square"></i>
-                                    </button>
+                                    {isPredicted ? (
+                                      <button
+                                        className="dismiss-prediction-btn"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDismissPrediction(transaction);
+                                        }}
+                                        title="Dismiss prediction"
+                                      >
+                                        <i className="fa-solid fa-xmark"></i>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        className={`category-edit-btn ${
+                                          categoryEditModal && 
+                                          getTransactionKey(categoryEditModal.transaction) === getTransactionKey(transaction)
+                                          ? 'active' : ''
+                                        }`}
+                                        onClick={() => handleCategoryEdit(transaction, month.month, category)}
+                                        disabled={isLocked}
+                                        title="Change category"
+                                      >
+                                        <i className="fa-solid fa-pen-to-square"></i>
+                                      </button>
+                                    )}
                                   </div>
                                   <div className="transaction-amount">
                                     -{formatCurrency(Math.abs(transaction.amount), transaction.currency)}
@@ -810,27 +1025,46 @@ const MonthDetail = ({
                   );
                 })}
                 
-                {/* Section Total - At bottom, always visible and clickable */}
+                {/* Section Total - At bottom, always visible (informational only) */}
                 <div 
                   className="category-item" 
-                  onClick={() => toggleSection(sectionKey)}
                   style={{ 
                     borderTop: '3px solid #1a1a1a', 
                     marginTop: '12px', 
                     paddingTop: '12px',
                     background: '#f5f5f5',
                     fontWeight: '600',
-                    borderRadius: '0 0 8px 8px',
-                    cursor: 'pointer'
+                    borderRadius: '0 0 8px 8px'
                   }}>
                   <div style={{ flex: 1 }}>
                     <div className="category-name" style={{ fontWeight: '600' }}>
-                      <span className="expand-arrow">{isSectionExpanded ? '▼' : '▶'}</span>
                       {title.includes('(Essential)') ? 'Total Essential' : 'Total Non-Essential'}
                     </div>
+                    {title.includes('(Essential)') && isCurrentMonth && predictedAmount > 0 && (
+                      <div className="category-bar" style={{ marginTop: '8px' }}>
+                        <div
+                          className="category-bar-fill bar-essential"
+                          style={{ 
+                            width: `${Math.min((totalAmount / predictedAmount) * 100, 100)}%`,
+                            transition: 'width 0.3s ease'
+                          }}
+                          title={`${((totalAmount / predictedAmount) * 100).toFixed(0)}% of predicted`}
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="category-amount" style={{ fontWeight: '700', fontSize: '16px' }}>
                     {formatCurrency(totalAmount, primaryCurrency)}
+                    {title.includes('(Essential)') && isCurrentMonth && predictedAmount > 0 && (
+                      <span style={{ 
+                        fontSize: '13px', 
+                        fontWeight: '400', 
+                        color: '#64748b',
+                        marginLeft: '8px'
+                      }}>
+                        ({formatCurrency(predictedAmount, primaryCurrency)} avg)
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2629,6 +2863,203 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
   );
 };
 
+// Prediction Detail Modal Component
+const PredictionDetailModal = ({ prediction, onClose, onDismiss, formatCurrency, formatDate }) => {
+  if (!prediction) return null;
+
+  const isIncome = prediction.type === 'income';
+
+  const historicalPayments = (Array.isArray(prediction.based_on) ? prediction.based_on : [])
+    .map((entry) => {
+      if (!entry) return null;
+      if (typeof entry === 'string') {
+        return {
+          date: entry,
+          amount: null,
+          currency: prediction.currency
+        };
+      }
+      const rawAmount = entry.amount;
+      const parsedAmount = rawAmount === null || rawAmount === undefined
+        ? null
+        : typeof rawAmount === 'number'
+          ? rawAmount
+          : parseFloat(rawAmount);
+
+      return {
+        date: entry.date || entry.transaction_date || entry,
+        amount: Number.isFinite(parsedAmount) ? parsedAmount : null,
+        currency: entry.currency || prediction.currency
+      };
+    })
+    .filter((entry) => entry && entry.date);
+
+  const paymentsDescending = historicalPayments
+    .slice()
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const paymentsCount = paymentsDescending.length;
+  const highlightCount = prediction.recurrence_type === 'monthly' && paymentsCount >= 3 ? 3 : 0;
+
+  return (
+    <div className="modal-overlay open" onClick={onClose}>
+      <div className="modal-content open" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Prediction Details</h3>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        
+        <div className="modal-body">
+          <div className="transaction-preview">
+            <div className="transaction-preview-item">
+              <strong>Predicted Date:</strong> {formatDate(prediction.date)}
+            </div>
+            <div className="transaction-preview-item">
+              <strong>Recipient:</strong> {prediction.recipient}
+            </div>
+            <div className="transaction-preview-item">
+              <strong>Category:</strong> {prediction.category}
+            </div>
+            <div className="transaction-preview-item">
+              <strong>Amount:</strong> 
+              <span style={{ color: isIncome ? '#10b981' : '#ef4444', fontWeight: '600', marginLeft: '8px' }}>
+                {isIncome ? '+' : '-'}{formatCurrency(Math.abs(prediction.amount), prediction.currency)}
+              </span>
+            </div>
+            <div className="transaction-preview-item">
+              <strong>Recurrence:</strong> {prediction.recurrence_type}
+            </div>
+            <div className="transaction-preview-item">
+              <strong>Confidence:</strong> {(prediction.confidence * 100).toFixed(0)}%
+            </div>
+          </div>
+
+          <div style={{ marginTop: '24px' }}>
+            <h4 style={{ 
+              fontSize: '14px', 
+              fontWeight: '600', 
+              marginBottom: '12px',
+              color: '#1a1a1a'
+            }}>
+              Based on {paymentsCount} past payment{paymentsCount !== 1 ? 's' : ''}:
+            </h4>
+            <div className="prediction-history-container">
+              {paymentsDescending.map((payment, index) => {
+                const isHighlighted = index < highlightCount;
+                const paymentCurrency = payment.currency || prediction.currency;
+                const amountValue = payment.amount;
+                const formattedAmount = amountValue !== null
+                  ? `${isIncome ? '+' : '-'}${formatCurrency(Math.abs(amountValue), paymentCurrency)}`
+                  : '—';
+                const orderLabel = `${paymentsCount - index} of ${paymentsCount}`;
+
+                return (
+                  <div 
+                    key={`${payment.date}-${index}`}
+                    className={`prediction-history-entry${isHighlighted ? ' highlighted' : ''}`}
+                  >
+                    <div>
+                      <div style={{ fontWeight: '500', color: '#1a1a1a', marginBottom: '2px' }}>
+                        {formatDate(payment.date)}
+                      </div>
+                      {isHighlighted && (
+                        <div style={{ fontSize: '11px', color: '#4f5bd5' }}>
+                          Used in calculation
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      <div style={{ 
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        color: amountValue !== null
+                          ? (isIncome ? '#059669' : '#dc2626')
+                          : '#94a3b8'
+                      }}>
+                        {formattedAmount}
+                      </div>
+                      <div style={{ 
+                        fontSize: '12px', 
+                        color: '#64748b',
+                        minWidth: '64px',
+                        textAlign: 'right'
+                      }}>
+                        {orderLabel}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {prediction.recurrence_type === 'monthly' && paymentsCount >= 3 && (
+              <div style={{
+                marginTop: '12px',
+                padding: '12px',
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                borderRadius: '6px',
+                fontSize: '13px',
+                color: '#0369a1'
+              }}>
+                ℹ️ This prediction uses the average of the last 3 payments for greater accuracy.
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div
+          className="modal-footer"
+          style={{ 
+            display: 'flex', 
+            gap: '12px',
+            justifyContent: 'flex-end',
+            padding: '16px 24px 24px',
+            borderTop: '1px solid #eef2f6',
+            borderBottomLeftRadius: '12px',
+            borderBottomRightRadius: '12px'
+          }}
+        >
+          <button
+            className="btn-secondary"
+            onClick={onClose}
+            style={{
+              padding: '8px 16px',
+              background: '#f3f4f6',
+              border: '1px solid #e5e7eb',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '500'
+            }}
+          >
+            Close
+          </button>
+          <button
+            className="btn-danger"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss(prediction);
+              onClose();
+            }}
+            style={{
+              padding: '8px 16px',
+              background: '#fee',
+              border: '1px solid #fcc',
+              color: '#dc2626',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '500'
+            }}
+          >
+            Dismiss Prediction
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   console.log('🎬🎬🎬 APP FUNCTION CALLED - Component is rendering!');
   
@@ -2665,6 +3096,7 @@ function App() {
   const [categoryEditModal, setCategoryEditModal] = useState(null); // Category edit modal state
   const [pendingCategoryChange, setPendingCategoryChange] = useState(null); // Track card animation
   const [isCategoryModalClosing, setIsCategoryModalClosing] = useState(false);
+  const [predictionDetailModal, setPredictionDetailModal] = useState(null); // Prediction detail modal state
   const [showEssentialSplit, setShowEssentialSplit] = useState(true);
   const [segmentDetail, setSegmentDetail] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -2820,6 +3252,28 @@ function App() {
         isArray: Array.isArray(data),
         length: Array.isArray(data) ? data.length : 'not an array'
       });
+      
+      // Debug: Check for November 2025 data
+      if (Array.isArray(data)) {
+        const november2025 = data.find(m => m.month === '2025-11');
+        console.log('🔍 November 2025 data:', november2025);
+        if (november2025) {
+          console.log('📥 Income categories:', Object.keys(november2025.income_categories || {}));
+          console.log('📤 Expense categories:', Object.keys(november2025.expense_categories || {}));
+          
+          // Check for predictions
+          const allCategories = {...november2025.income_categories, ...november2025.expense_categories};
+          Object.entries(allCategories).forEach(([catName, catData]) => {
+            const predictions = catData.transactions?.filter(t => t.is_predicted) || [];
+            if (predictions.length > 0) {
+              console.log(`🔮 Category "${catName}" has ${predictions.length} predictions:`, predictions);
+            }
+          });
+        } else {
+          console.warn('⚠️ November 2025 not found in response!');
+        }
+      }
+      
       setSummary(data || []);
       setLoading(false);
       return data;
@@ -3054,6 +3508,74 @@ function App() {
       currentCategory,
       isIncome: currentCategory.startsWith('income-')
     });
+  };
+
+  const handleDismissPrediction = async (prediction) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/predictions/dismiss`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionStorage.getItem('sessionToken') || localStorage.getItem('sessionToken')}`
+        },
+        body: JSON.stringify({
+          prediction_key: prediction.prediction_key,
+          recurrence_type: prediction.recurrence_type
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to dismiss prediction');
+      }
+
+      // Optimistically remove the prediction from UI
+      setSummary(prev => {
+        return prev.map(month => {
+          if (month.month !== prediction.date.substring(0, 7)) {
+            return month;
+          }
+
+          const isIncome = prediction.type === 'income';
+          const categoriesKey = isIncome ? 'income_categories' : 'expense_categories';
+          const updatedCategories = { ...month[categoriesKey] };
+          const category = prediction.category;
+
+          if (updatedCategories[category]) {
+            const updatedTransactions = updatedCategories[category].transactions.filter(
+              t => t.prediction_key !== prediction.prediction_key
+            );
+
+            if (updatedTransactions.length === 0) {
+              delete updatedCategories[category];
+            } else {
+              updatedCategories[category] = {
+                ...updatedCategories[category],
+                transactions: updatedTransactions
+              };
+            }
+          }
+
+          return {
+            ...month,
+            [categoriesKey]: updatedCategories
+          };
+        });
+      });
+
+      console.log('Prediction dismissed successfully');
+    } catch (error) {
+      console.error('Error dismissing prediction:', error);
+      alert('Failed to dismiss prediction. Please try again.');
+    }
+  };
+
+  const handlePredictionClick = (prediction) => {
+    console.log('Showing prediction details:', prediction);
+    setPredictionDetailModal(prediction);
+  };
+
+  const closePredictionModal = () => {
+    setPredictionDetailModal(null);
   };
 
  const applyLocalCategoryChange = useCallback(({
@@ -3621,8 +4143,34 @@ function App() {
           </div>
         </div>
 
-        {/* Current Month - shown prominently at top */}
-        {currentMonthContent}
+        {/* Current Month with Predictions */}
+        <div style={{ marginTop: '0' }}>
+          <MonthDetail
+            key={`${latestMonth.month}-${categoriesVersion}`}
+            month={latestMonth}
+            expandedCategories={expandedCategories}
+            toggleCategory={toggleCategory}
+            categorySorts={categorySorts}
+            toggleSort={toggleSort}
+            getSortedTransactions={getSortedTransactions}
+            formatCurrency={formatCurrency}
+            formatMonth={formatMonth}
+            formatDate={formatDate}
+            handleCategoryEdit={handleCategoryEdit}
+            pendingCategoryChange={pendingCategoryChange}
+            showEssentialSplit={showEssentialSplit}
+            essentialCategories={essentialCategories}
+            categoryEditModal={categoryEditModal}
+            handlePredictionClick={handlePredictionClick}
+            handleDismissPrediction={handleDismissPrediction}
+            includeLoanPayments={includeLoanPayments}
+            setShowEssentialCategoriesModal={setShowEssentialCategoriesModal}
+            defaultCurrency={defaultCurrency}
+            getTransactionKey={getTransactionKey}
+            isCurrentMonth={true}
+            allMonthsData={summary}
+          />
+        </div>
 
         {/* Previous Months - details style */}
         {previousMonths.length > 0 && (
@@ -3656,10 +4204,13 @@ function App() {
           showEssentialSplit={showEssentialSplit}
           essentialCategories={essentialCategories}
           categoryEditModal={categoryEditModal}
+          handlePredictionClick={handlePredictionClick}
+          handleDismissPrediction={handleDismissPrediction}
           includeLoanPayments={includeLoanPayments}
           setShowEssentialCategoriesModal={setShowEssentialCategoriesModal}
           defaultCurrency={defaultCurrency}
           getTransactionKey={getTransactionKey}
+          allMonthsData={summary}
         />
       ))}
           </>
@@ -3703,10 +4254,13 @@ function App() {
           showEssentialSplit={showEssentialSplit}
           essentialCategories={essentialCategories}
           categoryEditModal={categoryEditModal}
+          handlePredictionClick={handlePredictionClick}
+          handleDismissPrediction={handleDismissPrediction}
           includeLoanPayments={includeLoanPayments}
           setShowEssentialCategoriesModal={setShowEssentialCategoriesModal}
           defaultCurrency={defaultCurrency}
           getTransactionKey={getTransactionKey}
+          allMonthsData={summary}
         />
       ))}
     </>
@@ -4567,9 +5121,12 @@ function App() {
             essentialCategories={essentialCategories}
             categoryEditModal={categoryEditModal}
             includeLoanPayments={includeLoanPayments}
+            handlePredictionClick={handlePredictionClick}
+            handleDismissPrediction={handleDismissPrediction}
             setShowEssentialCategoriesModal={setShowEssentialCategoriesModal}
             defaultCurrency={defaultCurrency}
             getTransactionKey={getTransactionKey}
+            allMonthsData={summary}
           />
         </div>
       )}
@@ -5334,6 +5891,15 @@ function App() {
         formatCurrency={formatCurrency}
         isClosing={isCategoryModalClosing}
         sessionToken={sessionToken}
+      />
+
+      {/* Prediction Detail Modal */}
+      <PredictionDetailModal
+        prediction={predictionDetailModal}
+        onClose={closePredictionModal}
+        onDismiss={handleDismissPrediction}
+        formatCurrency={formatCurrency}
+        formatDate={formatDate}
       />
 
       {/* Settings Modal */}

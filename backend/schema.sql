@@ -334,6 +334,20 @@ CREATE TRIGGER update_loans_updated_at
     BEFORE UPDATE ON loans
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+-- Prediction dismissals table for recurring payment predictions
+CREATE TABLE prediction_dismissals (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER REFERENCES tenants(id),
+    recipient VARCHAR(255),
+    category VARCHAR(100),
+    prediction_key VARCHAR(255) UNIQUE NOT NULL,
+    dismissed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATE
+);
+
+CREATE INDEX idx_prediction_dismissals_tenant ON prediction_dismissals(tenant_id, expires_at);
+CREATE INDEX idx_prediction_dismissals_key ON prediction_dismissals(prediction_key);
+
 -- Insert default tenant for development
 INSERT INTO tenants (tenant_id, name) VALUES ('default', 'Default Tenant');
 

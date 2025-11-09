@@ -15,6 +15,7 @@ from encryption import get_encryption_service, encrypt_sensitive_data, decrypt_s
 from auth import get_session_manager
 from database import get_wealth_database
 from user_management import get_user_manager
+from prediction_service import RecurringPatternDetector, get_dismissed_predictions
 
 # Load environment variables
 load_dotenv()
@@ -1041,6 +1042,131 @@ def get_summary():
             continue
 
     print(f"Grouped transactions into {len(monthly_data)} months")
+    
+    # Generate predictions for current month
+    current_month = datetime.now().strftime('%Y-%m')
+    try:
+        print(f"Generating predictions for current month: {current_month}")
+        
+        # Detect recurring patterns
+        detector = RecurringPatternDetector()
+        patterns = detector.detect_recurring_patterns(transactions)
+        print(f"Detected {len(patterns)} recurring patterns")
+        
+        # Get dismissed predictions
+        dismissed_predictions = set()
+        try:
+            # Query dismissed predictions directly
+            target_year, target_month_num = map(int, current_month.split('-'))
+            target_date = datetime(target_year, target_month_num, 1)
+            
+            with wealth_db.db.get_cursor() as cursor:
+                # Check if table exists
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'prediction_dismissals'
+                    )
+                """)
+                table_exists = cursor.fetchone()[0]
+                
+                if table_exists:
+                    cursor.execute("""
+                        SELECT prediction_key 
+                        FROM prediction_dismissals 
+                        WHERE tenant_id = (SELECT id FROM tenants WHERE tenant_id = %s)
+                        AND (expires_at IS NULL OR expires_at >= %s)
+                    """, [tenant_id, target_date.date()])
+                    result = cursor.fetchall()
+                    dismissed_predictions = {row[0] for row in result}
+                    print(f"Found {len(dismissed_predictions)} dismissed predictions")
+                else:
+                    print("⚠️ prediction_dismissals table does not exist yet (run schema.sql to create it)")
+        except Exception as e:
+            print(f"Warning: Could not fetch dismissed predictions: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Generate predictions for current month
+        predictions = detector.generate_predictions_for_month(patterns, current_month, dismissed_predictions)
+        print(f"Generated {len(predictions)} predictions for {current_month}")
+        
+        # Debug: Print prediction details
+        for pred in predictions:
+            print(f"  - Prediction: {pred['recipient']} ({pred['category']}) - {pred['recurrence_type']} - {pred['amount']} {pred['currency']}")
+        
+        # Merge predictions into current month's data
+        if predictions:
+            # Create current month entry if it doesn't exist
+            if current_month not in monthly_data:
+                monthly_data[current_month] = {
+                    'income': 0,
+                    'expenses': 0,
+                    'income_categories': defaultdict(float),
+                    'income_transactions': defaultdict(list),
+                    'expense_categories': defaultdict(float),
+                    'expense_transactions': defaultdict(list),
+                    'internal_transfer_total': 0,
+                    'internal_transfer_transactions': [],
+                    'currency_totals': {'EUR': 0, 'CHF': 0}
+                }
+            
+            print(f"💡 Adding {len(predictions)} predictions to month {current_month}")
+            print(f"💡 Current month data has {len(monthly_data[current_month]['income_transactions'])} income categories and {len(monthly_data[current_month]['expense_transactions'])} expense categories")
+            
+            # Filter out predictions that match existing transactions
+            filtered_predictions = []
+            for prediction in predictions:
+                category = prediction['category']
+                recipient = prediction['recipient']
+                pred_amount = abs(float(prediction['amount']))
+                
+                # Check if there's already a matching transaction this month
+                existing_transactions = []
+                if prediction['type'] == 'income':
+                    existing_transactions = monthly_data[current_month]['income_transactions'].get(category, [])
+                else:
+                    existing_transactions = monthly_data[current_month]['expense_transactions'].get(category, [])
+                
+                # Look for a matching transaction (same recipient and similar amount within 10%)
+                is_duplicate = False
+                for txn in existing_transactions:
+                    if txn.get('recipient') == recipient:
+                        txn_amount = abs(float(txn.get('amount', 0)))
+                        amount_diff = abs(txn_amount - pred_amount) / pred_amount if pred_amount > 0 else 0
+                        if amount_diff < 0.10:  # Within 10% of predicted amount
+                            is_duplicate = True
+                            print(f"  ⏭️  Skipping prediction for {recipient}: actual transaction already exists ({txn_amount} vs predicted {pred_amount})")
+                            break
+                
+                if not is_duplicate:
+                    filtered_predictions.append(prediction)
+            
+            print(f"💡 After filtering, {len(filtered_predictions)} predictions remain (removed {len(predictions) - len(filtered_predictions)} duplicates)")
+            
+            for prediction in filtered_predictions:
+                category = prediction['category']
+                amount = abs(float(prediction['amount']))
+                
+                if prediction['type'] == 'income':
+                    # Add to income category transactions
+                    monthly_data[current_month]['income_transactions'][category].append(prediction)
+                    # Add predicted amount to totals
+                    monthly_data[current_month]['income'] += amount
+                    monthly_data[current_month]['income_categories'][category] += amount
+                    print(f"  ✓ Added income prediction to category '{category}': {amount} (now has {len(monthly_data[current_month]['income_transactions'][category])} transactions)")
+                else:
+                    # Add to expense category transactions
+                    monthly_data[current_month]['expense_transactions'][category].append(prediction)
+                    # Add predicted amount to totals
+                    monthly_data[current_month]['expenses'] += amount
+                    monthly_data[current_month]['expense_categories'][category] += amount
+                    print(f"  ✓ Added expense prediction to category '{category}': {amount} (now has {len(monthly_data[current_month]['expense_transactions'][category])} transactions)")
+    except Exception as e:
+        print(f"Error generating predictions: {e}")
+        import traceback
+        traceback.print_exc()
+    
     # Calculate saving rate for each month
     summary = []
     for month, data in sorted(monthly_data.items(), reverse=True):
@@ -1050,28 +1176,38 @@ def get_summary():
         saving_rate = (savings / total_income * 100) if total_income > 0 else 0
 
         # Prepare income category data with transactions
+        # Include categories that have transactions even if total is 0 (for predictions)
         income_categories_with_transactions = {}
-        for category, total in data['income_categories'].items():
-            income_categories_with_transactions[category] = {
-                'total': round(total, 2),
-                'transactions': sorted(
-                    data['income_transactions'][category],
-                    key=lambda x: x['date'],
-                    reverse=True
-                )
-            }
+        all_income_categories = set(data['income_categories'].keys()) | set(data['income_transactions'].keys())
+        for category in all_income_categories:
+            total = data['income_categories'].get(category, 0)
+            transactions = data['income_transactions'].get(category, [])
+            if transactions:  # Only include if there are transactions
+                income_categories_with_transactions[category] = {
+                    'total': round(total, 2),
+                    'transactions': sorted(
+                        transactions,
+                        key=lambda x: x['date'],
+                        reverse=True
+                    )
+                }
 
         # Prepare expense category data with transactions
+        # Include categories that have transactions even if total is 0 (for predictions)
         expense_categories_with_transactions = {}
-        for category, total in data['expense_categories'].items():
-            expense_categories_with_transactions[category] = {
-                'total': round(total, 2),
-                'transactions': sorted(
-                    data['expense_transactions'][category],
-                    key=lambda x: x['date'],
-                    reverse=True
-                )
-            }
+        all_expense_categories = set(data['expense_categories'].keys()) | set(data['expense_transactions'].keys())
+        for category in all_expense_categories:
+            total = data['expense_categories'].get(category, 0)
+            transactions = data['expense_transactions'].get(category, [])
+            if transactions:  # Only include if there are transactions
+                expense_categories_with_transactions[category] = {
+                    'total': round(total, 2),
+                    'transactions': sorted(
+                        transactions,
+                        key=lambda x: x['date'],
+                        reverse=True
+                    )
+                }
 
         # Prepare internal transfers data
         internal_transfers_data = None
@@ -1085,7 +1221,7 @@ def get_summary():
                 )
             }
 
-        summary.append({
+        month_summary = {
             'month': month,
             'income': round(total_income, 2),
             'expenses': round(total_expenses, 2),
@@ -1095,7 +1231,23 @@ def get_summary():
             'expense_categories': expense_categories_with_transactions,
             'internal_transfers': internal_transfers_data,
             'currency_totals': {k: round(v, 2) for k, v in data['currency_totals'].items()}
-        })
+        }
+        
+        # Log info about current month
+        if month == current_month:
+            print(f"📊 Current month ({month}) summary:")
+            print(f"   Income categories: {len(income_categories_with_transactions)}")
+            print(f"   Expense categories: {len(expense_categories_with_transactions)}")
+            for cat_name, cat_data in income_categories_with_transactions.items():
+                predicted_count = sum(1 for t in cat_data['transactions'] if t.get('is_predicted'))
+                if predicted_count > 0:
+                    print(f"   📥 Income category '{cat_name}': {len(cat_data['transactions'])} transactions ({predicted_count} predicted)")
+            for cat_name, cat_data in expense_categories_with_transactions.items():
+                predicted_count = sum(1 for t in cat_data['transactions'] if t.get('is_predicted'))
+                if predicted_count > 0:
+                    print(f"   📤 Expense category '{cat_name}': {len(cat_data['transactions'])} transactions ({predicted_count} predicted)")
+        
+        summary.append(month_summary)
 
     print(f"Returning summary with {len(summary)} months")
     return jsonify(summary)
@@ -1709,6 +1861,74 @@ def get_upload_progress(upload_id):
             'success': False,
             'error': 'Upload ID not found'
         }), 404
+
+
+@app.route('/api/predictions/dismiss', methods=['POST'])
+@authenticate_request
+@require_auth
+def dismiss_prediction():
+    """
+    Dismiss a prediction so it won't show up again
+    """
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+    
+    try:
+        data = request.get_json()
+        prediction_key = data.get('prediction_key')
+        recurrence_type = data.get('recurrence_type', 'monthly')
+        
+        if not prediction_key:
+            return jsonify({'error': 'prediction_key is required'}), 400
+        
+        # Calculate expiry date based on recurrence type
+        from datetime import timedelta
+        current_date = datetime.now()
+        
+        if recurrence_type == 'monthly':
+            # Expire after 2 months
+            expires_at = current_date + timedelta(days=60)
+        elif recurrence_type == 'quarterly':
+            # Expire after 4 months
+            expires_at = current_date + timedelta(days=120)
+        elif recurrence_type == 'yearly':
+            # Expire after 14 months
+            expires_at = current_date + timedelta(days=420)
+        else:
+            # Default: 2 months
+            expires_at = current_date + timedelta(days=60)
+        
+        # Store dismissal in database
+        with wealth_db.db.get_cursor() as cursor:
+            # Get tenant DB ID
+            cursor.execute(
+                "SELECT id FROM tenants WHERE tenant_id = %s",
+                [tenant_id]
+            )
+            tenant_result = cursor.fetchone()
+            if not tenant_result:
+                return jsonify({'error': 'Tenant not found'}), 404
+            
+            tenant_db_id = tenant_result[0]
+            
+            # Insert or update dismissal
+            cursor.execute("""
+                INSERT INTO prediction_dismissals 
+                (tenant_id, prediction_key, expires_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (prediction_key) 
+                DO UPDATE SET dismissed_at = CURRENT_TIMESTAMP, expires_at = EXCLUDED.expires_at
+            """, [tenant_db_id, prediction_key, expires_at.date()])
+        
+        return jsonify({
+            'success': True,
+            'message': 'Prediction dismissed successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error dismissing prediction: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to dismiss prediction'}), 500
 
 
 @app.route('/api/download-statement/<file_id>', methods=['GET'])

@@ -464,6 +464,64 @@
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
+.prediction-history-container {
+  max-height: 300px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  background: #ffffff;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.prediction-history-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(229, 231, 235, 0.6);
+}
+
+.prediction-history-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.prediction-history-container::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.prediction-history-container::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+  border: 2px solid #ffffff;
+}
+
+.prediction-history-container::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.prediction-history-entry {
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  position: relative;
+}
+
+.prediction-history-entry:not(:last-child) {
+  border-bottom: 1px solid #eef2f6;
+}
+
+.prediction-history-entry.highlighted {
+  background: #f6f8ff;
+}
+
 .segment-empty {
   font-size: 13px;
   color: #94a3b8;
@@ -1638,6 +1696,8 @@
   transform: translateY(16px) scale(0.98);
   opacity: 0;
   transition: transform 0.22s ease, opacity 0.22s ease;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 .modal-content.open {
@@ -1649,6 +1709,25 @@
   transform: translateY(20px) scale(0.95);
   opacity: 0;
   pointer-events: none;
+}
+
+.modal-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 12px 0;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+  border: 2px solid white;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .modal-header {
@@ -1885,6 +1964,70 @@
 .transaction-item.transaction-flip-out .transaction-amount {
   will-change: transform, opacity;
   backface-visibility: hidden;
+}
+
+/* Predicted transaction styles */
+.transaction-item-predicted {
+  background: linear-gradient(135deg, #f8f9ff 0%, #fafbff 100%);
+  border-left: 3px dashed #6b7eff !important;
+  opacity: 0.90;
+  position: relative;
+  cursor: pointer !important;
+  transition: all 0.2s ease;
+}
+
+.transaction-item-predicted:hover {
+  opacity: 1;
+  box-shadow: 0 2px 8px rgba(107, 126, 255, 0.15);
+  border-color: #5a6eee !important;
+  transform: translateX(2px);
+}
+
+.transaction-item-predicted::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #6b7eff 0%, #8b9aff 100%);
+  opacity: 0.3;
+}
+
+.account-badge-predicted {
+  background: linear-gradient(135deg, #6b7eff 0%, #8b9aff 100%);
+  color: white;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(107, 126, 255, 0.2);
+}
+
+.dismiss-prediction-btn {
+  background: transparent;
+  border: 1px solid #dfe3e8;
+  color: #64748b;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dismiss-prediction-btn:hover {
+  background: #fee;
+  border-color: #fcc;
+  color: #dc2626;
+}
+
+.dismiss-prediction-btn:active {
+  transform: scale(0.95);
 }
 
 @keyframes transactionFlipOut {
