@@ -5,6 +5,8 @@ Implements PostgreSQL with pgcrypto for encrypted data storage
 """
 
 import os
+import uuid
+import hashlib
 import pg8000
 from contextlib import contextmanager
 from typing import Dict, List, Any, Optional, Generator
@@ -426,18 +428,41 @@ class WealthDatabase:
             return {'id': result[0], 'created_at': result[1]}
 
     def create_file_attachment(self, tenant_id: str, file_data: Dict[str, Any],
-                             encrypted_data: bytes, encryption_metadata: Dict[str, Any]) -> Dict[str, Any]:
+                             encrypted_data: bytes, encryption_metadata: Dict[str, Any],
+                             key_version: str = 'v1', uploaded_by: Optional[int] = None) -> Dict[str, Any]:
         """Store an encrypted file attachment"""
         tenant_db_id = self.set_tenant_context(tenant_id)
+
+        metadata_dict: Dict[str, Any]
+        if isinstance(encryption_metadata, (str, bytes, bytearray)):
+            if isinstance(encryption_metadata, (bytes, bytearray)):
+                metadata_str = encryption_metadata.decode('utf-8')
+            else:
+                metadata_str = encryption_metadata
+            try:
+                metadata_dict = json.loads(metadata_str)
+            except json.JSONDecodeError:
+                metadata_dict = {}
+        elif isinstance(encryption_metadata, dict):
+            metadata_dict = encryption_metadata
+        else:
+            metadata_dict = {}
+
+        metadata_payload = json.dumps(metadata_dict)
 
         with self.db.get_cursor() as cursor:
             cursor.execute("""
                 INSERT INTO file_attachments (
                     tenant_id, file_name, original_name, file_size, mime_type,
-                    encrypted_data, encryption_metadata, checksum, key_version,
-                    file_type, account_id, uploaded_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'v1', %s, %s, CURRENT_TIMESTAMP)
-                RETURNING id, file_name, uploaded_at
+                    encrypted_data, encryption_metadata, checksum, uploaded_by,
+                    key_version, file_type, account_id, transaction_id, holding_id
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s::jsonb, %s, %s,
+                    %s, %s, %s, %s, %s
+                )
+                RETURNING id, file_name, original_name, file_size, mime_type,
+                          file_type, uploaded_at, uploaded_by, checksum
             """, (
                 tenant_db_id,
                 file_data['file_name'],
@@ -445,13 +470,201 @@ class WealthDatabase:
                 file_data['file_size'],
                 file_data.get('mime_type'),
                 encrypted_data,
-                json.dumps(encryption_metadata),
+                metadata_payload,
                 file_data.get('checksum'),
+                uploaded_by,
+                key_version,
                 file_data.get('file_type'),
-                file_data.get('account_id')
+                file_data.get('account_id'),
+                file_data.get('transaction_id'),
+                file_data.get('holding_id')
             ))
 
-            return dict(cursor.fetchone())
+            result = cursor.fetchone()
+            return {
+                'id': result[0],
+                'file_name': result[1],
+                'original_name': result[2],
+                'file_size': result[3],
+                'mime_type': result[4],
+                'file_type': result[5],
+                'uploaded_at': result[6],
+                'uploaded_by': result[7],
+                'checksum': result[8],
+                'metadata': metadata_dict
+            }
+
+    def store_encrypted_file(self, tenant_id: str, encrypted_data: bytes,
+                             metadata: Dict[str, Any], file_type: Optional[str] = None,
+                             uploaded_by: Optional[int] = None,
+                             account_id: Optional[int] = None,
+                             transaction_id: Optional[int] = None,
+                             holding_id: Optional[int] = None) -> Dict[str, Any]:
+        """Persist encrypted file content and metadata."""
+        # Derive file info details from metadata payload
+        file_info = metadata.get('file_info', {}) or {}
+
+        original_name = file_info.get('original_name') or metadata.get('originalName') or 'document.bin'
+        original_name = os.path.basename(original_name)
+
+        # Generate deterministic checksum when missing
+        checksum = file_info.get('checksum') or metadata.get('checksum')
+        if not checksum:
+            checksum = hashlib.sha256(encrypted_data).hexdigest()
+            file_info['checksum'] = checksum
+
+        original_size = file_info.get('original_size') or metadata.get('originalSize') or len(encrypted_data)
+        mime_type = file_info.get('original_type') or metadata.get('originalType')
+
+        # Ensure metadata keeps the updated file_info block
+        metadata['file_info'] = {
+            **file_info,
+            'original_name': original_name,
+            'original_size': original_size,
+            'original_type': mime_type
+        }
+
+        stored_name = f"{uuid.uuid4().hex}_{original_name}"
+        file_data = {
+            'file_name': stored_name,
+            'original_name': original_name,
+            'file_size': int(original_size),
+            'mime_type': mime_type,
+            'checksum': checksum,
+            'file_type': file_type,
+            'account_id': account_id,
+            'transaction_id': transaction_id,
+            'holding_id': holding_id
+        }
+
+        return self.create_file_attachment(
+            tenant_id=tenant_id,
+            file_data=file_data,
+            encrypted_data=encrypted_data,
+            encryption_metadata=metadata,
+            uploaded_by=uploaded_by
+        )
+
+    def list_file_attachments(self, tenant_id: str,
+                              file_types: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Fetch file attachments for a tenant, optionally filtered by type."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        base_query = """
+            SELECT
+                id,
+                file_name,
+                original_name,
+                file_size,
+                mime_type,
+                file_type,
+                uploaded_at,
+                uploaded_by,
+                checksum,
+                encryption_metadata
+            FROM file_attachments
+            WHERE tenant_id = %s
+        """
+        params: List[Any] = [tenant_db_id]
+
+        if file_types:
+            base_query += " AND file_type = ANY(%s)"
+            params.append(file_types)
+
+        base_query += " ORDER BY uploaded_at DESC, id DESC"
+
+        with self.db.get_cursor() as cursor:
+            cursor.execute(base_query, params)
+            rows = cursor.fetchall()
+
+        attachments: List[Dict[str, Any]] = []
+        for row in rows:
+            metadata_payload = row[9]
+            if isinstance(metadata_payload, str):
+                try:
+                    metadata_payload = json.loads(metadata_payload)
+                except json.JSONDecodeError:
+                    metadata_payload = {}
+
+            uploaded_at = row[6]
+            if hasattr(uploaded_at, 'isoformat'):
+                uploaded_at_iso = uploaded_at.isoformat()
+            else:
+                uploaded_at_iso = uploaded_at
+
+            attachments.append({
+                'id': row[0],
+                'file_name': row[1],
+                'original_name': row[2],
+                'file_size': row[3],
+                'mime_type': row[4],
+                'file_type': row[5],
+                'uploaded_at': uploaded_at_iso,
+                'uploaded_by': row[7],
+                'checksum': row[8],
+                'metadata': metadata_payload
+            })
+
+        return attachments
+
+    def delete_file_attachment(self, tenant_id: str, file_id: int) -> Optional[Dict[str, Any]]:
+        """Delete a file attachment owned by a tenant and return metadata if found."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM file_attachments
+                WHERE tenant_id = %s AND id = %s
+                RETURNING id, encryption_metadata
+                """,
+                (tenant_db_id, file_id)
+            )
+            result = cursor.fetchone()
+            if not result:
+                return None
+
+            metadata = result[1]
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    metadata = {}
+
+            return {
+                'id': result[0],
+                'metadata': metadata or {}
+            }
+
+    def delete_file_attachments_by_type(self, tenant_id: str, file_type: str) -> List[Dict[str, Any]]:
+        """Delete all file attachments for a tenant matching a specific type."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM file_attachments
+                WHERE tenant_id = %s AND file_type = %s
+                RETURNING id, encryption_metadata
+                """,
+                (tenant_db_id, file_type)
+            )
+            rows = cursor.fetchall()
+
+        deleted_records: List[Dict[str, Any]] = []
+        for row in rows:
+            metadata = row[1]
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    metadata = {}
+            deleted_records.append({
+                'id': row[0],
+                'metadata': metadata or {}
+            })
+
+        return deleted_records
 
     def get_file_attachment(self, tenant_id: str, file_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve a file attachment"""
@@ -467,6 +680,55 @@ class WealthDatabase:
 
             result = cursor.fetchone()
             return dict(result) if result else None
+
+    def wipe_tenant_data(self, tenant_id: str, keep_custom_categories: bool = True) -> Dict[str, int]:
+        """
+        Delete all tenant-scoped data so the user can start fresh.
+
+        Args:
+            tenant_id: external identifier (string) for the tenant.
+            keep_custom_categories: when False, custom categories are removed as well.
+
+        Returns:
+            Dictionary summarizing the number of rows removed per table (best-effort).
+        """
+        tenant_db_id = self.set_tenant_context(tenant_id)
+        deletion_counts: Dict[str, int] = {}
+
+        tables_with_tenant_fk = [
+            ('category_overrides', 'tenant_id'),
+            ('prediction_dismissals', 'tenant_id'),
+            ('transactions', 'tenant_id'),
+            ('investment_transactions', 'tenant_id'),
+            ('investment_holdings', 'tenant_id'),
+            ('loans', 'tenant_id'),
+            ('file_attachments', 'tenant_id'),
+            ('accounts', 'tenant_id'),
+            ('audit_log', 'tenant_id')
+        ]
+
+        with self.db.get_cursor() as cursor:
+            for table_name, column in tables_with_tenant_fk:
+                cursor.execute(f"DELETE FROM {table_name} WHERE {column} = %s", (tenant_db_id,))
+                deletion_counts[table_name] = cursor.rowcount if cursor.rowcount is not None else 0
+
+            if not keep_custom_categories:
+                cursor.execute("DELETE FROM categories WHERE tenant_id = %s", (tenant_db_id,))
+                deletion_counts['categories'] = cursor.rowcount if cursor.rowcount is not None else 0
+
+        # Essential categories table uses textual tenant_id; ensure table exists before deleting.
+        with self.db.get_cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS essential_categories (
+                    tenant_id TEXT PRIMARY KEY,
+                    categories TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("DELETE FROM essential_categories WHERE tenant_id = %s", (tenant_id,))
+            deletion_counts['essential_categories'] = cursor.rowcount if cursor.rowcount is not None else 0
+
+        return deletion_counts
 
     def log_audit_event(self, tenant_id: str, user_id: int, action: str,
                        resource_type: str = None, resource_id: int = None,

@@ -7,6 +7,7 @@ import AccountsPage from './pages/AccountsPage';
 import BrokerPage from './pages/BrokerPage';
 import LoansPage from './pages/LoansPage';
 import ProjectionPage from './pages/ProjectionPage';
+import DocumentsPage from './pages/DocumentsPage';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_GOAL_EUR,
@@ -15,6 +16,7 @@ import {
   convertAmountToCurrency,
   getColorForPercentage
 } from './utils/finance';
+import { createSecureUpload } from './encryption';
 
 const DEFAULT_ESSENTIAL_CATEGORIES = ['Rent', 'Insurance', 'Groceries', 'Utilities'];
 const TAB_ITEMS = [
@@ -23,7 +25,8 @@ const TAB_ITEMS = [
   { key: 'accounts', label: 'Accounts' },
   { key: 'broker', label: 'Broker' },
   { key: 'loans', label: 'Loans' },
-  { key: 'projection', label: 'Wealth Projection' }
+  { key: 'projection', label: 'Wealth Projection' },
+  { key: 'data', label: 'Manage Files' }
 ];
 const TAB_DESCRIPTIONS = {
   'monthly-overview': 'Track current month progress and review historical spending patterns',
@@ -31,10 +34,169 @@ const TAB_DESCRIPTIONS = {
   accounts: 'Review balances across cash and savings accounts',
   broker: 'Inspect performance of your investment accounts',
   loans: 'Stay on top of loan balances and payments',
-  projection: 'Model future net worth using your current savings rate'
+  projection: 'Model future net worth using your current savings rate',
+  data: 'Upload and manage statements, broker reports, and loan documents'
 };
 
 const API_BASE_URL = 'http://localhost:5001';
+
+const BANK_STATEMENT_TYPES = {
+  bank_statement_dkb: 'dkb',
+  bank_statement_yuh: 'yuh'
+};
+
+const normalizeTypeKey = (value) =>
+  (value || '').toString().trim().toLowerCase();
+
+const normalizeDocumentRecord = (doc) => {
+  if (!doc) return doc;
+  let metadata = doc.documentMetadata ?? doc.metadata ?? doc.encryption_metadata;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch (error) {
+      metadata = {};
+    }
+  }
+  if (!metadata || typeof metadata !== 'object') {
+    metadata = {};
+  }
+
+  const fileInfo = metadata.file_info || doc.fileInfo || {};
+  const documentType =
+    doc.documentType ||
+    doc.file_type ||
+    fileInfo.document_type ||
+    metadata.document_type ||
+    (doc.documentMetadata && doc.documentMetadata.document_type);
+
+  return {
+    ...doc,
+    documentType,
+    documentMetadata: metadata,
+    metadata,
+    fileInfo,
+    clientMetadata: metadata.client_encryption || doc.clientMetadata
+  };
+};
+
+const uploadBankStatementWithProgress = (file, bankType, sessionToken, onProgress) => {
+  if (!bankType) {
+    return Promise.resolve(null);
+  }
+
+  const emit = (phase, progress, message, extra = {}) => {
+    if (typeof onProgress === 'function') {
+      onProgress(phase, progress, message, extra);
+    }
+  };
+
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    const uploadId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    formData.append('file', file);
+    formData.append('bankType', bankType);
+    formData.append('uploadId', uploadId);
+
+    const xhr = new XMLHttpRequest();
+    let pollHandle = null;
+    let finished = false;
+
+    const stopPolling = () => {
+      if (pollHandle) {
+        clearTimeout(pollHandle);
+        pollHandle = null;
+      }
+    };
+
+    const pollProgress = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/upload-progress/${uploadId}`, {
+          headers: {
+            'Authorization': `Bearer ${sessionToken}`
+          }
+        });
+
+        if (response.ok) {
+          const payload = await response.json();
+          const data = payload.data || payload;
+
+          if (data.success) {
+            const total = data.total || 0;
+            const processed = data.processed || 0;
+            const percent = total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 0;
+            emit('processing', percent, `Processing ${processed}/${total} transactions…`, {
+              processedCount: `${processed}/${total}`
+            });
+
+            if (data.status === 'complete' || data.status === 'error') {
+              return;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Progress polling error:', error);
+      }
+
+      if (!finished) {
+        pollHandle = setTimeout(pollProgress, 600);
+      }
+    };
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        emit('upload', percent, `Uploading… ${percent}%`);
+      }
+    });
+
+    xhr.upload.addEventListener('load', () => {
+      emit('upload', 100, 'Upload complete.');
+      emit('processing', 0, 'Processing transactions…', { processedCount: '0/?' });
+      pollProgress();
+    });
+
+    xhr.addEventListener('load', () => {
+      finished = true;
+      stopPolling();
+      try {
+        const responseText = xhr.responseText;
+        const parsed = responseText ? JSON.parse(responseText) : {};
+        const actual = parsed.data || parsed;
+
+        if ((xhr.status >= 200 && xhr.status < 300) && actual?.success) {
+          const imported = actual.imported || actual.processed || 0;
+          const total = actual.total || actual.processed || imported;
+          emit('processing', 100, `Processing complete: ${imported}/${total} transactions`, {
+            processedCount: `${imported}/${total}`
+          });
+          resolve(actual);
+        } else {
+          const errorMessage = actual?.error || actual?.message || `Failed to import statement (status ${xhr.status})`;
+          emit('processing', 100, errorMessage, { processedCount: 'error' });
+          reject(new Error(errorMessage));
+        }
+      } catch (error) {
+        emit('processing', 100, 'Failed to parse import response', { processedCount: 'error' });
+        reject(error);
+      }
+    });
+
+    const handleFailure = (reason) => {
+      finished = true;
+      stopPolling();
+      emit('processing', 100, reason, { processedCount: 'error' });
+      reject(new Error(reason));
+    };
+
+    xhr.addEventListener('error', () => handleFailure('Import failed - network error'));
+    xhr.addEventListener('abort', () => handleFailure('Import cancelled'));
+
+    xhr.open('POST', `${API_BASE_URL}/api/upload-csv`);
+    xhr.setRequestHeader('Authorization', `Bearer ${sessionToken}`);
+    xhr.send(formData);
+  });
+};
 
 const getPrimaryCurrencyForMonth = (month = {}) => {
   const eurTotal = Math.abs(month.currency_totals?.EUR || 0);
@@ -1793,12 +1955,20 @@ const LoginPage = ({ onLogin }) => {
 };
 
 // Onboarding Component for new users
-const OnboardingComponent = ({ onUploadComplete }) => {
+const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadStatuses, setUploadStatuses] = useState([]); // Array of status objects for each file
   const [bankType, setBankType] = useState('auto');
   const [uploadsComplete, setUploadsComplete] = useState(false);
   const fileInputRef = useRef(null);
+
+  const inferDocumentType = useCallback((fileName, selectedBankType) => {
+    if (selectedBankType === 'dkb') return 'bank_statement_dkb';
+    if (selectedBankType === 'yuh') return 'bank_statement_yuh';
+    const lower = (fileName || '').toLowerCase();
+    if (lower.includes('yuh')) return 'bank_statement_yuh';
+    return 'bank_statement_dkb';
+  }, []);
 
   // Debug: Log status changes
   useEffect(() => {
@@ -2037,7 +2207,8 @@ const OnboardingComponent = ({ onUploadComplete }) => {
               skipped: actualData.skipped || 0,
               uploadProgress: 100,
               processingProgress: 100,
-              progress: 100
+              progress: 100,
+              importResult: actualData
             };
             console.log(`✅ Upload success for ${file.name}:`, result);
             
@@ -2049,6 +2220,24 @@ const OnboardingComponent = ({ onUploadComplete }) => {
               }
               return updated;
             });
+
+            if (typeof onDocumentUpload === 'function') {
+              const docTypeKey = inferDocumentType(file.name, bankType);
+              onDocumentUpload(
+                docTypeKey,
+                file,
+                {
+                  statementSummary: {
+                    startDate: actualData.start_date,
+                    endDate: actualData.end_date,
+                    imported: actualData.imported,
+                    skipped: actualData.skipped
+                  }
+                },
+                null,
+                { skipImport: true, importResult: actualData }
+              ).catch(err => console.error('Failed to store encrypted document copy:', err));
+            }
             
             resolve(result);
           } else {
@@ -3067,6 +3256,7 @@ function App() {
   const [loans, setLoans] = useState(null);
   const [loading, setLoading] = useState(true);
   const [forceShowApp, setForceShowApp] = useState(false); // Force show app after upload
+  const uploadsInFlightRef = useRef(0);
   const [expandedCategories, setExpandedCategories] = useState({});
   const [activeTab, setActiveTab] = useState('monthly-overview');
   const [categorySorts, setCategorySorts] = useState({});
@@ -3089,6 +3279,13 @@ function App() {
   const [showEssentialCategoriesModal, setShowEssentialCategoriesModal] = useState(false);
   const [allCategories, setAllCategories] = useState([]);
   const [categoriesVersion, setCategoriesVersion] = useState(0);
+  const [documentTypes, setDocumentTypes] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [wipeKeepCategories, setWipeKeepCategories] = useState(true);
+  const [wipeLoading, setWipeLoading] = useState(false);
+  const [wipeError, setWipeError] = useState(null);
+  const [wipeSuccess, setWipeSuccess] = useState(null);
 
   const handleToggleIncludeLoanPayments = useCallback(() => {
     setIncludeLoanPayments((prev) => !prev);
@@ -3371,6 +3568,52 @@ function App() {
     }
   }, [sessionToken]);
 
+  const fetchDocuments = useCallback(async () => {
+    if (!sessionToken) {
+      setDocumentTypes([]);
+      setDocuments([]);
+      setDocumentsLoading(false);
+      return null;
+    }
+
+    try {
+      setDocumentsLoading(true);
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sessionToken}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/documents`, { headers });
+      const wrappedData = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          localStorage.removeItem('sessionToken');
+          localStorage.removeItem('user');
+          setIsAuthenticated(false);
+          setSessionToken(null);
+          setUser(null);
+        }
+        setDocumentTypes([]);
+        setDocuments([]);
+        return null;
+      }
+
+      const rawData = wrappedData.data?.data || wrappedData.data || wrappedData;
+      const docTypes = Array.isArray(rawData.documentTypes) ? rawData.documentTypes : [];
+      const docs = Array.isArray(rawData.documents) ? rawData.documents : [];
+      const normalizedDocs = docs.map(normalizeDocumentRecord);
+      setDocumentTypes(docTypes);
+      setDocuments(normalizedDocs);
+      return { documentTypes: docTypes, documents: normalizedDocs };
+    } catch (error) {
+      console.error('Error fetching documents:', error);
+      return null;
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, [sessionToken]);
+
   // Save essential categories
   const saveEssentialCategories = async (categories) => {
     if (!sessionToken) return;
@@ -3396,6 +3639,233 @@ function App() {
     }
   };
 
+  const handleDocumentUpload = useCallback(async (documentType, file, metadata = {}, onProgress, options = {}) => {
+    if (!sessionToken) {
+      throw new Error('Authentication required');
+    }
+
+    let normalizedMetadata = {
+      ...(metadata || {}),
+      documentType
+    };
+    const progressCallback = typeof onProgress === 'function' ? onProgress : () => {};
+    const bankType = BANK_STATEMENT_TYPES[documentType];
+    const skipImport = options?.skipImport;
+    const shouldImport = bankType && !skipImport;
+    let importResult = options?.importResult || null;
+
+    try {
+      if (shouldImport) {
+        uploadsInFlightRef.current += 1;
+        importResult = await uploadBankStatementWithProgress(file, bankType, sessionToken, progressCallback);
+        uploadsInFlightRef.current = Math.max(0, uploadsInFlightRef.current - 1);
+      } else if (!bankType) {
+        progressCallback('upload', 15, 'Encrypting file…');
+      }
+
+      if (importResult && (importResult.start_date || importResult.end_date)) {
+        normalizedMetadata = {
+          ...normalizedMetadata,
+          statementSummary: {
+            startDate: importResult.start_date,
+            endDate: importResult.end_date,
+            imported: importResult.imported,
+            skipped: importResult.skipped
+          }
+        };
+      } else if (options?.statementSummary) {
+        normalizedMetadata = {
+          ...normalizedMetadata,
+          statementSummary: options.statementSummary
+        };
+      }
+
+      const securePackage = await createSecureUpload(file, sessionToken, normalizedMetadata);
+      const formData = securePackage.formData;
+
+      formData.append('documentType', documentType);
+      if (normalizedMetadata && Object.keys(normalizedMetadata).length > 0) {
+        formData.append('documentMetadata', JSON.stringify(normalizedMetadata));
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/documents/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: formData
+      });
+
+      const wrappedData = await response.json();
+
+      if (!response.ok) {
+        const errorMessage = wrappedData.error || wrappedData.message || 'Upload failed';
+        throw new Error(errorMessage);
+      }
+
+      progressCallback('upload', 100, 'Document secured.');
+
+      const data = wrappedData.data?.data || wrappedData.data || wrappedData;
+      const newDocument = normalizeDocumentRecord(data.document);
+
+      if (newDocument) {
+        setDocuments(prev => {
+          const filtered = prev.filter(doc => doc.id !== newDocument.id);
+          return [newDocument, ...filtered];
+        });
+      }
+
+      if (!bankType || skipImport) {
+        progressCallback('processing', 100, 'Processing complete.');
+      }
+
+      await Promise.allSettled([
+        fetchSummary(),
+        fetchAccounts(),
+        fetchBroker(),
+        fetchLoans(),
+        fetchProjection()
+      ]);
+
+      await fetchDocuments();
+
+      if (shouldImport && uploadsInFlightRef.current === 0) {
+        const wasForceShown = forceShowApp;
+        setForceShowApp(true);
+        if (!wasForceShown) {
+          setActiveTab('monthly-overview');
+        }
+      }
+
+      return newDocument;
+    } catch (error) {
+      if (shouldImport) {
+        uploadsInFlightRef.current = Math.max(0, uploadsInFlightRef.current - 1);
+      }
+      console.error(`Error uploading document for type ${documentType}:`, error);
+      throw error;
+    }
+  }, [
+    sessionToken,
+    fetchSummary,
+    fetchAccounts,
+    fetchBroker,
+    fetchLoans,
+    fetchProjection,
+    fetchDocuments,
+    forceShowApp
+  ]);
+
+  const handleDocumentDelete = useCallback(async (documentId, documentType) => {
+    if (!sessionToken) {
+      throw new Error('Authentication required');
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      });
+
+      let responseData = {};
+      try {
+        responseData = await response.json();
+      } catch {
+        responseData = {};
+      }
+
+      if (!response.ok) {
+        const errorMessage = responseData.error || 'Failed to delete document';
+        throw new Error(errorMessage);
+      }
+
+      setDocuments(prev => prev.filter(doc => doc.id !== documentId));
+
+      if (documentType && BANK_STATEMENT_TYPES[documentType]) {
+        const refreshTasks = [
+          fetchSummary(),
+          fetchAccounts(),
+          fetchBroker(),
+          fetchLoans(),
+          fetchProjection()
+        ];
+        await Promise.allSettled(refreshTasks);
+        await fetchDocuments();
+        setForceShowApp(true);
+        setActiveTab('data');
+      } else {
+        await fetchDocuments();
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`Error deleting document ${documentId}:`, error);
+      throw error;
+    }
+  }, [sessionToken, fetchSummary, fetchAccounts, fetchBroker, fetchLoans, fetchProjection, fetchDocuments]);
+
+  const handleDocumentDeleteByType = useCallback(async (documentType) => {
+    if (!sessionToken) {
+      throw new Error('Authentication required');
+    }
+
+    const normalizedType = normalizeTypeKey(documentType);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/documents/by-type/${normalizedType}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        const errorMessage = responseData.error || 'Failed to delete documents';
+        throw new Error(errorMessage);
+      }
+
+      const deletedCount = responseData.deletedCount || 0;
+
+      if (deletedCount > 0) {
+        setDocuments(prev =>
+          prev.filter(doc => normalizeTypeKey(doc.documentType || doc.file_type) !== normalizedType)
+        );
+      }
+
+      if (normalizedType && normalizedType in BANK_STATEMENT_TYPES) {
+        const refreshTasks = [
+          fetchSummary(),
+          fetchAccounts(),
+          fetchBroker(),
+          fetchLoans(),
+          fetchProjection()
+        ];
+        await Promise.allSettled(refreshTasks);
+        await fetchDocuments();
+        setForceShowApp(true);
+        setActiveTab('data');
+      } else {
+        await fetchDocuments();
+      }
+
+      return deletedCount;
+    } catch (error) {
+      console.error(`Error deleting documents for type ${documentType}:`, error);
+      throw error;
+    }
+  }, [
+    sessionToken,
+    fetchSummary,
+    fetchAccounts,
+    fetchBroker,
+    fetchLoans,
+    fetchProjection,
+    fetchDocuments
+  ]);
+
   // Extract all unique categories from summary
   useEffect(() => {
     if (summary.length > 0) {
@@ -3419,11 +3889,12 @@ function App() {
       fetchLoans();
       fetchProjection();
       fetchEssentialCategories();
+      fetchDocuments();
     } else if (isAuthenticated && !sessionToken) {
       // If authenticated but no token, set loading to false to show error state
       setLoading(false);
     }
-  }, [isAuthenticated, sessionToken, fetchSummary, fetchAccounts, fetchBroker, fetchLoans, fetchProjection, fetchEssentialCategories]);
+  }, [isAuthenticated, sessionToken, fetchSummary, fetchAccounts, fetchBroker, fetchLoans, fetchProjection, fetchEssentialCategories, fetchDocuments]);
 
   useEffect(() => {
     setSegmentDetail(null);
@@ -3437,6 +3908,15 @@ function App() {
       isArray: Array.isArray(summary)
     });
   }, [summary]);
+
+  useEffect(() => {
+    if (!showSettings) {
+      setWipeLoading(false);
+      setWipeError(null);
+      setWipeSuccess(null);
+      setWipeKeepCategories(true);
+    }
+  }, [showSettings]);
 
   const closeCategoryModal = useCallback(() => {
     if (!categoryEditModal || isCategoryModalClosing) {
@@ -3650,6 +4130,79 @@ function App() {
       return updated;
     });
   }, []);
+
+  const handleWipeData = useCallback(async () => {
+    if (!sessionToken) {
+      setWipeError('Your session has expired. Please log in again.');
+      return;
+    }
+
+    const confirmationMessage = wipeKeepCategories
+      ? 'This will delete all accounts, transactions, loans, documents, and other financial data. Your custom categories will remain. This action cannot be undone. Continue?'
+      : 'This will delete all accounts, transactions, loans, documents, and custom categories. This action cannot be undone. Continue?';
+
+    if (!window.confirm(confirmationMessage)) {
+      return;
+    }
+
+    setWipeLoading(true);
+    setWipeError(null);
+    setWipeSuccess(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/wipe-data`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({ keepCustomCategories: wipeKeepCategories })
+      });
+
+      const wrappedData = await response.json();
+
+      if (!response.ok) {
+        const errorMessage = wrappedData?.error || wrappedData?.message || 'Failed to wipe data';
+        throw new Error(errorMessage);
+      }
+
+      setWipeSuccess('All data has been deleted successfully.');
+      setForceShowApp(false);
+      setSummary([]);
+      setAccounts(null);
+      setBroker(null);
+      setLoans(null);
+      setProjectionData(null);
+      setDocuments([]);
+      setDocumentTypes([]);
+      setEssentialCategories(DEFAULT_ESSENTIAL_CATEGORIES);
+
+      await Promise.allSettled([
+        fetchSummary(),
+        fetchAccounts(),
+        fetchBroker(),
+        fetchLoans(),
+        fetchProjection(),
+        fetchDocuments(),
+        fetchEssentialCategories()
+      ]);
+    } catch (error) {
+      console.error('Error wiping data:', error);
+      setWipeError(error?.message || 'Failed to wipe data');
+    } finally {
+      setWipeLoading(false);
+    }
+  }, [
+    sessionToken,
+    wipeKeepCategories,
+    fetchSummary,
+    fetchAccounts,
+    fetchBroker,
+    fetchLoans,
+    fetchProjection,
+    fetchDocuments,
+    fetchEssentialCategories
+  ]);
 
   const handleLogin = async (email, password) => {
     console.log('🔑 Login attempt for:', email);
@@ -3895,16 +4448,6 @@ function App() {
         padding: '20px 24px',
         borderTop: '1px solid rgba(0,0,0,0.06)'
       }}>
-        {user && (
-          <div style={{
-            color: '#86868b',
-            fontSize: '15px',
-            marginBottom: '12px',
-            fontWeight: '400'
-          }}>
-            Logged in as <strong style={{ color: '#1d1d1f' }}>{user.name || user.email || user.id}</strong>
-          </div>
-        )}
         <button
           onClick={handleLogout}
           style={{
@@ -3965,7 +4508,8 @@ function App() {
       <div className="app">
         <div className="app-layout" style={{ justifyContent: 'center' }}>
           <main className="main-content" style={{ maxWidth: '800px', width: '100%' }}>
-            <OnboardingComponent onUploadComplete={async () => {
+            <OnboardingComponent
+              onUploadComplete={async () => {
               console.log('🚀 Finish setup clicked, fetching data...');
               setLoading(true);
               try {
@@ -3974,6 +4518,7 @@ function App() {
                 
                 const summaryData = await fetchSummary();
                 await fetchAccounts();
+                await fetchDocuments();
                 console.log('✅ Data fetched successfully');
                 console.log('📊 Summary data:', summaryData);
                 console.log('📊 Summary length:', summaryData?.length || 0);
@@ -4038,7 +4583,9 @@ function App() {
                 // Even on error, try to show app if accounts exist
                 setForceShowApp(true);
               }
-            }} />
+            }}
+              onDocumentUpload={handleDocumentUpload}
+            />
           </main>
         </div>
       </div>
@@ -4074,562 +4621,6 @@ function App() {
       loanPayment: monthlyLoanPayment
     };
   }) : [];
-
-
-
-  // eslint-disable-next-line no-unused-vars
-  const renderCurrentMonthTab = () => {
-    if (!summary.length) {
-      return (
-        <div className="current-month-container">
-          <div className="loading">No transaction data available.</div>
-        </div>
-      );
-    }
-
-    const latestMonth = summary.reduce((latest, month) => {
-      if (!latest) return month;
-      return new Date(month.month) > new Date(latest.month) ? month : latest;
-    }, null);
-
-    if (!latestMonth) {
-      return (
-        <div className="current-month-container">
-          <div className="loading">Unable to determine the current month summary.</div>
-        </div>
-      );
-    }
-
-    const primaryCurrency = defaultCurrency;
-    const formatForPrimary = (amount) => formatCurrency(convertAmountToCurrency(amount, primaryCurrency), primaryCurrency);
-    const monthLabel = formatMonth(latestMonth.month);
-    const targetSavings = getSavingsGoal();
-    const income = latestMonth.income || 0;
-    const essentialTransactions = [];
-    const nonEssentialTransactions = [];
-    const essentialTxKeys = new Set();
-    const nonEssentialTxKeys = new Set();
-    let essentialSpend = 0;
-    let nonEssentialSpend = 0;
-    let essentialCount = 0;
-    let nonEssentialCount = 0;
-
-    Object.entries(latestMonth.expense_categories || {}).forEach(([category, categoryData]) => {
-      const total = categoryData?.total || 0;
-      const count = categoryData?.transactions?.length || 0;
-      const transactions = categoryData?.transactions || [];
-      
-      // Check if this is a loan payment category (case-insensitive, handle singular/plural)
-      const isLoanPayment = category.toLowerCase().includes('loan payment');
-      
-      // If loan payments are counted as savings, exclude them from spending entirely
-      if (includeLoanPayments && isLoanPayment) {
-        return; // Skip this category
-      }
-      
-      // Check if category is essential based on user's customization
-      if (essentialCategories.includes(category)) {
-        essentialSpend += total;
-        essentialCount += count;
-        transactions.forEach((tx) => {
-          const txKey = getTransactionKey(tx);
-          if (!essentialTxKeys.has(txKey)) {
-            essentialTxKeys.add(txKey);
-            essentialTransactions.push({ ...tx, category });
-          }
-        });
-      } else {
-        nonEssentialSpend += total;
-        nonEssentialCount += count;
-        transactions.forEach((tx) => {
-          const txKey = getTransactionKey(tx);
-          if (!nonEssentialTxKeys.has(txKey)) {
-            nonEssentialTxKeys.add(txKey);
-            nonEssentialTransactions.push({ ...tx, category });
-          }
-        });
-      }
-    });
-
-    const totalTrackedExpenses = essentialSpend + nonEssentialSpend;
-    const spendableBudget = Math.max(income - targetSavings, 0);
-    const overspendAmount = Math.max(totalTrackedExpenses - spendableBudget, 0);
-    
-    // Calculate loan payment amount if needed
-    let monthlyLoanPayment = 0;
-    if (includeLoanPayments && latestMonth.expense_categories) {
-      // Find loan payment category (case-insensitive)
-      const loanCategory = Object.keys(latestMonth.expense_categories).find(cat => 
-        cat.toLowerCase().includes('loan payment')
-      );
-      if (loanCategory) {
-        const loanPaymentData = latestMonth.expense_categories[loanCategory];
-        monthlyLoanPayment = loanPaymentData.total || 0;
-      }
-    }
-    
-    // Calculate adjusted savings and savings rate
-    const actualSavings = Math.max(latestMonth.savings, 0);
-    const adjustedSavings = actualSavings + monthlyLoanPayment;
-    const adjustedSavingsRate = income > 0 ? ((adjustedSavings / income) * 100) : 0;
-    const displaySavings = includeLoanPayments ? adjustedSavings : actualSavings;
-    const displaySavingsRate = includeLoanPayments ? adjustedSavingsRate : latestMonth.saving_rate;
-    
-    const totalPlanned = totalTrackedExpenses + targetSavings;
-    const isOverBudget = totalPlanned > income + 0.01;
-    // Savings gap calculation (for future use)
-    // const savingsGap = Math.max(targetSavings - actualSavings, 0);
-    const savingsProgressPercentage = targetSavings > 0
-      ? Math.min(Math.max((displaySavings / targetSavings) * 100, 0), 200)
-      : 0;
-    const unusedCapital = Math.max(income - totalPlanned, 0);
-    const hasUnusedCapital = unusedCapital > 0.01;
-    const essentialRadius = [12, 0, 0, 12];
-    const middleRadius = [0, 0, 0, 0];
-    const savingsRadius = hasUnusedCapital ? middleRadius : [0, 12, 12, 0];
-    const unusedRadius = hasUnusedCapital ? [0, 12, 12, 0] : middleRadius;
-
-    const sortTransactionsByAmount = (transactions) => [...transactions].sort((a, b) => {
-      const diff = Math.abs(b.amount) - Math.abs(a.amount);
-      if (diff !== 0) return diff;
-      return new Date(b.date) - new Date(a.date);
-    });
-
-    const handleSegmentSelect = (segment) => {
-      if (segment === 'essential') {
-        const meta = essentialTransactions.length
-          ? `${essentialTransactions.length} transaction${essentialTransactions.length === 1 ? '' : 's'}`
-          : 'No transactions found in essential categories.';
-        setSegmentDetail({
-          month: latestMonth.month,
-          segment,
-          label: 'Essential spend',
-          total: essentialSpend,
-          type: 'expense',
-          transactions: sortTransactionsByAmount(essentialTransactions),
-          meta,
-          message: essentialTransactions.length ? '' : 'Add more categorised essential expenses to see them here.'
-        });
-      } else if (segment === 'nonEssential') {
-        const meta = nonEssentialTransactions.length
-          ? `${nonEssentialTransactions.length} transaction${nonEssentialTransactions.length === 1 ? '' : 's'}`
-          : 'No transactions found in non-essential categories.';
-        setSegmentDetail({
-          month: latestMonth.month,
-          segment,
-          label: 'Non-essential spend',
-          total: nonEssentialSpend,
-          type: 'expense',
-          transactions: sortTransactionsByAmount(nonEssentialTransactions),
-          meta,
-          message: nonEssentialTransactions.length ? '' : 'Add more categorised non-essential expenses to see them here.'
-        });
-      } else if (segment === 'savings') {
-        const gap = Math.max(targetSavings - displaySavings, 0);
-        const meta = gap > 0
-          ? `Target ${formatForPrimary(targetSavings)} · saved ${formatForPrimary(displaySavings)}${includeLoanPayments && monthlyLoanPayment > 0 ? ` (incl. ${formatForPrimary(monthlyLoanPayment)} loans)` : ''} · gap ${formatForPrimary(gap)}`
-          : `Target ${formatForPrimary(targetSavings)} · saved ${formatForPrimary(displaySavings)}${includeLoanPayments && monthlyLoanPayment > 0 ? ` (incl. ${formatForPrimary(monthlyLoanPayment)} loans)` : ''}`;
-        setSegmentDetail({
-          month: latestMonth.month,
-          segment,
-          label: 'Savings goal',
-          total: targetSavings,
-          type: 'info',
-          transactions: [],
-          meta,
-          message: 'Savings goal is derived from income minus spending, so there are no individual transactions.'
-        });
-      } else if (segment === 'unused' && hasUnusedCapital) {
-        setSegmentDetail({
-          month: latestMonth.month,
-          segment,
-          label: 'Unused capital',
-          total: unusedCapital,
-          type: 'info',
-          transactions: [],
-          meta: `Remaining after planned spending: ${formatForPrimary(unusedCapital)}`,
-          message: 'Unused capital represents income that has not been assigned to savings or spending categories.'
-        });
-      }
-    };
-
-    const currentSegmentDetail = segmentDetail && segmentDetail.month === latestMonth.month ? segmentDetail : null;
-    const essentialShare = totalTrackedExpenses > 0 ? (essentialSpend / totalTrackedExpenses) * 100 : 0;
-    const nonEssentialShare = totalTrackedExpenses > 0 ? (nonEssentialSpend / totalTrackedExpenses) * 100 : 0;
-
-    return (
-      <div className="current-month-container">
-        <div className="current-month-header">
-          <div>
-            <h3>{monthLabel}</h3>
-            <p>
-              Income {formatForPrimary(latestMonth.income)} • Expenses {formatForPrimary(latestMonth.expenses)}
-            </p>
-          </div>
-        </div>
-
-        {income > 0 ? (
-          <div className="current-month-chart">
-            <div className="chart-header">
-              <span>Income allocation</span>
-              <strong>{formatForPrimary(income)}</strong>
-            </div>
-            <ResponsiveContainer width="100%" height={140}>
-              <BarChart
-                data={[
-                  {
-                    name: 'Allocation',
-                    essential: essentialSpend,
-                    nonEssential: nonEssentialSpend,
-                    savings: targetSavings,
-                    unused: unusedCapital
-                  }
-                ]}
-                layout="vertical"
-                margin={{ top: 20, right: 40, left: 20, bottom: 0 }}
-              >
-                <XAxis
-                  type="number"
-                  domain={[0, Math.max(income, totalPlanned)]}
-                  tickFormatter={(value) => formatForPrimary(value)}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis type="category" dataKey="name" hide />
-                <Tooltip
-                  formatter={(value, key) => {
-                    const label =
-                      key === 'essential'
-                        ? 'Essential spend'
-                        : key === 'nonEssential'
-                          ? 'Non-essential spend'
-                          : key === 'savings'
-                            ? 'Savings goal'
-                            : 'Unused capital';
-                    return [formatForPrimary(value), label];
-                  }}
-                />
-                <ReferenceLine
-                  x={income}
-                  stroke="#0f172a"
-                  strokeWidth={2}
-                  strokeDasharray="4 4"
-                  label={{
-                    value: `Income ${formatForPrimary(income)}`,
-                    position: 'top',
-                    fill: '#0f172a',
-                    fontSize: 12
-                  }}
-                />
-                <defs>
-                  <linearGradient id="segmentEssential" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#1a1a1a" />
-                    <stop offset="100%" stopColor="#2d2d2d" />
-                  </linearGradient>
-                  <linearGradient id="segmentNonEssential" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#525252" />
-                    <stop offset="100%" stopColor="#6b6b6b" />
-                  </linearGradient>
-                  <linearGradient id="segmentSavings" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#9ca3af" />
-                    <stop offset="100%" stopColor="#b8bfc7" />
-                  </linearGradient>
-                  <linearGradient id="segmentSavingsOver" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#000000" />
-                    <stop offset="100%" stopColor="#1a1a1a" />
-                  </linearGradient>
-                  <linearGradient id="segmentUnused" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#e5e7eb" />
-                    <stop offset="100%" stopColor="#f3f4f6" />
-                  </linearGradient>
-                </defs>
-                <Bar
-                  dataKey="essential"
-                  stackId="allocation"
-                  fill="url(#segmentEssential)"
-                  barSize={24}
-                  radius={essentialRadius}
-                  cursor={essentialTransactions.length ? 'pointer' : 'default'}
-                  onClick={() => {
-                    if (essentialTransactions.length) {
-                      handleSegmentSelect('essential');
-                    }
-                  }}
-                />
-                <Bar
-                  dataKey="nonEssential"
-                  stackId="allocation"
-                  fill="url(#segmentNonEssential)"
-                  radius={middleRadius}
-                  cursor={nonEssentialTransactions.length ? 'pointer' : 'default'}
-                  onClick={() => {
-                    if (nonEssentialTransactions.length) {
-                      handleSegmentSelect('nonEssential');
-                    }
-                  }}
-                />
-                <Bar
-                  dataKey="savings"
-                  stackId="allocation"
-                  fill={isOverBudget ? 'url(#segmentSavingsOver)' : 'url(#segmentSavings)'}
-                  radius={savingsRadius}
-                  cursor="pointer"
-                  onClick={() => handleSegmentSelect('savings')}
-                />
-                <Bar
-                  dataKey="unused"
-                  stackId="allocation"
-                  fill="url(#segmentUnused)"
-                  radius={unusedRadius}
-                  cursor={hasUnusedCapital ? 'pointer' : 'default'}
-                  onClick={() => {
-                    if (hasUnusedCapital) {
-                      handleSegmentSelect('unused');
-                    }
-                  }}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="chart-summary">
-              <div
-                className="chart-summary-item chart-summary-item-clickable"
-                onClick={() => {
-                  if (essentialTransactions.length) {
-                    handleSegmentSelect('essential');
-                  }
-                }}
-                role="button"
-                tabIndex={essentialTransactions.length ? 0 : -1}
-                onKeyDown={(event) => {
-                  if (essentialTransactions.length && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault();
-                    handleSegmentSelect('essential');
-                  }
-                }}
-              >
-                <span className="summary-dot essential" />
-                Essential spend: {formatForPrimary(-essentialSpend)}
-              </div>
-              <div
-                className="chart-summary-item chart-summary-item-clickable"
-                onClick={() => {
-                  if (nonEssentialTransactions.length) {
-                    handleSegmentSelect('nonEssential');
-                  }
-                }}
-                role="button"
-                tabIndex={nonEssentialTransactions.length ? 0 : -1}
-                onKeyDown={(event) => {
-                  if (nonEssentialTransactions.length && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault();
-                    handleSegmentSelect('nonEssential');
-                  }
-                }}
-              >
-                <span className="summary-dot non-essential" />
-                Non-essential spend: {formatForPrimary(-nonEssentialSpend)}
-              </div>
-              <div
-                className="chart-summary-item chart-summary-item-clickable"
-                onClick={() => handleSegmentSelect('savings')}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    handleSegmentSelect('savings');
-                  }
-                }}
-              >
-                <span className="summary-dot savings" style={{ background: isOverBudget ? '#ef4444' : '#10b981' }} />
-                Savings goal: {formatForPrimary(targetSavings)} (saved {formatForPrimary(displaySavings)})
-                {includeLoanPayments && monthlyLoanPayment > 0 && (
-                  <span style={{ fontSize: '11px', color: '#666', marginLeft: '4px' }}>
-                    incl. loans
-                  </span>
-                )}
-              </div>
-              <div
-                className={`chart-summary-item ${hasUnusedCapital ? 'chart-summary-item-clickable' : ''}`}
-                onClick={() => {
-                  if (hasUnusedCapital) {
-                    handleSegmentSelect('unused');
-                  }
-                }}
-                role="button"
-                tabIndex={hasUnusedCapital ? 0 : -1}
-                onKeyDown={(event) => {
-                  if (hasUnusedCapital && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault();
-                    handleSegmentSelect('unused');
-                  }
-                }}
-              >
-                <span className={`summary-dot ${overspendAmount > 0 ? 'negative' : 'unused'}`} />
-                {overspendAmount > 0
-                  ? `Overspend: ${formatForPrimary(overspendAmount)}`
-                  : `Unused capital: ${formatForPrimary(unusedCapital)}`}
-              </div>
-            </div>
-            {currentSegmentDetail && (
-              <div className="segment-detail">
-                <div className="segment-detail-header">
-                  <div>
-                    <h4>{currentSegmentDetail.label}</h4>
-                    <div className="segment-detail-meta">
-                      {currentSegmentDetail.type === 'expense'
-                        ? formatForPrimary(-currentSegmentDetail.total)
-                        : formatForPrimary(currentSegmentDetail.total)}
-                      <span className="segment-detail-divider">·</span>
-                      {currentSegmentDetail.meta}
-                    </div>
-                  </div>
-                  <button
-                    className="segment-detail-close"
-                    onClick={() => setSegmentDetail(null)}
-                    type="button"
-                  >
-                    Close
-                  </button>
-                </div>
-                {currentSegmentDetail.transactions.length > 0 ? (
-                  <div className="transaction-list segment-transaction-list">
-                    {currentSegmentDetail.transactions.map((transaction, index) => {
-                      const transactionKey = `${currentSegmentDetail.segment}-${getTransactionKey(transaction)}-${index}`;
-                      const amountIsExpense = transaction.amount < 0;
-                      const amountDisplay = `${amountIsExpense ? '-' : '+'}${formatCurrency(Math.abs(transaction.amount), transaction.currency)}`;
-                      const accountClass = transaction.account
-                        ? `account-badge account-badge-${transaction.account.toLowerCase().replace(/ /g, '-')}`
-                        : 'account-badge';
-                      return (
-                        <div key={transactionKey} className="transaction-item">
-                          <div className="transaction-date">
-                            {formatDate(transaction.date)}
-                            {transaction.account && (
-                              <span className={accountClass}>{transaction.account}</span>
-                            )}
-                          </div>
-                          <div className="transaction-details">
-                            <div className="transaction-recipient">
-                              {transaction.recipient || 'Unknown recipient'}
-                            </div>
-                            {transaction.description && (
-                              <div className="transaction-description">
-                                {transaction.description}
-                              </div>
-                            )}
-                            <div className="transaction-category-tag">
-                              {transaction.category}
-                            </div>
-                          </div>
-                          <div className={`transaction-amount ${amountIsExpense ? '' : 'transaction-amount-income'}`}>
-                            {amountDisplay}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="segment-empty">
-                    {currentSegmentDetail.message || 'No transaction details available for this segment.'}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="current-month-highlight">
-            <div className="current-month-remaining negative">
-              <span>No income recorded for this month</span>
-              <strong>{formatForPrimary(0)}</strong>
-            </div>
-          </div>
-        )}
-
-        <div className="metrics-bar-charts">
-          {/* Income Bar */}
-          <div className="metric-bar-item">
-            <div className="metric-bar-header">
-              <div className="metric-bar-label">INCOME</div>
-              <div className="metric-bar-value positive">+{formatForPrimary(income)}</div>
-            </div>
-            <div className="metric-bar-container">
-              <div
-                className="metric-bar-fill positive"
-                style={{ width: '100%' }}
-              />
-            </div>
-          </div>
-
-          {/* Expenses Bar - Stacked with Essential/Non-Essential */}
-          <div className="metric-bar-item">
-            <div className="metric-bar-header">
-              <div className="metric-bar-label">EXPENSES</div>
-              <div className="metric-bar-value negative">-{formatForPrimary(totalTrackedExpenses)}</div>
-            </div>
-            <div className="metric-bar-container">
-              <div style={{ display: 'flex', width: `${income > 0 ? (totalTrackedExpenses / income) * 100 : 0}%`, height: '100%' }}>
-                <div
-                  className="metric-bar-fill"
-                  style={{ 
-                    width: `${totalTrackedExpenses > 0 ? (essentialSpend / totalTrackedExpenses) * 100 : 0}%`,
-                    background: 'linear-gradient(90deg, #991b1b, #dc2626)',
-                    borderRadius: essentialSpend === totalTrackedExpenses ? '8px' : '8px 0 0 8px'
-                  }}
-                  title={`Essential: ${formatForPrimary(essentialSpend)}`}
-                />
-                <div
-                  className="metric-bar-fill"
-                  style={{ 
-                    width: `${totalTrackedExpenses > 0 ? (nonEssentialSpend / totalTrackedExpenses) * 100 : 0}%`,
-                    background: 'linear-gradient(90deg, #f97316, #fb923c)',
-                    borderRadius: nonEssentialSpend === totalTrackedExpenses ? '8px' : '0 8px 8px 0'
-                  }}
-                  title={`Non-Essential: ${formatForPrimary(nonEssentialSpend)}`}
-                />
-              </div>
-            </div>
-            <div className="metric-bar-footer" style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #991b1b, #dc2626)', borderRadius: '2px', display: 'inline-block' }}></span>
-                Essential: {formatForPrimary(essentialSpend)} ({essentialShare.toFixed(0)}%)
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '10px', height: '10px', background: 'linear-gradient(90deg, #f97316, #fb923c)', borderRadius: '2px', display: 'inline-block' }}></span>
-                Non-Essential: {formatForPrimary(nonEssentialSpend)} ({nonEssentialShare.toFixed(0)}%)
-              </span>
-            </div>
-          </div>
-
-          {/* Savings Bar */}
-          <div className="metric-bar-item">
-            <div className="metric-bar-header">
-              <div className="metric-bar-label">
-                SAVINGS {includeLoanPayments && monthlyLoanPayment > 0 && '(INCL. LOANS)'}
-              </div>
-              <div className="metric-bar-value positive">
-                +{formatForPrimary(displaySavings)}
-                <span className="metric-bar-meta">
-                  {displaySavingsRate.toFixed(1)}%
-                </span>
-              </div>
-            </div>
-            <div className="metric-bar-container">
-              <div
-                className="metric-bar-fill positive"
-                style={{ width: `${income > 0 ? (displaySavings / income) * 100 : 0}%` }}
-              />
-            </div>
-            <div className="metric-bar-footer">
-              {savingsProgressPercentage.toFixed(0)}% of goal • 
-            {((displaySavingsRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of {SAVINGS_RATE_GOAL}% savings rate
-          </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   console.log('✅✅✅ Authenticated - showing main app');
 
   const activeTabConfig = TAB_ITEMS.find(tab => tab.key === activeTab);
@@ -4670,10 +4661,12 @@ function App() {
 
         <div className="app-layout">
         <main className="main-content">
-          <div className="content-header">
-            <h2>{activeTabConfig?.label || ''}</h2>
-            {tabDescription && <p>{tabDescription}</p>}
-          </div>
+          {activeTab !== 'data' && (
+            <div className="content-header">
+              <h2>{activeTabConfig?.label || ''}</h2>
+              {tabDescription && <p>{tabDescription}</p>}
+            </div>
+          )}
           <div className="tab-content">
             {activeTab === 'monthly-overview' && (
               <MonthlyOverviewPage
@@ -4757,6 +4750,17 @@ function App() {
                 formatDate={formatDate}
               />
             )}
+            {activeTab === 'data' && (
+              <DocumentsPage
+                documentTypes={documentTypes}
+                documents={documents}
+                loading={documentsLoading}
+                onUpload={handleDocumentUpload}
+                onDelete={handleDocumentDelete}
+                onDeleteAll={handleDocumentDeleteByType}
+                onRefresh={fetchDocuments}
+              />
+            )}
             {activeTab === 'projection' && (
               <ProjectionPage
                 projectionData={projectionData}
@@ -4829,6 +4833,42 @@ function App() {
                     <span className="currency-name">US Dollar</span>
                   </button>
                 </div>
+              </div>
+              <div className="settings-section danger-zone">
+                <h3 className="settings-section-title">Reset Your Data</h3>
+                <p className="settings-section-description">
+                  Permanently delete all imported data (accounts, transactions, broker statements, loans, documents, and predictions).
+                  This cannot be undone.
+                </p>
+                <label className="danger-toggle">
+                  <input
+                    type="checkbox"
+                    checked={wipeKeepCategories}
+                    onChange={(event) => setWipeKeepCategories(event.target.checked)}
+                    disabled={wipeLoading}
+                  />
+                  <span>Keep my custom categories</span>
+                </label>
+                {wipeError && (
+                  <div className="danger-status danger-error">
+                    {wipeError}
+                  </div>
+                )}
+                {wipeSuccess && (
+                  <div className="danger-status danger-success">
+                    {wipeSuccess}
+                  </div>
+                )}
+                <button
+                  className="danger-button"
+                  onClick={handleWipeData}
+                  disabled={wipeLoading}
+                >
+                  {wipeLoading ? 'Wiping…' : 'Delete all data'}
+                </button>
+                <p className="danger-note">
+                  Tip: download any files you want to keep before wiping.
+                </p>
               </div>
             </div>
           </div>
