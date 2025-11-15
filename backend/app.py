@@ -1780,9 +1780,11 @@ def upload_document():
             return jsonify({'error': 'documentType is required'}), 400
 
         document_type = document_type.strip()
+        print(f"📄 Document upload - documentType received: {document_type}")
         document_config = DOCUMENT_TYPE_LOOKUP.get(document_type)
         if not document_config:
             return jsonify({'error': f'Unknown documentType: {document_type}'}), 400
+        print(f"✓ Document config found: {document_config['label']}")
 
         encrypted_file = request.files['encryptedFile']
         metadata_raw = request.form['encryptionMetadata']
@@ -1882,24 +1884,8 @@ def delete_document(document_id: int):
         if not deleted_info:
             return jsonify({'error': 'Document not found'}), 404
 
-        metadata = deleted_info.get('metadata') if isinstance(deleted_info, dict) else {}
-        document_type = (
-            metadata.get('fileMetadata', {}).get('documentType')
-            or metadata.get('document_type')
-            or metadata.get('documentType')
-        )
-
-        if document_type in ('bank_statement_dkb', 'bank_statement_yuh'):
-            remaining_statements = wealth_db.list_file_attachments(
-                tenant_id,
-                ['bank_statement_dkb', 'bank_statement_yuh']
-            )
-            remaining_count = len(remaining_statements)
-            if remaining_count == 0:
-                print(f"🧹 No bank statements remain after deleting {document_id}; wiping tenant data.")
-                wealth_db.wipe_tenant_data(tenant_id, keep_custom_categories=True)
-            else:
-                print(f"ℹ️ Skipping full wipe; {remaining_count} bank statement(s) still stored.")
+        # Transactions are automatically deleted via CASCADE foreign key constraint
+        print(f"✅ Document {document_id} deleted. Associated transactions removed automatically via CASCADE.")
 
         return jsonify({'success': True, 'deletedId': document_id})
     except Exception as e:
@@ -1926,17 +1912,8 @@ def delete_documents_by_type(document_type: str):
         deleted_records = wealth_db.delete_file_attachments_by_type(tenant_id, normalized_type)
         deleted_count = len(deleted_records)
 
-        if normalized_type in ('bank_statement_dkb', 'bank_statement_yuh') and deleted_count > 0:
-            remaining_statements = wealth_db.list_file_attachments(
-                tenant_id,
-                ['bank_statement_dkb', 'bank_statement_yuh']
-            )
-            remaining_count = len(remaining_statements)
-            if remaining_count == 0:
-                print(f"🧹 Deleted all statements of type={normalized_type}; wiping tenant data.")
-                wealth_db.wipe_tenant_data(tenant_id, keep_custom_categories=True)
-            else:
-                print(f"ℹ️ Skipping full wipe; {remaining_count} bank statement(s) still stored.")
+        # Transactions are automatically deleted via CASCADE foreign key constraint
+        print(f"✅ Deleted {deleted_count} document(s) of type {normalized_type}. Associated transactions removed automatically via CASCADE.")
 
         return jsonify({
             'success': True,
@@ -2011,6 +1988,8 @@ def upload_csv():
         file = request.files['file']
         bank_type = request.form.get('bankType', 'auto')  # 'yuh', 'dkb', or 'auto'
         upload_id = request.form.get('uploadId')  # Optional upload ID for progress tracking
+        document_id_str = request.form.get('documentId')  # Optional document ID to link transactions
+        document_id = int(document_id_str) if document_id_str else None
         
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
@@ -2041,12 +2020,15 @@ def upload_csv():
             transactions = []
             min_transaction_date = None
             max_transaction_date = None
+            detected_bank_type = bank_type  # Track what was actually detected
             
             if bank_type == 'yuh':
                 transactions = parser.parse_yuh(temp_path)
+                detected_bank_type = 'yuh'
                 print(f"Parsed as YUH, found {len(transactions)} transactions")
             elif bank_type == 'dkb':
                 transactions = parser.parse_dkb(temp_path)
+                detected_bank_type = 'dkb'
                 print(f"Parsed as DKB, found {len(transactions)} transactions")
             else:
                 # Auto-detect: Try DKB first if filename suggests DKB (contains "Umsatzliste" or "Girokonto" or "Tagesgeld")
@@ -2054,19 +2036,23 @@ def upload_csv():
                 if 'umsatzliste' in filename_lower or 'girokonto' in filename_lower or 'tagesgeld' in filename_lower or 'dkb' in filename_lower:
                     print(f"Auto-detecting as DKB based on filename: {file.filename}")
                     transactions = parser.parse_dkb(temp_path)
+                    detected_bank_type = 'dkb'
                     print(f"Auto-detected as DKB, parsed {len(transactions)} transactions")
-                elif 'yuh' in filename_lower:
+                elif 'yuh' in filename_lower or 'aktivit' in filename_lower:
                     print(f"Auto-detecting as YUH based on filename: {file.filename}")
                     transactions = parser.parse_yuh(temp_path)
+                    detected_bank_type = 'yuh'
                     print(f"Auto-detected as YUH, parsed {len(transactions)} transactions")
                 else:
                     # Try YUH first, then DKB
                     try:
                         transactions = parser.parse_yuh(temp_path)
+                        detected_bank_type = 'yuh'
                         print(f"Auto-detected as YUH, parsed {len(transactions)} transactions")
                     except Exception as e:
                         print(f"YUH parsing failed: {e}, trying DKB...")
                         transactions = parser.parse_dkb(temp_path)
+                        detected_bank_type = 'dkb'
                         print(f"Auto-detected as DKB, parsed {len(transactions)} transactions")
             
             print(f"Total transactions parsed: {len(transactions)}")
@@ -2096,6 +2082,10 @@ def upload_csv():
             created_accounts = {}
             imported_count = 0
             skipped_count = 0
+            
+            # Pre-calculate hashes for all transactions in this batch
+            # This allows us to skip duplicate checking within the same file
+            current_batch_hashes = set()
             
             for idx, trans in enumerate(transactions):
                 if (idx + 1) % 100 == 0:
@@ -2159,9 +2149,12 @@ def upload_csv():
                         'category': trans.get('category', 'Uncategorized')
                     }
 
-                    result = wealth_db.create_transaction(tenant_id, account_id, transaction_data)
+                    result = wealth_db.create_transaction(tenant_id, account_id, transaction_data, current_batch_hashes, document_id)
                     if result:
                         imported_count += 1
+                        # Add the hash of successfully imported transaction to the batch set
+                        if 'transaction_hash' in result:
+                            current_batch_hashes.add(result['transaction_hash'])
                     else:
                         skipped_count += 1
 
@@ -2208,7 +2201,8 @@ def upload_csv():
                 'accounts_created': len(created_accounts),
                 'tenant_id': tenant_id,  # Include tenant_id in response for debugging
                 'start_date': start_date_iso,
-                'end_date': end_date_iso
+                'end_date': end_date_iso,
+                'detected_bank_type': detected_bank_type  # Return what was actually detected
             })
 
         except Exception as e:

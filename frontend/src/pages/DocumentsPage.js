@@ -98,6 +98,7 @@ const DocumentsPage = ({
   onDeleteAll,
   onRefresh,
   onWipeData,
+  onWipeDataConfirm,
   wipeState = {}
 }) => {
   const [actionState, setActionState] = useState({});
@@ -1204,20 +1205,17 @@ const DocumentsPage = ({
                   doc?.metadata?.file_info?.originalSize;
                 const docUploaded = doc?.uploadedAt || doc?.uploaded_at;
                 return (
-                  <div key={doc?.id || docName} className="documents-confirm-meta">
-                    <span className="documents-confirm-label">{docName || 'Document'}</span>
-                    <span className="documents-confirm-value">
+                  <div key={doc?.id || docName} className="documents-bulk-delete-item">
+                    <div className="documents-bulk-delete-name">{docName || 'Document'}</div>
+                    <div className="documents-bulk-delete-meta">
                       {formatFileSize(docSize) || '—'} • {formatDateTime(docUploaded) || '—'}
-                    </span>
+                    </div>
                   </div>
                 );
               })}
               {bulkConfirmState.documents.length > 5 && (
-                <div className="documents-confirm-meta">
-                  <span className="documents-confirm-label">More</span>
-                  <span className="documents-confirm-value">
-                    +{bulkConfirmState.documents.length - 5} additional document{bulkConfirmState.documents.length - 5 === 1 ? '' : 's'}
-                  </span>
+                <div className="documents-bulk-delete-more">
+                  +{bulkConfirmState.documents.length - 5} additional document{bulkConfirmState.documents.length - 5 === 1 ? '' : 's'}
                 </div>
               )}
               {bulkConfirmState.error && (
@@ -1247,6 +1245,71 @@ const DocumentsPage = ({
                 disabled={bulkConfirmBusy}
               >
                 {bulkConfirmBusy ? 'Deleting…' : 'Delete documents'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {wipeState?.showConfirm && (
+        <div
+          className="modal-overlay open"
+          onClick={() => wipeState?.setShowConfirm?.(false)}
+        >
+          <div
+            className="modal-content open documents-confirm-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="documents-confirm-header">
+              <div>
+                <h3>Delete all data?</h3>
+                <p>
+                  This will delete <strong>all accounts, transactions, loans, documents, and other financial data</strong>.
+                  {wipeState?.keepCustomCategories ? ' Your custom categories will remain.' : ' All custom categories will also be deleted.'}
+                  {' '}<strong>This action cannot be undone.</strong>
+                </p>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  wipeState?.setShowConfirm?.(false);
+                }}
+                aria-label="Close confirmation"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="documents-confirm-body">
+              <div className="documents-wipe-warning">
+                <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: '24px', color: '#dc2626', marginBottom: '8px' }}></i>
+                <p style={{ margin: 0, fontSize: '14px', fontWeight: '500', color: '#dc2626' }}>
+                  Warning: This will permanently erase all your financial data
+                </p>
+              </div>
+            </div>
+
+            <div className="documents-confirm-actions">
+              <button
+                className="documents-cancel-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  wipeState?.setShowConfirm?.(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="danger-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (typeof onWipeDataConfirm === 'function') {
+                    onWipeDataConfirm();
+                  }
+                }}
+              >
+                Delete all data
               </button>
             </div>
           </div>

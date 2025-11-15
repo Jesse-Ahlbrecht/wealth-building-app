@@ -153,7 +153,8 @@ class WealthDatabase:
             result = cursor.fetchone()
             return {'id': result[0], 'username': result[1], 'created_at': result[2]}
 
-    def create_transaction(self, tenant_id: str, account_id: int, transaction_data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_transaction(self, tenant_id: str, account_id: int, transaction_data: Dict[str, Any], 
+                          exclude_hashes: set = None, source_document_id: int = None) -> Dict[str, Any]:
         """
         Create a new transaction record with encrypted sensitive data
 
@@ -161,6 +162,9 @@ class WealthDatabase:
             tenant_id: Tenant identifier
             account_id: Database account ID
             transaction_data: Transaction data dictionary
+            exclude_hashes: Set of transaction hashes to exclude from duplicate checking
+                          (used to allow duplicates within the same upload batch)
+            source_document_id: ID of the document this transaction was imported from
 
         Returns:
             Created transaction data
@@ -170,10 +174,12 @@ class WealthDatabase:
         # Calculate transaction hash for duplicate detection
         transaction_hash = self._calculate_transaction_hash(account_id, transaction_data)
 
-        # Check for duplicate
-        existing = self.get_transaction_by_hash(tenant_id, transaction_hash)
-        if existing:
-            return existing
+        # Check for duplicate, but skip if this hash is in the current batch
+        if exclude_hashes is None or transaction_hash not in exclude_hashes:
+            existing = self.get_transaction_by_hash(tenant_id, transaction_hash)
+            if existing:
+                print(f"Duplicate found: {transaction_data.get('recipient', 'Unknown')} on {transaction_data.get('date')} - skipping")
+                return existing
 
         with self.db.get_cursor() as cursor:
             cursor.execute("""
@@ -181,11 +187,11 @@ class WealthDatabase:
                     tenant_id, account_id, transaction_date, amount, currency,
                     transaction_type, encrypted_description, encrypted_recipient,
                     encrypted_reference, category, subcategory, tags,
-                    transaction_hash, key_version
+                    transaction_hash, source_document_id, key_version
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s,
                     encrypt_tenant_data(%s, %s), encrypt_tenant_data(%s, %s), encrypt_tenant_data(%s, %s),
-                    %s, %s, %s, %s, 'v1'
+                    %s, %s, %s, %s, %s, 'v1'
                 )
                 RETURNING id, transaction_date, amount, currency, transaction_type,
                          category, subcategory, tags, transaction_hash, created_at
@@ -197,7 +203,7 @@ class WealthDatabase:
                 transaction_data.get('recipient'), tenant_db_id,
                 transaction_data.get('reference', ''), tenant_db_id,
                 transaction_data.get('category'), transaction_data.get('subcategory'),
-                transaction_data.get('tags', []), transaction_hash
+                transaction_data.get('tags', []), transaction_hash, source_document_id
             ))
 
             result = cursor.fetchone()
@@ -211,9 +217,38 @@ class WealthDatabase:
     def _calculate_transaction_hash(self, account_id: int, transaction_data: Dict[str, Any]) -> str:
         """Calculate transaction hash for duplicate detection"""
         import hashlib
+        import re
+
+        # Normalize recipient for better duplicate detection
+        recipient = transaction_data.get('recipient', '').lower()
+        
+        # Common merchant name normalizations to catch duplicates
+        merchant_mappings = {
+            'amzn': 'amazon',
+            'amznmktpde': 'amazon',
+            'paypal': 'paypal',
+            'pp': 'paypal',
+        }
+        
+        # Apply merchant mappings
+        for pattern, normalized in merchant_mappings.items():
+            if pattern in recipient.replace('.', '').replace(' ', ''):
+                recipient = normalized
+                break
+        
+        # Remove special chars and extra spaces
+        normalized_recipient = re.sub(r'[^\w\s]', '', recipient).strip()
+        normalized_recipient = re.sub(r'\s+', ' ', normalized_recipient)
+        
+        # For very long recipients (likely transaction IDs), extract just the first meaningful word
+        words = normalized_recipient.split()
+        if len(normalized_recipient) > 30 and words:
+            # Take first word if it's meaningful (>3 chars)
+            if len(words[0]) > 3:
+                normalized_recipient = words[0]
 
         # Create a unique string from key transaction fields
-        hash_string = f"{account_id}|{transaction_data['date']}|{transaction_data['amount']}|{transaction_data.get('description', '')}|{transaction_data.get('recipient', '')}"
+        hash_string = f"{account_id}|{transaction_data['date']}|{transaction_data['amount']}|{transaction_data.get('description', '')}|{normalized_recipient}"
 
         return hashlib.sha256(hash_string.encode()).hexdigest()
 

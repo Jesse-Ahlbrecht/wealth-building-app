@@ -80,7 +80,7 @@ const normalizeDocumentRecord = (doc) => {
   };
 };
 
-const uploadBankStatementWithProgress = (file, bankType, sessionToken, onProgress) => {
+const uploadBankStatementWithProgress = (file, bankType, sessionToken, onProgress, documentId = null) => {
   if (!bankType) {
     return Promise.resolve(null);
   }
@@ -97,6 +97,9 @@ const uploadBankStatementWithProgress = (file, bankType, sessionToken, onProgres
     formData.append('file', file);
     formData.append('bankType', bankType);
     formData.append('uploadId', uploadId);
+    if (documentId) {
+      formData.append('documentId', documentId.toString());
+    }
 
     const xhr = new XMLHttpRequest();
     let pollHandle = null;
@@ -2222,7 +2225,12 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
             });
 
             if (typeof onDocumentUpload === 'function') {
-              const docTypeKey = inferDocumentType(file.name, bankType);
+              // Use the detected bank type from the backend response
+              const detectedType = actualData.detected_bank_type || bankType;
+              const docTypeKey = detectedType === 'yuh' ? 'bank_statement_yuh' : 
+                                detectedType === 'dkb' ? 'bank_statement_dkb' : 
+                                inferDocumentType(file.name, bankType);
+              console.log(`📄 Saving document as type: ${docTypeKey} (detected: ${detectedType})`);
               onDocumentUpload(
                 docTypeKey,
                 file,
@@ -2525,7 +2533,7 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
     <div className="onboarding-container">
       <div className="onboarding-content">
         <div className="onboarding-header">
-          <h2>Welcome to Wealth Tracker! 👋</h2>
+          <h2>Welcome to Wealth Tracker</h2>
           <p>Get started by uploading your bank statements</p>
         </div>
 
@@ -2536,12 +2544,12 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
             onDragOver={handleDragOver}
             onClick={() => fileInputRef.current?.click()}
             style={{
-              border: '2px dashed #667eea',
-              borderRadius: '12px',
+              border: '2px dashed #e5e7eb',
+              borderRadius: '8px',
               padding: '60px 40px',
               textAlign: 'center',
               cursor: 'pointer',
-              backgroundColor: uploading ? '#f7fafc' : '#fafbfc',
+              backgroundColor: uploading ? '#f9fafb' : '#ffffff',
               transition: 'all 0.3s',
               opacity: uploading ? 0.6 : 1
             }}
@@ -2558,13 +2566,13 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
             {uploading || uploadStatuses.length > 0 ? (
               <div>
                 <div style={{ fontSize: '48px', marginBottom: '16px' }}>
-                  {uploading ? '⏳' : uploadsComplete ? '🎉' : completedCount > 0 ? '✅' : '📁'}
+                  {uploading ? '⏳' : uploadsComplete ? '✓' : completedCount > 0 ? '✓' : '📁'}
                 </div>
-                <p style={{ fontSize: '18px', color: '#667eea', fontWeight: '600' }}>
+                <p style={{ fontSize: '18px', color: '#1f2937', fontWeight: '600' }}>
                   {uploading 
                     ? `Uploading ${uploadStatuses.length} file${uploadStatuses.length !== 1 ? 's' : ''}...`
                     : uploadsComplete 
-                      ? 'Uploads Complete!'
+                      ? 'Uploads Complete'
                       : `${completedCount} file${completedCount !== 1 ? 's' : ''} uploaded successfully`
                   }
                 </p>
@@ -2574,19 +2582,19 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                     <div style={{
                       width: '100%',
                       height: '8px',
-                      backgroundColor: '#e2e8f0',
+                      backgroundColor: '#f3f4f6',
                       borderRadius: '4px',
                       overflow: 'hidden'
                     }}>
                       <div style={{
                         width: `${overallProgress}%`,
                         height: '100%',
-                        backgroundColor: uploadsComplete ? '#22c55e' : '#667eea',
+                        backgroundColor: '#1f2937',
                         borderRadius: '4px',
                         transition: 'width 0.3s ease'
                       }} />
                     </div>
-                    <p style={{ marginTop: '8px', fontSize: '14px', color: '#4a5568' }}>
+                    <p style={{ marginTop: '8px', fontSize: '14px', color: '#6b7280' }}>
                       {overallProgress}% complete ({completedCount} succeeded{failedCount > 0 ? `, ${failedCount} failed` : ''})
                     </p>
                   </div>
@@ -2595,13 +2603,13 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
             ) : (
               <div>
                 <div style={{ fontSize: '48px', marginBottom: '16px' }}>📁</div>
-                <p style={{ fontSize: '18px', color: '#667eea', fontWeight: '600', marginBottom: '8px' }}>
+                <p style={{ fontSize: '18px', color: '#1f2937', fontWeight: '600', marginBottom: '8px' }}>
                   Click to upload or drag and drop
                 </p>
-                <p style={{ fontSize: '14px', color: '#718096', marginTop: '8px' }}>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '8px' }}>
                   Supports YUH and DKB bank statement CSV files
                 </p>
-                <p style={{ fontSize: '12px', color: '#a0aec0', marginTop: '8px' }}>
+                <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '8px' }}>
                   You can select multiple files at once
                 </p>
               </div>
@@ -2609,7 +2617,7 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
           </div>
 
           <div className="bank-type-selector" style={{ marginTop: '24px', textAlign: 'center' }}>
-            <label style={{ display: 'block', marginBottom: '12px', fontSize: '14px', color: '#4a5568', fontWeight: '500' }}>
+            <label style={{ display: 'block', marginBottom: '12px', fontSize: '14px', color: '#6b7280', fontWeight: '500' }}>
               Bank Type (optional - auto-detected if not specified):
             </label>
             <select
@@ -2619,9 +2627,10 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
               style={{
                 padding: '8px 16px',
                 borderRadius: '6px',
-                border: '1px solid #e2e8f0',
+                border: '1px solid #e5e7eb',
                 fontSize: '14px',
                 backgroundColor: 'white',
+                color: '#1f2937',
                 cursor: uploading ? 'not-allowed' : 'pointer'
               }}
             >
@@ -2640,13 +2649,13 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                     marginBottom: '12px',
                     padding: '12px',
                     borderRadius: '8px',
-                    backgroundColor: status.type === 'success' ? '#f0fdf4' : status.type === 'error' ? '#fef2f2' : '#f7fafc',
+                    backgroundColor: status.type === 'success' ? '#f9fafb' : status.type === 'error' ? '#fef2f2' : '#ffffff',
                     border: `1px solid ${
-                      status.type === 'success' ? '#86efac' : 
+                      status.type === 'success' ? '#d1d5db' : 
                       status.type === 'error' ? '#fca5a5' : 
-                      '#cbd5e0'
+                      '#e5e7eb'
                     }`,
-                    color: status.type === 'success' ? '#166534' : status.type === 'error' ? '#991b1b' : '#4a5568'
+                    color: status.type === 'success' ? '#1f2937' : status.type === 'error' ? '#991b1b' : '#6b7280'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -2665,27 +2674,27 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                         <span style={{
                           fontSize: '11px',
                           fontWeight: '600',
-                          color: '#667eea',
+                          color: '#6b7280',
                           textTransform: 'uppercase',
                           letterSpacing: '0.5px'
                         }}>
                           📤 Upload
                         </span>
-                        <span style={{ fontSize: '11px', color: '#667eea', fontWeight: '500' }}>
+                        <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '500' }}>
                           {status.uploadProgress || 0}%
                         </span>
                       </div>
                       <div style={{
                         width: '100%',
                         height: '6px',
-                        backgroundColor: '#e2e8f0',
+                        backgroundColor: '#f3f4f6',
                         borderRadius: '3px',
                         overflow: 'hidden'
                       }}>
                         <div style={{
                           width: `${status.uploadProgress || 0}%`,
                           height: '100%',
-                          backgroundColor: '#667eea',
+                          backgroundColor: '#6b7280',
                           borderRadius: '3px',
                           transition: 'width 0.3s ease'
                         }} />
@@ -2700,27 +2709,27 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                         <span style={{
                           fontSize: '11px',
                           fontWeight: '600',
-                          color: '#22c55e',
+                          color: '#1f2937',
                           textTransform: 'uppercase',
                           letterSpacing: '0.5px'
                         }}>
                           ⚙️ Processing
                         </span>
-                        <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: '500' }}>
+                        <span style={{ fontSize: '11px', color: '#1f2937', fontWeight: '500' }}>
                           {status.processingProgress || 0}%
                         </span>
                       </div>
                       <div style={{
                         width: '100%',
                         height: '6px',
-                        backgroundColor: '#e2e8f0',
+                        backgroundColor: '#f3f4f6',
                         borderRadius: '3px',
                         overflow: 'hidden'
                       }}>
                         <div style={{
                           width: `${status.processingProgress || 0}%`,
                           height: '100%',
-                          backgroundColor: '#22c55e',
+                          backgroundColor: '#1f2937',
                           borderRadius: '3px',
                           transition: 'width 0.3s ease'
                         }} />
@@ -2755,16 +2764,16 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
             <div style={{ marginTop: '32px', textAlign: 'center' }}>
               <div style={{
                 padding: '24px',
-                backgroundColor: '#f0fdf4',
-                borderRadius: '12px',
-                border: '2px solid #86efac',
+                backgroundColor: '#f9fafb',
+                borderRadius: '8px',
+                border: '1px solid #e5e7eb',
                 marginBottom: '20px'
               }}>
-                <div style={{ fontSize: '48px', marginBottom: '12px' }}>🎉</div>
-                <h3 style={{ fontSize: '20px', fontWeight: '600', color: '#166534', marginBottom: '8px' }}>
-                  Setup Complete!
+                <div style={{ fontSize: '48px', marginBottom: '12px' }}>✓</div>
+                <h3 style={{ fontSize: '20px', fontWeight: '600', color: '#1f2937', marginBottom: '8px' }}>
+                  Setup Complete
                 </h3>
-                <p style={{ fontSize: '14px', color: '#166534', marginBottom: '0' }}>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '0' }}>
                   Your transactions have been imported successfully. Click the button below to start using Wealth Tracker.
                 </p>
               </div>
@@ -2780,22 +2789,19 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                   fontSize: '16px',
                   fontWeight: '600',
                   color: 'white',
-                  backgroundColor: '#667eea',
+                  backgroundColor: '#1f2937',
                   border: 'none',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
-                  boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)',
-                  transition: 'all 0.3s ease'
+                  transition: 'all 0.2s ease'
                 }}
                 onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#5568d3';
-                  e.target.style.transform = 'translateY(-2px)';
-                  e.target.style.boxShadow = '0 6px 16px rgba(102, 126, 234, 0.5)';
+                  e.target.style.backgroundColor = '#111827';
+                  e.target.style.transform = 'translateY(-1px)';
                 }}
                 onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#667eea';
+                  e.target.style.backgroundColor = '#1f2937';
                   e.target.style.transform = 'translateY(0)';
-                  e.target.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
                 }}
               >
                 Finish Setup →
@@ -2803,9 +2809,9 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
             </div>
           )}
 
-          <div className="onboarding-info" style={{ marginTop: '32px', padding: '20px', backgroundColor: '#f7fafc', borderRadius: '8px' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#2d3748' }}>How to get your bank statements:</h3>
-            <ul style={{ textAlign: 'left', fontSize: '14px', color: '#4a5568', lineHeight: '1.8', paddingLeft: '20px' }}>
+          <div className="onboarding-info" style={{ marginTop: '32px', padding: '20px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+            <h3 style={{ fontSize: '16px', marginBottom: '12px', color: '#1f2937' }}>How to get your bank statements:</h3>
+            <ul style={{ textAlign: 'left', fontSize: '14px', color: '#6b7280', lineHeight: '1.8', paddingLeft: '20px' }}>
               <li><strong>YUH:</strong> Export your transactions as CSV from the YUH app or website</li>
               <li><strong>DKB:</strong> Download your DKB bank statement as CSV from the DKB online banking portal</li>
               <li>You can upload multiple files at once - duplicate transactions will be automatically skipped</li>
@@ -3286,6 +3292,7 @@ function App() {
   const [wipeLoading, setWipeLoading] = useState(false);
   const [wipeError, setWipeError] = useState(null);
   const [wipeSuccess, setWipeSuccess] = useState(null);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
 
   const handleToggleIncludeLoanPayments = useCallback(() => {
     setIncludeLoanPayments((prev) => !prev);
@@ -3655,29 +3662,11 @@ function App() {
     let importResult = options?.importResult || null;
 
     try {
-      if (shouldImport) {
-        uploadsInFlightRef.current += 1;
-        importResult = await uploadBankStatementWithProgress(file, bankType, sessionToken, progressCallback);
-        uploadsInFlightRef.current = Math.max(0, uploadsInFlightRef.current - 1);
-      } else if (!bankType) {
+      // Step 1: Save the document first to get its ID
+      if (!bankType) {
         progressCallback('upload', 15, 'Encrypting file…');
-      }
-
-      if (importResult && (importResult.start_date || importResult.end_date)) {
-        normalizedMetadata = {
-          ...normalizedMetadata,
-          statementSummary: {
-            startDate: importResult.start_date,
-            endDate: importResult.end_date,
-            imported: importResult.imported,
-            skipped: importResult.skipped
-          }
-        };
-      } else if (options?.statementSummary) {
-        normalizedMetadata = {
-          ...normalizedMetadata,
-          statementSummary: options.statementSummary
-        };
+      } else {
+        progressCallback('upload', 10, 'Preparing document…');
       }
 
       const securePackage = await createSecureUpload(file, sessionToken, normalizedMetadata);
@@ -3703,10 +3692,36 @@ function App() {
         throw new Error(errorMessage);
       }
 
-      progressCallback('upload', 100, 'Document secured.');
+      progressCallback('upload', shouldImport ? 30 : 100, 'Document secured.');
 
       const data = wrappedData.data?.data || wrappedData.data || wrappedData;
       const newDocument = normalizeDocumentRecord(data.document);
+      const documentId = newDocument?.id;
+
+      // Step 2: Import transactions with the document ID
+      if (shouldImport && documentId) {
+        uploadsInFlightRef.current += 1;
+        importResult = await uploadBankStatementWithProgress(file, bankType, sessionToken, progressCallback, documentId);
+        uploadsInFlightRef.current = Math.max(0, uploadsInFlightRef.current - 1);
+
+        // Update document metadata with import summary
+        if (importResult && (importResult.start_date || importResult.end_date)) {
+          normalizedMetadata = {
+            ...normalizedMetadata,
+            statementSummary: {
+              startDate: importResult.start_date,
+              endDate: importResult.end_date,
+              imported: importResult.imported,
+              skipped: importResult.skipped
+            }
+          };
+        }
+      } else if (options?.statementSummary) {
+        normalizedMetadata = {
+          ...normalizedMetadata,
+          statementSummary: options.statementSummary
+        };
+      }
 
       if (newDocument) {
         setDocuments(prev => {
@@ -3732,7 +3747,10 @@ function App() {
       if (shouldImport && uploadsInFlightRef.current === 0) {
         const wasForceShown = forceShowApp;
         setForceShowApp(true);
-        if (!wasForceShown) {
+        // Only switch to monthly-overview if user wasn't already using the app
+        // (i.e., this is their first upload during onboarding)
+        // Don't switch if they're already on the data tab managing files
+        if (!wasForceShown && activeTab !== 'data') {
           setActiveTab('monthly-overview');
         }
       }
@@ -3753,7 +3771,8 @@ function App() {
     fetchLoans,
     fetchProjection,
     fetchDocuments,
-    forceShowApp
+    forceShowApp,
+    activeTab
   ]);
 
   const handleDocumentDelete = useCallback(async (documentId, documentType) => {
@@ -4131,20 +4150,16 @@ function App() {
     });
   }, []);
 
-  const handleWipeData = useCallback(async () => {
+  const handleWipeDataRequest = useCallback(() => {
     if (!sessionToken) {
       setWipeError('Your session has expired. Please log in again.');
       return;
     }
+    setShowWipeConfirm(true);
+  }, [sessionToken]);
 
-    const confirmationMessage = wipeKeepCategories
-      ? 'This will delete all accounts, transactions, loans, documents, and other financial data. Your custom categories will remain. This action cannot be undone. Continue?'
-      : 'This will delete all accounts, transactions, loans, documents, and custom categories. This action cannot be undone. Continue?';
-
-    if (!window.confirm(confirmationMessage)) {
-      return;
-    }
-
+  const handleWipeDataConfirm = useCallback(async () => {
+    setShowWipeConfirm(false);
     setWipeLoading(true);
     setWipeError(null);
     setWipeSuccess(null);
@@ -4759,6 +4774,17 @@ function App() {
                 onDelete={handleDocumentDelete}
                 onDeleteAll={handleDocumentDeleteByType}
                 onRefresh={fetchDocuments}
+                onWipeData={handleWipeDataRequest}
+                onWipeDataConfirm={handleWipeDataConfirm}
+                wipeState={{
+                  keepCustomCategories: wipeKeepCategories,
+                  setKeepCustomCategories: setWipeKeepCategories,
+                  loading: wipeLoading,
+                  error: wipeError,
+                  success: wipeSuccess,
+                  showConfirm: showWipeConfirm,
+                  setShowConfirm: setShowWipeConfirm
+                }}
               />
             )}
             {activeTab === 'projection' && (
@@ -4861,7 +4887,7 @@ function App() {
                 )}
                 <button
                   className="danger-button"
-                  onClick={handleWipeData}
+                  onClick={handleWipeDataRequest}
                   disabled={wipeLoading}
                 >
                   {wipeLoading ? 'Wiping…' : 'Delete all data'}
