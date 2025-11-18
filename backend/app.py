@@ -1271,21 +1271,45 @@ def get_loans():
 @authenticate_request
 @require_auth
 def get_categories():
-    """Get all available categories including custom ones"""
+    """Get all available categories including custom ones, organized hierarchically"""
     try:
         tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
         
-        # Load default categories from JSON files
+        # Load default categories from JSON files (these are parent categories)
         spending_categories = _load_categories('categories_spending.json')
         income_categories = _load_categories('categories_income.json')
         
-        # Get tenant-specific custom categories from database
+        # Get tenant-specific custom categories from database (hierarchical)
         db_categories = wealth_db.get_categories(tenant_id)
         
-        # Combine default and custom categories (return just names)
+        # Convert default categories to hierarchical format
+        default_expense_categories = []
+        for cat_name in spending_categories.keys():
+            default_expense_categories.append({
+                'id': None,  # Default categories don't have DB IDs
+                'category_name': cat_name,
+                'category_type': 'expense',
+                'parent_category_id': None,
+                'subcategories': [],
+                'is_default': True
+            })
+        
+        default_income_categories = []
+        for cat_name in income_categories.keys():
+            default_income_categories.append({
+                'id': None,
+                'category_name': cat_name,
+                'category_type': 'income',
+                'parent_category_id': None,
+                'subcategories': [],
+                'is_default': True
+            })
+        
+        # Merge default and custom categories
+        # Custom categories can be parents or subcategories
         all_categories = {
-            'income': list(income_categories.keys()) + [c['category_name'] for c in db_categories.get('income', [])],
-            'expense': list(spending_categories.keys()) + [c['category_name'] for c in db_categories.get('expense', [])]
+            'income': default_income_categories + db_categories.get('income', []),
+            'expense': default_expense_categories + db_categories.get('expense', [])
         }
         
         return jsonify(all_categories)
@@ -1300,14 +1324,15 @@ def get_categories():
 @authenticate_request
 @require_auth
 def create_custom_category():
-    """Create a new custom category"""
+    """Create a new custom category (super or sub category)"""
     try:
         tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
         data = request.get_json()
         category_name = data.get('name', '').strip()
         category_type = data.get('type', 'expense')
+        parent_category_id = data.get('parent_category_id')  # Optional: for subcategories
         
-        print(f"Creating custom category for tenant {tenant_id}: {category_name} ({category_type})")
+        print(f"Creating custom category for tenant {tenant_id}: {category_name} ({category_type}), parent={parent_category_id}")
         
         if not category_name:
             return jsonify({'error': 'Category name is required'}), 400
@@ -1315,23 +1340,28 @@ def create_custom_category():
         if category_type not in ['income', 'expense']:
             return jsonify({'error': 'Category type must be income or expense'}), 400
         
-        # Check if category already exists in default categories
-        if category_type == 'expense':
-            default_categories = _load_categories('categories_spending.json')
-        else:
-            default_categories = _load_categories('categories_income.json')
-        
-        if category_name in default_categories:
-            return jsonify({'error': 'Category already exists as a default category'}), 400
+        # Check if category already exists in default categories (only for parent categories)
+        if not parent_category_id:
+            if category_type == 'expense':
+                default_categories = _load_categories('categories_spending.json')
+            else:
+                default_categories = _load_categories('categories_income.json')
+            
+            if category_name in default_categories:
+                return jsonify({'error': 'Category already exists as a default category'}), 400
         
         # Create category in database
         try:
-            wealth_db.create_custom_category(tenant_id, category_name, category_type)
-            print(f"✓ Custom category created successfully")
-            return jsonify({'success': True, 'message': 'Custom category created successfully'})
+            result = wealth_db.create_custom_category(tenant_id, category_name, category_type, parent_category_id)
+            print(f"✓ Custom category created successfully: {result}")
+            return jsonify({
+                'success': True, 
+                'message': 'Custom category created successfully',
+                'category': result
+            })
         except ValueError as e:
-            # Duplicate category
-            print(f"Category already exists: {e}")
+            # Duplicate category or validation error
+            print(f"Category creation failed: {e}")
             return jsonify({'error': str(e)}), 400
         
     except Exception as e:
