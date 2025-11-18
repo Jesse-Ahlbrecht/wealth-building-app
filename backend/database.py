@@ -333,7 +333,7 @@ class WealthDatabase:
             }
 
     def get_categories(self, tenant_id: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Get all categories for a tenant"""
+        """Get all categories for a tenant, organized hierarchically"""
         tenant_db_id = self.set_tenant_context(tenant_id)
 
         with self.db.get_cursor() as cursor:
@@ -342,40 +342,79 @@ class WealthDatabase:
                        color, icon, created_at
                 FROM categories
                 WHERE active = TRUE AND tenant_id = %s
-                ORDER BY category_type, category_name
+                ORDER BY category_type, parent_category_id NULLS FIRST, category_name
             """, [tenant_db_id])
 
-            categories = {'income': [], 'expense': []}
+            # Build flat list first
+            all_categories = []
             for row in cursor.fetchall():
                 row_dict = {
                     'id': row[0], 'category_name': row[1], 'category_type': row[2],
                     'parent_category_id': row[3], 'color': row[4], 'icon': row[5],
-                    'created_at': row[6]
+                    'created_at': row[6], 'subcategories': []
                 }
-                cat_type = row_dict['category_type']
+                all_categories.append(row_dict)
+
+            # Organize into hierarchical structure
+            categories = {'income': [], 'expense': []}
+            category_map = {}  # Map category ID to category object
+            
+            # First pass: create map and separate parent/child categories
+            parent_categories = []
+            child_categories = []
+            
+            for cat in all_categories:
+                category_map[cat['id']] = cat
+                if cat['parent_category_id'] is None:
+                    parent_categories.append(cat)
+                else:
+                    child_categories.append(cat)
+            
+            # Second pass: attach children to parents
+            for child in child_categories:
+                parent_id = child['parent_category_id']
+                if parent_id in category_map:
+                    parent = category_map[parent_id]
+                    parent['subcategories'].append(child)
+            
+            # Third pass: organize by type
+            for cat in parent_categories:
+                cat_type = cat['category_type']
                 if cat_type in categories:
-                    categories[cat_type].append(row_dict)
+                    categories[cat_type].append(cat)
 
             return categories
 
     def create_custom_category(self, tenant_id: str, category_name: str, 
-                               category_type: str) -> Dict[str, Any]:
-        """Create a custom category for a tenant"""
+                               category_type: str, parent_category_id: int = None) -> Dict[str, Any]:
+        """Create a custom category for a tenant, optionally as a subcategory"""
         try:
             tenant_db_id = self.set_tenant_context(tenant_id)
-            print(f"Creating category for tenant_id={tenant_id}, tenant_db_id={tenant_db_id}")
+            print(f"Creating category for tenant_id={tenant_id}, tenant_db_id={tenant_db_id}, parent={parent_category_id}")
         except Exception as e:
             print(f"Error getting tenant_db_id: {e}")
             raise ValueError(f"Tenant not found: {tenant_id}")
 
         with self.db.get_cursor() as cursor:
+            # Validate parent category if provided
+            if parent_category_id:
+                cursor.execute("""
+                    SELECT id, category_type, tenant_id FROM categories
+                    WHERE id = %s AND active = TRUE AND tenant_id = %s
+                """, (parent_category_id, tenant_db_id))
+                parent = cursor.fetchone()
+                if not parent:
+                    raise ValueError(f"Parent category not found or doesn't belong to this tenant")
+                if parent[1] != category_type:
+                    raise ValueError(f"Parent category type '{parent[1]}' doesn't match category type '{category_type}'")
+            
             try:
                 cursor.execute("""
                     INSERT INTO categories (
-                        tenant_id, category_name, category_type, active
-                    ) VALUES (%s, %s, %s, TRUE)
-                    RETURNING id, category_name, category_type, created_at
-                """, (tenant_db_id, category_name, category_type))
+                        tenant_id, category_name, category_type, parent_category_id, active
+                    ) VALUES (%s, %s, %s, %s, TRUE)
+                    RETURNING id, category_name, category_type, parent_category_id, created_at
+                """, (tenant_db_id, category_name, category_type, parent_category_id))
                 
                 result = cursor.fetchone()
                 print(f"Category created successfully: {result}")
@@ -383,7 +422,8 @@ class WealthDatabase:
                     'id': result[0],
                     'category_name': result[1], 
                     'category_type': result[2],
-                    'created_at': result[3]
+                    'parent_category_id': result[3],
+                    'created_at': result[4]
                 }
             except Exception as e:
                 print(f"Database error creating category: {e}")

@@ -751,6 +751,8 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
   const [customCategoryName, setCustomCategoryName] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [selectedParentCategory, setSelectedParentCategory] = useState(null);
+  const [expandedCategories, setExpandedCategories] = useState({});
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -767,15 +769,15 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
 
       if (modal) {
         const categories = modal.isIncome ? data.income : data.expense;
-        // Ensure categories is always an array, fallback to default if undefined
+        // Categories are now hierarchical objects with subcategories
         if (Array.isArray(categories) && categories.length > 0) {
           setAvailableCategories(categories);
         } else {
-          // Use default categories if the API response is invalid
+          // Fallback: convert to flat list for backward compatibility
           const defaultCategories = modal.isIncome
             ? ['Salary', 'Income', 'Other']
             : ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Loan Payment', 'Rent', 'Insurance', 'Transfer', 'Other'];
-          setAvailableCategories(defaultCategories);
+          setAvailableCategories(defaultCategories.map(name => ({ category_name: name, subcategories: [] })));
         }
       }
     } catch (error) {
@@ -784,7 +786,7 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
       const defaultCategories = modal?.isIncome
         ? ['Salary', 'Income', 'Other']
         : ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Loan Payment', 'Rent', 'Insurance', 'Transfer', 'Other'];
-      setAvailableCategories(defaultCategories);
+      setAvailableCategories(defaultCategories.map(name => ({ category_name: name, subcategories: [] })));
     }
   }, [modal, sessionToken]);
 
@@ -792,6 +794,8 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
     if (modal) {
       setShowCustomInput(false);
       setCustomCategoryName('');
+      setSelectedParentCategory(null);
+      setExpandedCategories({});
       fetchCategories();
     }
   }, [modal, fetchCategories]);
@@ -813,19 +817,30 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
         headers,
         body: JSON.stringify({
           name: customCategoryName.trim(),
-          type: modal.isIncome ? 'income' : 'expense'
+          type: modal.isIncome ? 'income' : 'expense',
+          parent_category_id: selectedParentCategory
         }),
       });
 
       if (response.ok) {
-        // Add the new category to the list
-        setAvailableCategories(prev => [...prev, customCategoryName.trim()]);
+        const result = await response.json();
+        const resultData = result.data || result;
+        
+        // Refresh categories
+        await fetchCategories();
         setCustomCategoryName('');
         setShowCustomInput(false);
+        setSelectedParentCategory(null);
+        
+        // If creating a subcategory, select the parent category
+        if (selectedParentCategory) {
+          setExpandedCategories(prev => ({ ...prev, [selectedParentCategory]: true }));
+        }
       } else {
         const errorData = await response.json();
+        const errorMsg = errorData.data?.error || errorData.error || 'Failed to create category';
         console.error('Category creation failed:', response.status, errorData);
-        alert(errorData.error || 'Failed to create category');
+        alert(errorMsg);
       }
     } catch (error) {
       console.error('Error creating custom category:', error);
@@ -833,6 +848,36 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleCategoryExpand = (categoryId) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId]
+    }));
+  };
+
+  const getCategoryDisplayName = (category) => {
+    return typeof category === 'string' ? category : category.category_name;
+  };
+
+  const getCategoryId = (category) => {
+    return typeof category === 'string' ? null : category.id;
+  };
+
+  const hasSubcategories = (category) => {
+    return typeof category !== 'string' && category.subcategories && category.subcategories.length > 0;
+  };
+
+  const flattenCategories = (categories) => {
+    const flat = [];
+    categories.forEach(cat => {
+      flat.push(cat);
+      if (cat.subcategories && cat.subcategories.length > 0) {
+        cat.subcategories.forEach(sub => flat.push(sub));
+      }
+    });
+    return flat;
   };
 
   if (!modal) return null;
@@ -878,30 +923,125 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
           <div className="category-selection">
             <h4>Select New Category:</h4>
             <div className="category-grid">
-              {(availableCategories || []).map((category) => (
-                <button
-                  key={category}
-                  className={`category-option ${category === currentCategoryName ? 'selected' : ''}`}
-                  onClick={() => onUpdate(category)}
-                >
-                  {category}
-                </button>
-              ))}
+              {(availableCategories || []).map((category) => {
+                const categoryName = getCategoryDisplayName(category);
+                const categoryId = getCategoryId(category);
+                const isExpanded = categoryId ? expandedCategories[categoryId] : false;
+                const hasSubs = hasSubcategories(category);
+                const isSelected = categoryName === currentCategoryName;
+                
+                return (
+                  <div key={categoryId || categoryName} className="category-hierarchy-item">
+                    <div className="category-row">
+                      <button
+                        className={`category-option ${isSelected ? 'selected' : ''} ${hasSubs ? 'has-children' : ''}`}
+                        onClick={(e) => {
+                          // If clicking the expand icon, just expand/collapse
+                          if (e.target.classList.contains('category-expand-icon') || e.target.closest('.category-expand-icon')) {
+                            if (hasSubs) {
+                              toggleCategoryExpand(categoryId);
+                            }
+                          } else {
+                            // Otherwise, select the category
+                            onUpdate(categoryName);
+                          }
+                        }}
+                      >
+                        {hasSubs && (
+                          <span 
+                            className="category-expand-icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleCategoryExpand(categoryId);
+                            }}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            {isExpanded ? '▼' : '▶'}
+                          </span>
+                        )}
+                        {categoryName}
+                      </button>
+                    </div>
+                    {hasSubs && isExpanded && (
+                      <div className="category-subcategories">
+                        {category.subcategories.map((subcategory) => {
+                          const subName = getCategoryDisplayName(subcategory);
+                          const subSelected = subName === currentCategoryName;
+                          return (
+                            <button
+                              key={subcategory.id || subName}
+                              className={`category-option category-option-sub ${subSelected ? 'selected' : ''}`}
+                              onClick={() => onUpdate(subName)}
+                            >
+                              {subName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             
             <div className="custom-category-section">
               {!showCustomInput ? (
-                <button
-                  className="create-category-btn"
-                  onClick={() => setShowCustomInput(true)}
-                >
-                  + Create New Category
-                </button>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    className="create-category-btn"
+                    onClick={() => {
+                      setSelectedParentCategory(null);
+                      setShowCustomInput(true);
+                    }}
+                  >
+                    + Create Super Category
+                  </button>
+                  <button
+                    className="create-category-btn"
+                    onClick={() => {
+                      // Show parent selector
+                      const parentCategories = availableCategories.filter(cat => 
+                        typeof cat !== 'string' && !cat.parent_category_id
+                      );
+                      if (parentCategories.length === 0) {
+                        alert('Please create a super category first');
+                        return;
+                      }
+                      // For now, let user select parent after clicking
+                      setShowCustomInput(true);
+                    }}
+                  >
+                    + Create Sub Category
+                  </button>
+                </div>
               ) : (
                 <div className="custom-category-input">
+                  <div style={{ marginBottom: '10px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px' }}>
+                      Select parent category (optional - leave empty for super category):
+                    </label>
+                    <select
+                      value={selectedParentCategory || ''}
+                      onChange={(e) => setSelectedParentCategory(e.target.value ? parseInt(e.target.value) : null)}
+                      style={{ width: '100%', padding: '8px', marginBottom: '10px' }}
+                    >
+                      <option value="">-- Create Super Category --</option>
+                      {availableCategories
+                        .filter(cat => {
+                          // Only show user-created categories (with DB IDs) as potential parents
+                          // Default categories from JSON files don't have IDs and can't be parents
+                          return typeof cat !== 'string' && !cat.parent_category_id && cat.id !== null && cat.id !== undefined;
+                        })
+                        .map(cat => (
+                          <option key={cat.id} value={cat.id}>
+                            {getCategoryDisplayName(cat)}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                   <input
                     type="text"
-                    placeholder="Enter category name"
+                    placeholder={selectedParentCategory ? "Enter subcategory name" : "Enter category name"}
                     value={customCategoryName}
                     onChange={(e) => setCustomCategoryName(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleCreateCustomCategory()}
@@ -921,6 +1061,7 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
                       onClick={() => {
                         setShowCustomInput(false);
                         setCustomCategoryName('');
+                        setSelectedParentCategory(null);
                       }}
                     >
                       Cancel
