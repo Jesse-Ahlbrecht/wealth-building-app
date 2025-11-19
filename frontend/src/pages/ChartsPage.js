@@ -48,6 +48,7 @@ const ChartsPage = ({
   MonthDetailComponent
 }) => {
   const chartContainerRef = useRef(null);
+  const customButtonRef = useRef(null); // Ref for Custom button to position tooltip
   const isDraggingRef = useRef(false); // Track if we're currently dragging
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionStart, setSelectionStart] = useState(null);
@@ -55,6 +56,7 @@ const ChartsPage = ({
   const [selectedRange, setSelectedRange] = useState(null); // { startIndex, endIndex }
   const [hasMoved, setHasMoved] = useState(false); // Track if mouse moved during drag
   const [hoveredIndex, setHoveredIndex] = useState(null); // Track hovered bar index
+  const [showCustomHelp, setShowCustomHelp] = useState(false); // Show help popup for custom selection
 
   // Helper function to lighten a color
   const lightenColor = (color, amount) => {
@@ -203,6 +205,9 @@ const ChartsPage = ({
     const index = getDataIndexFromX(e.clientX, e.clientY);
     if (index === null) return; // Don't start selection if outside plotting area
     
+    // Prevent default to avoid scrolling and text selection during drag
+    e.preventDefault();
+    
     setIsSelecting(true);
     isDraggingRef.current = true; // Mark that we're starting a drag
     setHasMoved(false); // Reset movement tracking
@@ -214,6 +219,9 @@ const ChartsPage = ({
   // Handle mouse move - update selection
   const handleMouseMove = useCallback((e) => {
     if (!isSelecting || selectionStart === null) return;
+    
+    // Prevent default to avoid scrolling during drag
+    e.preventDefault();
     
     // Don't update selection if hovering over axes
     const isAxisHover = e.target.closest('.recharts-cartesian-axis') || 
@@ -280,6 +288,22 @@ const ChartsPage = ({
     }
   }, [timeRange]);
 
+  // Close tooltip when clicking outside
+  useEffect(() => {
+    if (!showCustomHelp) return;
+
+    const handleClickOutside = (e) => {
+      if (customButtonRef.current && !customButtonRef.current.contains(e.target)) {
+        setShowCustomHelp(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showCustomHelp]);
+
   // Add global mouse event listeners
   useEffect(() => {
     if (isSelecting) {
@@ -316,11 +340,6 @@ const ChartsPage = ({
         >
           <div>
             <h3 className="chart-title" style={{ marginBottom: '4px' }}>Savings Over Time</h3>
-            {!selectedRange && (
-              <div style={{ fontSize: '12px', color: 'var(--color-text-tertiary)', marginBottom: '4px', fontStyle: 'italic' }}>
-                Click and drag on the chart to select a custom date range
-              </div>
-            )}
             <div style={{ fontSize: '14px', color: 'var(--color-text-tertiary)', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
               {chartView === 'absolute' ? (
                 <>
@@ -397,21 +416,85 @@ const ChartsPage = ({
               >
                 All
               </button>
-              <button
-                className={`time-range-btn ${timeRange === 'custom' || selectedRange !== null ? 'active' : ''}`}
-                onClick={() => {
-                  if (selectedRange === null) {
-                    // If no selection exists, just switch to custom mode (shows all)
-                    onChangeTimeRange('custom');
-                  } else {
-                    // If selection exists, keep it and ensure custom is selected
-                    onChangeTimeRange('custom');
-                  }
-                }}
-                title={selectedRange ? 'Custom range selected' : 'Click and drag on chart to select custom range'}
-              >
-                Custom
-              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  ref={customButtonRef}
+                  className={`time-range-btn ${timeRange === 'custom' || selectedRange !== null ? 'active' : ''}`}
+                  onClick={() => {
+                    if (selectedRange === null) {
+                      // If no selection exists, show help tooltip
+                      setShowCustomHelp(true);
+                      onChangeTimeRange('custom');
+                      // Auto-hide after 5 seconds
+                      setTimeout(() => setShowCustomHelp(false), 5000);
+                    } else {
+                      // If selection exists, keep it and ensure custom is selected
+                      onChangeTimeRange('custom');
+                    }
+                  }}
+                  title={selectedRange ? 'Custom range selected' : 'Click to learn how to select a custom range'}
+                >
+                  Custom
+                </button>
+                {showCustomHelp && customButtonRef.current && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      marginTop: '8px',
+                      backgroundColor: 'var(--color-bg-card)',
+                      border: '1px solid var(--color-border-primary)',
+                      borderRadius: '8px',
+                      padding: '12px 16px',
+                      width: '320px',
+                      boxShadow: '0 4px 12px var(--color-shadow-md)',
+                      zIndex: 1000,
+                      fontSize: '13px',
+                      color: 'var(--color-text-secondary)',
+                      lineHeight: '1.5'
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '6px', fontSize: '14px' }}>
+                      Custom Range Selection
+                    </div>
+                    <div style={{ marginBottom: '4px' }}>
+                      Click and drag across bars to select a date range
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', fontStyle: 'italic', marginTop: '6px' }}>
+                      Tip: Start from any bar or empty space
+                    </div>
+                    {/* Arrow pointing up */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '-6px',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        width: 0,
+                        height: 0,
+                        borderLeft: '6px solid transparent',
+                        borderRight: '6px solid transparent',
+                        borderBottom: '6px solid var(--color-bg-card)'
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '-7px',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        width: 0,
+                        height: 0,
+                        borderLeft: '6px solid transparent',
+                        borderRight: '6px solid transparent',
+                        borderBottom: '6px solid var(--color-border-primary)'
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
             <div className="chart-toggle">
               <button
@@ -442,7 +525,11 @@ const ChartsPage = ({
           className="chart-wrapper" 
           ref={chartContainerRef}
           onMouseDown={handleMouseDown}
-          style={{ position: 'relative', cursor: isSelecting ? 'crosshair' : 'default' }}
+          style={{ 
+            position: 'relative', 
+            cursor: isSelecting ? 'crosshair' : 'default',
+            userSelect: isSelecting ? 'none' : 'auto' // Prevent text selection during drag
+          }}
         >
           <ResponsiveContainer width="100%" height={400}>
             <BarChart
