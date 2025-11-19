@@ -714,7 +714,12 @@ class WealthDatabase:
             """, (file_id,))
 
             result = cursor.fetchone()
-            return dict(result) if result else None
+            if not result:
+                return None
+            
+            # Convert tuple to dictionary using column names
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, result))
 
     def wipe_tenant_data(self, tenant_id: str, keep_custom_categories: bool = True) -> Dict[str, int]:
         """
@@ -793,6 +798,8 @@ class WealthDatabase:
 
         with self.db.get_cursor() as cursor:
             # Get monthly summaries
+            # Use make_interval() function to properly construct interval with parameter
+            # Alternative: Use INTERVAL '1 month' * %s which also works with parameters
             cursor.execute("""
                 SELECT
                     DATE_TRUNC('month', transaction_date) as month,
@@ -800,14 +807,17 @@ class WealthDatabase:
                     SUM(CASE WHEN transaction_type = 'expense' THEN amount ELSE 0 END) as expenses,
                     COUNT(*) as transaction_count
                 FROM transactions
-                WHERE transaction_date >= CURRENT_DATE - INTERVAL '%s months'
+                WHERE transaction_date >= CURRENT_DATE - (INTERVAL '1 month' * %s)
                 GROUP BY DATE_TRUNC('month', transaction_date)
                 ORDER BY month DESC
             """, (months,))
 
             summaries = []
+            # Get column names from cursor description
+            columns = [desc[0] for desc in cursor.description]
             for row in cursor.fetchall():
-                month_data = dict(row)
+                # Convert tuple to dictionary using column names
+                month_data = dict(zip(columns, row))
                 month_data['savings'] = month_data['income'] - month_data['expenses']
                 month_data['saving_rate'] = (
                     (month_data['savings'] / month_data['income'] * 100)
@@ -904,6 +914,75 @@ class WealthDatabase:
             import traceback
             traceback.print_exc()
             raise
+
+    def get_broker_valuation_cache(self, tenant_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached broker historical valuation data for a tenant, if available."""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Ensure table exists
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS broker_valuation_cache (
+                        tenant_id TEXT PRIMARY KEY,
+                        data JSONB NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+
+                cursor.execute(
+                    "SELECT data, updated_at FROM broker_valuation_cache WHERE tenant_id = %s",
+                    (tenant_id,)
+                )
+                result = cursor.fetchone()
+
+                if not result:
+                    return None
+
+                data, updated_at = result
+                # data is already JSONB → mapped to dict by pg8000
+                return {
+                    "data": data,
+                    "updated_at": updated_at
+                }
+        except Exception as e:
+            print(f"Error in get_broker_valuation_cache: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def save_broker_valuation_cache(self, tenant_id: str, data: Dict[str, Any]) -> None:
+        """Save broker historical valuation data for a tenant."""
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Ensure table exists
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS broker_valuation_cache (
+                        tenant_id TEXT PRIMARY KEY,
+                        data JSONB NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+
+                cursor.execute(
+                    """
+                    INSERT INTO broker_valuation_cache (tenant_id, data, updated_at)
+                    VALUES (%s, %s::jsonb, CURRENT_TIMESTAMP)
+                    ON CONFLICT (tenant_id)
+                    DO UPDATE SET data = EXCLUDED.data, updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (tenant_id, json.dumps(data))
+                )
+                conn.commit()
+        except Exception as e:
+            print(f"Error in save_broker_valuation_cache: {e}")
+            import traceback
+            traceback.print_exc()
+            # Do not raise, caching is best-effort
 
 
 # Global instance

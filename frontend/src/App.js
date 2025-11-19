@@ -16,7 +16,7 @@ import {
   convertAmountToCurrency,
   getColorForPercentage
 } from './utils/finance';
-import { createSecureUpload } from './encryption';
+import { createFileUpload } from './fileUpload';
 
 const DEFAULT_ESSENTIAL_CATEGORIES = ['Rent', 'Insurance', 'Groceries', 'Utilities'];
 const TAB_ITEMS = [
@@ -43,6 +43,11 @@ const API_BASE_URL = 'http://localhost:5001';
 const BANK_STATEMENT_TYPES = {
   bank_statement_dkb: 'dkb',
   bank_statement_yuh: 'yuh'
+};
+
+const BROKER_DOCUMENT_TYPES = {
+  broker_ing_diba_csv: 'ing_diba',
+  broker_viac_pdf: 'viac'
 };
 
 const normalizeTypeKey = (value) =>
@@ -2244,7 +2249,7 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                 },
                 null,
                 { skipImport: true, importResult: actualData }
-              ).catch(err => console.error('Failed to store encrypted document copy:', err));
+              ).catch(err => console.error('Failed to store document copy:', err));
             }
             
             resolve(result);
@@ -3264,7 +3269,15 @@ function App() {
   const [forceShowApp, setForceShowApp] = useState(false); // Force show app after upload
   const uploadsInFlightRef = useRef(0);
   const [expandedCategories, setExpandedCategories] = useState({});
-  const [activeTab, setActiveTab] = useState('monthly-overview');
+  // Initialize activeTab from localStorage or default to 'monthly-overview'
+  const [activeTab, setActiveTab] = useState(() => {
+    const savedTab = localStorage.getItem('activeTab');
+    // Validate that saved tab exists in TAB_ITEMS
+    if (savedTab && TAB_ITEMS.some(tab => tab.key === savedTab)) {
+      return savedTab;
+    }
+    return 'monthly-overview';
+  });
   const [categorySorts, setCategorySorts] = useState({});
   const [chartView, setChartView] = useState('absolute'); // 'absolute' or 'relative'
   const [timeRange, setTimeRange] = useState('all'); // '3m', '6m', '1y', 'all'
@@ -3541,7 +3554,12 @@ function App() {
       const response = await fetch('http://localhost:5001/api/projection', { headers });
       const wrappedData = await response.json();
       const data = wrappedData.data?.data || wrappedData.data || wrappedData;
-      setProjectionData(data);
+      // Ensure all numeric fields are actually numbers
+      setProjectionData({
+        currentNetWorth: typeof data.currentNetWorth === 'number' ? data.currentNetWorth : parseFloat(data.currentNetWorth) || 0,
+        averageMonthlySavings: typeof data.averageMonthlySavings === 'number' ? data.averageMonthlySavings : parseFloat(data.averageMonthlySavings) || 0,
+        averageSavingsRate: typeof data.averageSavingsRate === 'number' ? data.averageSavingsRate : parseFloat(data.averageSavingsRate) || 0
+      });
     } catch (error) {
       console.error('Error fetching projection:', error);
       setProjectionData({
@@ -3664,13 +3682,13 @@ function App() {
     try {
       // Step 1: Save the document first to get its ID
       if (!bankType) {
-        progressCallback('upload', 15, 'Encrypting file…');
+        progressCallback('upload', 15, 'Preparing file…');
       } else {
         progressCallback('upload', 10, 'Preparing document…');
       }
 
-      const securePackage = await createSecureUpload(file, sessionToken, normalizedMetadata);
-      const formData = securePackage.formData;
+      const uploadPackage = await createFileUpload(file, sessionToken, normalizedMetadata);
+      const formData = uploadPackage.formData;
 
       formData.append('documentType', documentType);
       if (normalizedMetadata && Object.keys(normalizedMetadata).length > 0) {
@@ -3734,15 +3752,18 @@ function App() {
         progressCallback('processing', 100, 'Processing complete.');
       }
 
-      await Promise.allSettled([
-        fetchSummary(),
-        fetchAccounts(),
-        fetchBroker(),
-        fetchLoans(),
-        fetchProjection()
-      ]);
+      // Skip data fetches if this is part of a batch upload (will be fetched once at the end)
+      if (!options?.skipDataFetch) {
+        await Promise.allSettled([
+          fetchSummary(),
+          fetchAccounts(),
+          fetchBroker(),
+          fetchLoans(),
+          fetchProjection()
+        ]);
 
-      await fetchDocuments();
+        await fetchDocuments();
+      }
 
       if (shouldImport && uploadsInFlightRef.current === 0) {
         const wasForceShown = forceShowApp;
@@ -3802,7 +3823,8 @@ function App() {
 
       setDocuments(prev => prev.filter(doc => doc.id !== documentId));
 
-      if (documentType && BANK_STATEMENT_TYPES[documentType]) {
+      // Refresh data if this is a bank statement or broker document
+      if (documentType && (BANK_STATEMENT_TYPES[documentType] || BROKER_DOCUMENT_TYPES[documentType])) {
         const refreshTasks = [
           fetchSummary(),
           fetchAccounts(),
@@ -3854,7 +3876,7 @@ function App() {
         );
       }
 
-      if (normalizedType && normalizedType in BANK_STATEMENT_TYPES) {
+      if (normalizedType && (normalizedType in BANK_STATEMENT_TYPES || normalizedType in BROKER_DOCUMENT_TYPES)) {
         const refreshTasks = [
           fetchSummary(),
           fetchAccounts(),
@@ -3918,6 +3940,13 @@ function App() {
   useEffect(() => {
     setSegmentDetail(null);
   }, [activeTab, summary]);
+
+  // Persist activeTab to localStorage whenever it changes
+  useEffect(() => {
+    if (activeTab) {
+      localStorage.setItem('activeTab', activeTab);
+    }
+  }, [activeTab]);
 
   // Debug: Log summary changes
   useEffect(() => {
@@ -4756,6 +4785,7 @@ function App() {
                 broker={broker}
                 formatCurrency={formatCurrency}
                 formatDate={formatDate}
+                sessionToken={sessionToken}
               />
             )}
             {activeTab === 'loans' && (
@@ -4773,7 +4803,12 @@ function App() {
                 onUpload={handleDocumentUpload}
                 onDelete={handleDocumentDelete}
                 onDeleteAll={handleDocumentDeleteByType}
-                onRefresh={fetchDocuments}
+                onRefresh={async () => {
+                  await fetchDocuments();
+                  // Also refresh broker data when documents are refreshed
+                  // This ensures broker page shows updated data after broker document uploads
+                  await fetchBroker();
+                }}
                 onWipeData={handleWipeDataRequest}
                 onWipeDataConfirm={handleWipeDataConfirm}
                 wipeState={{

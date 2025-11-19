@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, g
 from flask_cors import CORS
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import os
 import re
@@ -12,14 +12,15 @@ from functools import wraps
 from typing import Any, Dict, Optional
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
+
+# Load environment variables FIRST, before importing modules that need them
+load_dotenv()
+
 from encryption import get_encryption_service, encrypt_sensitive_data, decrypt_sensitive_data, EncryptedData
 from auth import get_session_manager
 from database import get_wealth_database
 from user_management import get_user_manager
 from prediction_service import RecurringPatternDetector, get_dismissed_predictions
-
-# Load environment variables
-load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
@@ -687,8 +688,13 @@ class BankStatementParser:
             date_str = date_match.group(1)
             date = datetime.strptime(date_str, '%d.%m.%Y')
 
-            # Extract security name from title "Börsenabrechnung - Kauf [Name]"
-            security_match = re.search(r'Börsenabrechnung\s*-\s*Kauf\s+(.+?)(?:\n|Wir haben)', text, re.DOTALL)
+            # Detect transaction type: "Börsenabrechnung - Kauf" or "Börsenabrechnung - Verkauf"
+            transaction_type_match = re.search(r'Börsenabrechnung\s*-\s*(Kauf|Verkauf)', text)
+            is_sell = transaction_type_match and transaction_type_match.group(1) == 'Verkauf'
+            transaction_type = 'sell' if is_sell else 'buy'
+
+            # Extract security name from title "Börsenabrechnung - Kauf/Verkauf [Name]"
+            security_match = re.search(r'Börsenabrechnung\s*-\s*(?:Kauf|Verkauf)\s+(.+?)(?:\n|Wir haben)', text, re.DOTALL)
             security_name = security_match.group(1).strip() if security_match else 'Unknown'
 
             # Extract shares: "X.XXX Anteile [Name]"
@@ -723,15 +729,17 @@ class BankStatementParser:
                 valuta_date = datetime.strptime(valuta_match.group(1), '%d.%m.%Y')
 
             # Create transaction record
+            # For buys: negative amount (outflow), positive shares
+            # For sells: positive amount (inflow), positive shares (aggregation handles sign)
             transactions.append({
                 'date': valuta_date.isoformat(),
                 'security': security_name,
                 'isin': isin,
-                'shares': shares,
+                'shares': shares,  # Always positive, aggregation logic handles buy/sell
                 'price_usd': price_usd,
-                'amount': -amount_chf,  # Negative because it's a purchase/outflow
+                'amount': amount_chf if is_sell else -amount_chf,  # Positive for sells (inflow), negative for buys (outflow)
                 'currency': 'CHF',
-                'type': 'buy',
+                'type': transaction_type,
                 'account': 'VIAC'
             })
 
@@ -1367,11 +1375,11 @@ def get_accounts():
     try:
         accounts = wealth_db.get_accounts(tenant_id)
 
-        # No demo data - users must upload their own data
-        if accounts:
-            accounts_list = []
-            totals = {'EUR': 0, 'CHF': 0}
+        accounts_list = []
+        totals = {'EUR': 0, 'CHF': 0}
 
+        # Add bank accounts
+        if accounts:
             for account in accounts:
                 account_summary = {
                     'account': account['account_name'],
@@ -1387,15 +1395,183 @@ def get_accounts():
                 if currency in totals:
                     totals[currency] += balance
 
-            return jsonify({
-                'accounts': accounts_list,
-                'totals': {k: round(v, 2) for k, v in totals.items()}
-            })
-        else:
-            # No accounts found - return empty (user will see onboarding)
-            return jsonify({'accounts': [], 'totals': {}})
+        # Add broker accounts from broker holdings
+        # Calculate broker totals directly (simplified version of get_broker logic)
+        try:
+            parser = BankStatementParser()
+            broker_docs = wealth_db.list_file_attachments(tenant_id, file_types=['broker_viac_pdf', 'broker_ing_diba_csv'])
+            
+            # Aggregate holdings across all documents first
+            all_holdings_dict = {}  # Key: ISIN, Value: {shares, total_cost}
+            
+            if broker_docs:
+                encryption_service = get_encryption_service()
+                import tempfile
+                
+                for doc in broker_docs:
+                    tmp_path = None
+                    try:
+                        full_doc = wealth_db.get_file_attachment(tenant_id, doc['id'])
+                        if not full_doc:
+                            continue
+                        
+                        encryption_metadata = full_doc.get('encryption_metadata') or {}
+                        if isinstance(encryption_metadata, str):
+                            try:
+                                encryption_metadata = json.loads(encryption_metadata)
+                            except json.JSONDecodeError:
+                                continue
+                        
+                        server_encryption = encryption_metadata.get('server_encryption', {})
+                        server_algorithm = server_encryption.get('algorithm', 'AES-256-GCM')
+                        
+                        if server_algorithm == 'none':
+                            decrypted = full_doc['encrypted_data']
+                        else:
+                            nonce_b64 = server_encryption.get('nonce', '')
+                            if not nonce_b64:
+                                continue
+                            
+                            try:
+                                nonce = base64.b64decode(nonce_b64)
+                            except Exception:
+                                continue
+                            
+                            encrypted_data = EncryptedData(
+                                ciphertext=full_doc['encrypted_data'],
+                                nonce=nonce,
+                                key_version=server_encryption.get('key_version', 1)
+                            )
+                            
+                            verification_metadata = encryption_metadata.copy()
+                            if 'server_encryption' in verification_metadata:
+                                verification_metadata['server_encryption'] = verification_metadata['server_encryption'].copy()
+                                verification_metadata['server_encryption'].pop('nonce', None)
+                                verification_metadata['server_encryption'].pop('key_version', None)
+                            
+                            if 'file_info' in verification_metadata:
+                                verification_metadata['file_info'] = verification_metadata['file_info'].copy()
+                                verification_metadata['file_info'].pop('checksum', None)
+                            
+                            metadata_json = json.dumps(verification_metadata, sort_keys=True).encode()
+                            try:
+                                decrypted = encryption_service.decrypt_data(encrypted_data, tenant_id, metadata_json)
+                            except ValueError:
+                                continue
+                        
+                        client_metadata = encryption_metadata.get('client_encryption')
+                        is_client_encrypted = (
+                            client_metadata 
+                            and client_metadata.get('algorithm') != 'none'
+                            and client_metadata.get('nonce')
+                        )
+                        
+                        if is_client_encrypted and g.session_token:
+                            try:
+                                decrypted = encryption_service.decrypt_client_layer(
+                                    decrypted, 
+                                    g.session_token, 
+                                    client_metadata
+                                )
+                            except Exception:
+                                continue
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(doc['original_name'])[1]) as tmp:
+                            tmp.write(decrypted)
+                            tmp_path = tmp.name
+                        
+                        file_type = doc.get('file_type') or full_doc.get('file_type')
+                        
+                        if file_type == 'broker_viac_pdf':
+                            file_transactions = parser.parse_viac(tmp_path)
+                            # Aggregate VIAC holdings across all documents
+                            for t in file_transactions:
+                                key = f"VIAC_{t['isin']}"
+                                if key not in all_holdings_dict:
+                                    all_holdings_dict[key] = {
+                                        'shares': 0,
+                                        'total_cost': 0
+                                    }
+                                all_holdings_dict[key]['shares'] += t['shares'] if t['type'] == 'buy' else -t['shares']
+                                all_holdings_dict[key]['total_cost'] += abs(t['amount']) if t['type'] == 'buy' else -abs(t['amount'])
+                                    
+                        elif file_type == 'broker_ing_diba_csv':
+                            file_holdings = parser.parse_ing_diba(tmp_path)
+                            # Aggregate ING DiBa holdings across all documents
+                            for holding in file_holdings:
+                                isin = holding.get('isin', '')
+                                if isin:
+                                    key = f"ING_DIBA_{isin}"
+                                    if key not in all_holdings_dict:
+                                        all_holdings_dict[key] = {
+                                            'shares': holding.get('shares', 0),
+                                            'total_cost': holding.get('total_cost', 0),
+                                            'current_value': holding.get('current_value', holding.get('total_cost', 0))
+                                        }
+                                    else:
+                                        # Aggregate shares and costs
+                                        all_holdings_dict[key]['shares'] += holding.get('shares', 0)
+                                        all_holdings_dict[key]['total_cost'] += holding.get('total_cost', 0)
+                                        all_holdings_dict[key]['current_value'] += holding.get('current_value', holding.get('total_cost', 0))
+                        
+                        if tmp_path:
+                            os.unlink(tmp_path)
+                    except Exception as e:
+                        print(f"Error processing broker document for accounts: {e}")
+                        if tmp_path and os.path.exists(tmp_path):
+                            try:
+                                os.unlink(tmp_path)
+                            except:
+                                pass
+                        continue
+                
+                # Calculate totals from aggregated holdings
+                viac_total_invested = 0
+                ing_diba_total_current = 0
+                
+                for key, holding in all_holdings_dict.items():
+                    if key.startswith('VIAC_'):
+                        if holding['shares'] > 0:
+                            viac_total_invested += holding['total_cost']
+                    elif key.startswith('ING_DIBA_'):
+                        if holding['shares'] > 0:
+                            ing_diba_total_current += holding.get('current_value', holding['total_cost'])
+                
+                # Add VIAC account if there are holdings
+                if viac_total_invested > 0:
+                    accounts_list.append({
+                        'account': 'VIAC',
+                        'balance': viac_total_invested,
+                        'currency': 'CHF',
+                        'transaction_count': 0,
+                        'last_transaction_date': None
+                    })
+                    totals['CHF'] += viac_total_invested
+                
+                # Add ING DiBa account if there are holdings
+                if ing_diba_total_current > 0:
+                    accounts_list.append({
+                        'account': 'ING DiBa',
+                        'balance': ing_diba_total_current,
+                        'currency': 'EUR',
+                        'transaction_count': 0,
+                        'last_transaction_date': None
+                    })
+                    totals['EUR'] += ing_diba_total_current
+        except Exception as e:
+            print(f"Error adding broker accounts: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue even if broker accounts fail
+
+        return jsonify({
+            'accounts': accounts_list,
+            'totals': {k: round(v, 2) for k, v in totals.items()}
+        })
     except Exception as e:
         print(f"Error getting accounts: {e}")
+        import traceback
+        traceback.print_exc()
         # On error, return empty accounts (user will see onboarding)
         return jsonify({'accounts': [], 'totals': {}})
 
@@ -1403,12 +1579,8 @@ def get_accounts():
 @authenticate_request
 @require_auth
 def get_broker():
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
     parser = BankStatementParser()
-
-    # Parse all broker statements
-    base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'depot transactions')
-    viac_folder = os.path.join(base_path, 'Viac')
-    ing_diba_folder = os.path.join(base_path, 'ing diba')
 
     transactions = []
     holdings_dict = {}
@@ -1416,29 +1588,636 @@ def get_broker():
     total_invested_eur = 0
     total_current_value_eur = 0
 
-    # Parse all VIAC PDF files (transactions)
-    if os.path.exists(viac_folder):
-        viac_files = glob.glob(os.path.join(viac_folder, '*.pdf')) + glob.glob(os.path.join(viac_folder, '*.PDF'))
-        for viac_file in viac_files:
-            file_transactions = parser.parse_viac(viac_file)
-            transactions.extend(file_transactions)
+    # Try to read from uploaded documents in database first
+    try:
+        broker_docs = wealth_db.list_file_attachments(tenant_id, file_types=['broker_viac_pdf', 'broker_ing_diba_csv'])
+        
+        if broker_docs:
+            encryption_service = get_encryption_service()
+            import tempfile
+            
+            for doc in broker_docs:
+                tmp_path = None
+                try:
+                    # Get full document with encrypted data
+                    full_doc = wealth_db.get_file_attachment(tenant_id, doc['id'])
+                    if not full_doc:
+                        print(f"⚠️ Broker document {doc.get('id')} not found in database")
+                        continue
+                    
+                    # Decrypt and save to temp file
+                    encryption_metadata = full_doc.get('encryption_metadata') or {}
+                    if isinstance(encryption_metadata, str):
+                        try:
+                            encryption_metadata = json.loads(encryption_metadata)
+                        except json.JSONDecodeError as e:
+                            print(f"⚠️ Invalid encryption metadata for broker document {doc.get('id')}: {e}")
+                            continue
+                    
+                    nonce_b64 = encryption_metadata.get('server_encryption', {}).get('nonce', '')
+                    if not nonce_b64:
+                        print(f"⚠️ Missing nonce in encryption metadata for broker document {doc.get('id')}")
+                        continue
+                    
+                    try:
+                        nonce = base64.b64decode(nonce_b64)
+                    except Exception as e:
+                        print(f"⚠️ Invalid nonce format for broker document {doc.get('id')}: {e}")
+                        continue
+                    
+                    # Check if server encryption was applied
+                    server_encryption = encryption_metadata.get('server_encryption', {})
+                    server_algorithm = server_encryption.get('algorithm', 'AES-256-GCM')
+                    
+                    if server_algorithm == 'none':
+                        # No server encryption - file is stored as-is (shouldn't happen with current design)
+                        # This means the file might be client-encrypted or plaintext
+                        decrypted = full_doc['encrypted_data']
+                    else:
+                        # Server encryption was applied - decrypt it first
+                        encrypted_data = EncryptedData(
+                            ciphertext=full_doc['encrypted_data'],
+                            nonce=nonce,
+                            key_version=server_encryption.get('key_version', 1)
+                        )
+                        
+                        # Create a copy of metadata for AAD verification
+                        # IMPORTANT: We must remove fields that were added AFTER encryption
+                        # The upload process adds nonce and key_version to server_encryption dict after encrypting
+                        # The store_encrypted_file function adds checksum to file_info after encrypting
+                        verification_metadata = encryption_metadata.copy()
+                        
+                        if 'server_encryption' in verification_metadata:
+                            verification_metadata['server_encryption'] = verification_metadata['server_encryption'].copy()
+                            verification_metadata['server_encryption'].pop('nonce', None)
+                            verification_metadata['server_encryption'].pop('key_version', None)
+                        
+                        if 'file_info' in verification_metadata:
+                            verification_metadata['file_info'] = verification_metadata['file_info'].copy()
+                            verification_metadata['file_info'].pop('checksum', None)
 
-            # Aggregate VIAC holdings by ISIN
-            for t in file_transactions:
-                key = f"VIAC_{t['isin']}"
-                if key not in holdings_dict:
-                    holdings_dict[key] = {
-                        'isin': t['isin'],
-                        'security': t['security'],
-                        'shares': 0,
-                        'total_cost': 0,
-                        'current_value': 0,
-                        'average_cost': 0,
-                        'currency': 'CHF',
-                        'account': 'VIAC',
-                        'transaction_count': 0
-                    }
-                # ... rest of broker aggregation logic continues here ...
+                        metadata_json = json.dumps(verification_metadata, sort_keys=True).encode()
+                        try:
+                            decrypted = encryption_service.decrypt_data(encrypted_data, tenant_id, metadata_json)
+                        except ValueError as e:
+                            # Decryption failed - this is a legacy file that can't be re-read
+                            # Transactions may already be in the database from initial import
+                            print(f"⚠️ Cannot decrypt broker document {doc.get('id')} ({doc.get('original_name', 'unknown')}): {e}")
+                            print(f"   This appears to be a legacy file with incompatible encryption. Data may already be loaded.")
+                            print(f"   To update holdings, delete and re-upload this file.")
+                            continue
+                    
+                    # Decrypt client layer if present (double encryption - legacy support)
+                    client_metadata = encryption_metadata.get('client_encryption')
+                    
+                    # Check if client-side encryption was used (algorithm != 'none')
+                    is_client_encrypted = (
+                        client_metadata 
+                        and client_metadata.get('algorithm') != 'none'
+                        and client_metadata.get('nonce')
+                    )
+                    
+                    if is_client_encrypted and g.session_token:
+                        try:
+                            decrypted = encryption_service.decrypt_client_layer(
+                                decrypted, 
+                                g.session_token, 
+                                client_metadata
+                            )
+                        except Exception as e:
+                            print(f"⚠️ Cannot decrypt client layer for broker document {doc.get('id')}: {e}")
+                            continue
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(doc['original_name'])[1]) as tmp:
+                        tmp.write(decrypted)
+                        tmp_path = tmp.name
+                    
+                    # Parse based on document type
+                    file_type = doc.get('file_type') or full_doc.get('file_type')
+                    if file_type == 'broker_viac_pdf':
+                        file_transactions = parser.parse_viac(tmp_path)
+                    elif file_type == 'broker_ing_diba_csv':
+                        file_holdings = parser.parse_ing_diba(tmp_path)
+                        # Convert holdings to transactions format for consistency
+                        for holding in file_holdings:
+                            holdings_dict[f"ING_DIBA_{holding['isin']}"] = holding
+                        if tmp_path:
+                            os.unlink(tmp_path)
+                        continue
+                    else:
+                        if tmp_path:
+                            os.unlink(tmp_path)
+                        continue
+                    
+                    transactions.extend(file_transactions)
+                    
+                    # Aggregate VIAC holdings by ISIN
+                    for t in file_transactions:
+                        key = f"VIAC_{t['isin']}"
+                        if key not in holdings_dict:
+                            holdings_dict[key] = {
+                                'isin': t['isin'],
+                                'security': t['security'],
+                                'shares': 0,
+                                'total_cost': 0,
+                                'current_value': 0,
+                                'average_cost': 0,
+                                'currency': 'CHF',
+                                'account': 'VIAC',
+                                'transaction_count': 0
+                            }
+                        holdings_dict[key]['shares'] += t['shares'] if t['type'] == 'buy' else -t['shares']
+                        holdings_dict[key]['total_cost'] += abs(t['amount']) if t['type'] == 'buy' else -abs(t['amount'])
+                        holdings_dict[key]['transaction_count'] += 1
+                    
+                    if tmp_path:
+                        os.unlink(tmp_path)
+                        tmp_path = None
+                except Exception as e:
+                    print(f"⚠️ Error processing broker document {doc.get('id')}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Clean up temp file if it exists
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.unlink(tmp_path)
+                        except:
+                            pass
+                    continue
+    except Exception as e:
+        print(f"Error reading broker documents from database: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # Note: File system fallback removed - broker data now only comes from uploaded documents in database
+    # This ensures that when files are deleted, broker data is properly cleared
+
+    # Calculate totals and prepare holdings list
+    holdings_list = []
+    viac_total_invested = 0
+    viac_total_current = 0
+    ing_diba_total_invested = 0
+    ing_diba_total_current = 0
+
+    for key, holding in holdings_dict.items():
+        # Skip holdings with zero or negative shares (fully sold positions)
+        if holding['shares'] <= 0:
+            continue
+        
+        # Only include holdings with positive shares in totals
+        if holding['account'] == 'VIAC':
+            viac_total_invested += holding['total_cost']
+            # VIAC holdings use cost basis (total_cost) as current_value since we don't fetch market prices
+            # Users can see current values from uploaded documents if available
+            if holding.get('current_value', 0) == 0:
+                holding['current_value'] = holding['total_cost']
+            viac_total_current += holding.get('current_value', 0)
+        elif holding['account'] == 'ING DiBa':
+            ing_diba_total_invested += holding['total_cost']
+            ing_diba_total_current += holding.get('current_value', holding['total_cost'])
+        
+        # Calculate average cost
+        holding['average_cost'] = holding['total_cost'] / holding['shares']
+        
+        holdings_list.append(holding)
+
+    # Prepare summary
+    summary = {}
+    if viac_total_invested > 0:
+        summary['viac'] = {
+            'total_invested': round(viac_total_invested, 2),
+            'currency': 'CHF'
+        }
+    if ing_diba_total_invested > 0:
+        summary['ing_diba'] = {
+            'total_invested': round(ing_diba_total_invested, 2),
+            'total_current_value': round(ing_diba_total_current, 2),
+            'currency': 'EUR'
+        }
+
+    return jsonify({
+        'transactions': transactions,
+        'holdings': holdings_list,
+        'summary': summary
+    })
+
+@app.route('/api/broker/historical-valuation')
+@authenticate_request
+@require_auth
+def get_broker_historical_valuation():
+    """
+    Calculate historical portfolio valuation using only prices from uploaded broker documents.
+    Uses exponential interpolation between document snapshots.
+    """
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+    parser = BankStatementParser()
+    
+    # Optional ?refresh=true to force recomputation
+    refresh = request.args.get('refresh', 'false').lower() in ('1', 'true', 'yes')
+
+    try:
+        # Try cached valuation first unless refresh was requested
+        if not refresh:
+            cached = wealth_db.get_broker_valuation_cache(tenant_id)
+            if cached and cached.get("data"):
+                data = cached["data"]
+                if isinstance(data, dict):
+                    ts_len = len(data.get('time_series', []))
+                    print(f"✅ Returning cached broker valuation for tenant {tenant_id}; time_series={ts_len}")
+                else:
+                    print(f"✅ Returning cached broker valuation for tenant {tenant_id} (non-dict data)")
+                return jsonify(data)
+
+        transactions = []
+        document_snapshots = []  # List of (date, total_portfolio_value) from documents
+        ing_diba_purchase_date = None  # Track ING DiBa purchase date for interpolation
+        ing_diba_purchase_invested = 0  # Invested capital at purchase date
+        
+        # Get broker documents and parse them
+        try:
+            broker_docs = wealth_db.list_file_attachments(tenant_id, file_types=['broker_viac_pdf', 'broker_ing_diba_csv'])
+            
+            if broker_docs:
+                encryption_service = get_encryption_service()
+                import tempfile
+                
+                for doc in broker_docs:
+                    try:
+                        full_doc = wealth_db.get_file_attachment(tenant_id, doc['id'])
+                        if not full_doc:
+                            continue
+                        
+                        encryption_metadata = full_doc.get('encryption_metadata') or {}
+                        if isinstance(encryption_metadata, str):
+                            encryption_metadata = json.loads(encryption_metadata)
+                        
+                        # Check if server encryption was applied
+                        server_encryption = encryption_metadata.get('server_encryption', {})
+                        server_algorithm = server_encryption.get('algorithm', 'AES-256-GCM')
+                        
+                        if server_algorithm == 'none':
+                            # No server encryption - file is stored as-is
+                            decrypted = full_doc['encrypted_data']
+                        else:
+                            # Server encryption was applied - decrypt it first
+                            nonce_b64 = server_encryption.get('nonce', '')
+                            if not nonce_b64:
+                                print(f"⚠️ Missing nonce in encryption metadata for broker document {doc.get('id')}")
+                                continue
+                            
+                            try:
+                                nonce = base64.b64decode(nonce_b64)
+                            except Exception as e:
+                                print(f"⚠️ Invalid nonce format for broker document {doc.get('id')}: {e}")
+                                continue
+                            
+                            encrypted_data = EncryptedData(
+                                ciphertext=full_doc['encrypted_data'],
+                                nonce=nonce,
+                                key_version=server_encryption.get('key_version', 1)
+                            )
+                            
+                            # Create a copy of metadata for AAD verification
+                            # IMPORTANT: We must remove fields that were added AFTER encryption
+                            verification_metadata = encryption_metadata.copy()
+                            if 'server_encryption' in verification_metadata:
+                                verification_metadata['server_encryption'] = verification_metadata['server_encryption'].copy()
+                                verification_metadata['server_encryption'].pop('nonce', None)
+                                verification_metadata['server_encryption'].pop('key_version', None)
+                            
+                            if 'file_info' in verification_metadata:
+                                verification_metadata['file_info'] = verification_metadata['file_info'].copy()
+                                verification_metadata['file_info'].pop('checksum', None)
+                            
+                            metadata_json = json.dumps(verification_metadata, sort_keys=True).encode()
+                            try:
+                                decrypted = encryption_service.decrypt_data(encrypted_data, tenant_id, metadata_json)
+                            except ValueError as e:
+                                # Decryption failed - legacy file, skip but data may already be in DB
+                                print(f"⚠️ Cannot decrypt broker document {doc.get('id')} ({doc.get('original_name', 'unknown')}): {e}")
+                                print(f"   Skipping legacy file - data may already be loaded from previous import.")
+                                continue
+                        
+                        # Decrypt client layer if present (double encryption - legacy support)
+                        client_metadata = encryption_metadata.get('client_encryption')
+                        
+                        # Check if client-side encryption was used (algorithm != 'none')
+                        is_client_encrypted = (
+                            client_metadata 
+                            and client_metadata.get('algorithm') != 'none'
+                            and client_metadata.get('nonce')
+                        )
+                        
+                        if is_client_encrypted and g.session_token:
+                            try:
+                                decrypted = encryption_service.decrypt_client_layer(
+                                    decrypted, 
+                                    g.session_token, 
+                                    client_metadata
+                                )
+                            except Exception as e:
+                                print(f"⚠️ Cannot decrypt client layer for broker document {doc.get('id')}: {e}")
+                                continue
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(doc['original_name'])[1]) as tmp:
+                            tmp.write(decrypted)
+                            tmp_path = tmp.name
+                        
+                        file_type = doc.get('file_type') or full_doc.get('file_type')
+                        if file_type == 'broker_viac_pdf':
+                            file_transactions = parser.parse_viac(tmp_path)
+                            transactions.extend(file_transactions)
+                        elif file_type == 'broker_ing_diba_csv':
+                            # Parse ING DiBa CSV and extract snapshot
+                            file_holdings = parser.parse_ing_diba(tmp_path)
+                            if file_holdings:
+                                # Get snapshot date from first holding (all have same date)
+                                snapshot_date_str = file_holdings[0].get('date')
+                                # Get purchase date and total cost from holdings
+                                purchase_date_str = file_holdings[0].get('purchase_date')
+                                if purchase_date_str and not ing_diba_purchase_date:
+                                    ing_diba_purchase_date = purchase_date_str
+                                
+                                if snapshot_date_str:
+                                    # Calculate total portfolio value from this document
+                                    total_value_chf = 0
+                                    total_cost_chf = 0
+                                    for holding in file_holdings:
+                                        current_val = holding.get('current_value', 0) or 0
+                                        cost_val = holding.get('total_cost', 0) or 0
+                                        currency = holding.get('currency', 'EUR')
+                                        # Convert to CHF
+                                        if currency == 'EUR':
+                                            total_value_chf += current_val * 0.95
+                                            total_cost_chf += cost_val * 0.95
+                                        elif currency == 'CHF':
+                                            total_value_chf += current_val
+                                            total_cost_chf += cost_val
+                                        else:
+                                            total_value_chf += current_val  # Default
+                                            total_cost_chf += cost_val
+                                    
+                                    if total_value_chf > 0:
+                                        document_snapshots.append((snapshot_date_str, total_value_chf))
+                                        print(f"📄 Document snapshot: {snapshot_date_str} = {total_value_chf:.2f} CHF")
+                                    
+                                    # Track purchase invested if we have purchase date
+                                    if purchase_date_str and total_cost_chf > 0:
+                                        ing_diba_purchase_invested = total_cost_chf
+                        
+                        os.unlink(tmp_path)
+                    except Exception as e:
+                        print(f"Error processing broker document {doc.get('id')}: {e}")
+                        continue
+        except Exception as e:
+            print(f"Error reading broker documents: {e}")
+        
+        # Note: File system fallback removed - historical valuation now only uses uploaded documents in database
+        # This ensures that when files are deleted, historical data is properly cleared
+        
+        # If no data, return empty result
+        if not transactions and not document_snapshots:
+            empty_payload = {
+                'time_series': [],
+                'error': None
+            }
+            wealth_db.save_broker_valuation_cache(tenant_id, empty_payload)
+            return jsonify(empty_payload)
+        
+        # Sort document snapshots by date
+        document_snapshots.sort(key=lambda x: x[0])
+        print(f"📊 Found {len(document_snapshots)} document snapshots")
+        
+        # Sort transactions by date
+        sorted_transactions = sorted(transactions, key=lambda x: x['date'])
+        
+        # Build invested capital timeline from transactions
+        invested_by_date = {}  # date_str -> cumulative_invested
+        cumulative_invested = 0
+        
+        # Get all dates we need to calculate
+        dates_to_calculate = set()
+        
+        # Add transaction dates
+        for transaction in sorted_transactions:
+            trans_date = transaction['date'].split('T')[0]
+            dates_to_calculate.add(trans_date)
+            cumulative_invested += abs(transaction.get('amount', 0))
+            invested_by_date[trans_date] = cumulative_invested
+        
+        # Add document snapshot dates
+        for snapshot_date_str, _ in document_snapshots:
+            dates_to_calculate.add(snapshot_date_str.split('T')[0])
+        
+        # Add today
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        dates_to_calculate.add(today_str)
+        
+        # Generate monthly data points between first and last date for smooth interpolation
+        if dates_to_calculate:
+            sorted_temp_dates = sorted(dates_to_calculate)
+            first_date = datetime.fromisoformat(sorted_temp_dates[0])
+            last_date = datetime.fromisoformat(sorted_temp_dates[-1])
+            
+            # Add first day of each month between first and last date
+            # Start from the month containing the first date
+            current_month = datetime(first_date.year, first_date.month, 1)
+            last_month = datetime(last_date.year, last_date.month, 1)
+            
+            while current_month <= last_month:
+                month_start = current_month.strftime('%Y-%m-%d')
+                dates_to_calculate.add(month_start)
+                # Move to next month
+                if current_month.month == 12:
+                    current_month = datetime(current_month.year + 1, 1, 1)
+                else:
+                    current_month = datetime(current_month.year, current_month.month + 1, 1)
+            
+            print(f"📅 Generated monthly data points: {len(dates_to_calculate)} total dates")
+        
+        # Sort all dates
+        sorted_dates = sorted(dates_to_calculate)
+        
+        if not sorted_dates:
+            sorted_dates = [today_str]
+        
+        # Build time series with exponential interpolation between snapshots
+        time_series = []
+        
+        # Create snapshot lookup: date_str -> portfolio_value
+        snapshot_values = {}
+        for snapshot_date_str, value in document_snapshots:
+            date_key = snapshot_date_str.split('T')[0]
+            snapshot_values[date_key] = value
+        
+        # Find purchase date for interpolation (use ING DiBa purchase date if available, otherwise first transaction)
+        purchase_date_for_interpolation = None
+        purchase_invested = 0
+        
+        print(f"🔍 ING DiBa purchase date: {ing_diba_purchase_date}, invested: {ing_diba_purchase_invested}")
+        print(f"🔍 Document snapshots: {len(document_snapshots)}, Transactions: {len(sorted_transactions)}")
+        
+        # Prefer ING DiBa purchase date if we have it
+        if ing_diba_purchase_date and ing_diba_purchase_invested > 0:
+            purchase_date_for_interpolation = ing_diba_purchase_date.split('T')[0] if 'T' in ing_diba_purchase_date else ing_diba_purchase_date
+            purchase_invested = ing_diba_purchase_invested
+            print(f"✅ Using ING DiBa purchase date: {purchase_date_for_interpolation}, invested: {purchase_invested:.2f}")
+        elif document_snapshots and sorted_transactions:
+            # Use first transaction date as purchase date
+            first_trans_date = sorted_transactions[0]['date'].split('T')[0]
+            purchase_date_for_interpolation = first_trans_date
+            purchase_invested = invested_by_date.get(first_trans_date, 0)
+            print(f"✅ Using first transaction date: {purchase_date_for_interpolation}, invested: {purchase_invested:.2f}")
+        
+        # If we have document snapshots but no purchase snapshot, add one at the purchase date
+        # This allows interpolation from purchase to first document snapshot
+        if purchase_date_for_interpolation and document_snapshots:
+            first_snapshot_date_str = document_snapshots[0][0].split('T')[0]
+            purchase_date_key = purchase_date_for_interpolation.split('T')[0] if 'T' in purchase_date_for_interpolation else purchase_date_for_interpolation
+            
+            print(f"🔍 Comparing purchase date {purchase_date_key} with first snapshot {first_snapshot_date_str}")
+            
+            # Only add purchase snapshot if it's before the first document snapshot
+            if purchase_date_key < first_snapshot_date_str and purchase_invested > 0:
+                snapshot_values[purchase_date_key] = purchase_invested
+                # Also add to dates_to_calculate if not already there
+                dates_to_calculate.add(purchase_date_key)
+                print(f"📅 Added purchase snapshot at {purchase_date_key}: {purchase_invested:.2f} CHF (for interpolation)")
+            else:
+                print(f"⚠️ Not adding purchase snapshot: purchase_date={purchase_date_key}, first_snapshot={first_snapshot_date_str}, invested={purchase_invested}")
+        
+        # Re-sort dates after adding purchase date
+        sorted_dates = sorted(dates_to_calculate)
+        
+        # Find first and last snapshot dates
+        snapshot_dates = sorted(snapshot_values.keys())
+        first_snapshot_date = snapshot_dates[0] if snapshot_dates else None
+        last_snapshot_date = snapshot_dates[-1] if snapshot_dates else None
+        
+        # Find first investment date - filter out dates before first investment
+        first_investment_date = None
+        if sorted_transactions:
+            first_investment_date = sorted_transactions[0]['date'].split('T')[0]
+        elif ing_diba_purchase_date:
+            first_investment_date = ing_diba_purchase_date.split('T')[0] if 'T' in ing_diba_purchase_date else ing_diba_purchase_date
+        
+        # Filter dates to only include from first investment onwards
+        if first_investment_date:
+            sorted_dates = [d for d in sorted_dates if d >= first_investment_date]
+            print(f"📅 Filtered dates: starting from first investment {first_investment_date}")
+        
+        for date_str in sorted_dates:
+            date_obj = datetime.fromisoformat(date_str)
+            
+            # Calculate invested capital at this date
+            invested = invested_by_date.get(date_str, 0)
+            if not invested and sorted_dates.index(date_str) > 0:
+                # Forward-fill invested capital
+                prev_dates = [d for d in sorted_dates if d < date_str]
+                if prev_dates:
+                    invested = invested_by_date.get(prev_dates[-1], 0)
+            
+            # Skip if no investment yet (shouldn't happen after filtering, but safety check)
+            if invested == 0 and date_str != first_investment_date:
+                continue
+            
+            point = {
+                'date': date_str,
+                'invested': round(invested, 2)
+            }
+            
+            # Calculate portfolio value - always set it
+            portfolio_value = None
+            
+            # If this is a snapshot date, use the exact value
+            if date_str in snapshot_values:
+                portfolio_value = snapshot_values[date_str]
+                print(f"📸 Snapshot at {date_str}: {portfolio_value:.2f} CHF")
+            elif snapshot_dates:
+                # Interpolate between snapshots using exponential growth
+                if date_str < first_snapshot_date:
+                    # Before first snapshot: use invested capital
+                    portfolio_value = invested
+                elif date_str > last_snapshot_date:
+                    # After last snapshot: keep flat at last snapshot value
+                    portfolio_value = snapshot_values[last_snapshot_date]
+                else:
+                    # Between snapshots: exponential interpolation
+                    # Find the two snapshots this date falls between
+                    prev_snapshot_date = None
+                    next_snapshot_date = None
+                    prev_value = None
+                    next_value = None
+                    
+                    for i, snap_date in enumerate(snapshot_dates):
+                        if snap_date <= date_str:
+                            prev_snapshot_date = snap_date
+                            prev_value = snapshot_values[snap_date]
+                        if snap_date > date_str and next_snapshot_date is None:
+                            next_snapshot_date = snap_date
+                            next_value = snapshot_values[snap_date]
+                            break
+                    
+                    if prev_snapshot_date and next_snapshot_date and prev_value > 0:
+                        # Calculate exponential growth rate
+                        days_between = (datetime.fromisoformat(next_snapshot_date) - datetime.fromisoformat(prev_snapshot_date)).days
+                        days_elapsed = (date_obj - datetime.fromisoformat(prev_snapshot_date)).days
+                        
+                        if days_between > 0:
+                            growth_ratio = next_value / prev_value
+                            t = days_elapsed / days_between  # t in [0, 1]
+                            portfolio_value = prev_value * (growth_ratio ** t)
+                        else:
+                            portfolio_value = prev_value
+                    elif prev_snapshot_date:
+                        # Only have previous snapshot, keep flat
+                        portfolio_value = prev_value
+                    else:
+                        # Fallback to invested
+                        portfolio_value = invested
+            else:
+                # No snapshots at all: use invested capital
+                portfolio_value = invested
+            
+            # Always set portfolio value (even if it equals invested)
+            if portfolio_value is None:
+                portfolio_value = invested
+            
+            point['value'] = round(portfolio_value, 2)
+            time_series.append(point)
+        
+        # Debug: Count points with value vs invested
+        points_with_value = sum(1 for p in time_series if p.get('value') is not None)
+        points_with_different_value = sum(1 for p in time_series if p.get('value') is not None and abs(p.get('value', 0) - p.get('invested', 0)) > 0.01)
+        print(f"📊 Generated {len(time_series)} data points: {points_with_value} have value, {points_with_different_value} differ from invested")
+        
+        payload = {
+            'time_series': time_series,
+            'error': None
+        }
+
+        # Store in cache
+        wealth_db.save_broker_valuation_cache(tenant_id, payload)
+        print(f"💾 Saved broker valuation cache: {len(time_series)} data points")
+
+        return jsonify(payload)
+        
+    except Exception as e:
+        import traceback
+        print(f"Error calculating historical valuation: {e}")    
+        print(traceback.format_exc())
+
+        # On error, fall back to cached data if available
+        cached = wealth_db.get_broker_valuation_cache(tenant_id)
+        if cached and cached.get("data"):
+            print(f"⚠️ Error during valuation; returning last cached data for tenant {tenant_id}")
+            return jsonify(cached["data"])
+
+        return jsonify({
+            'time_series': [],
+            'error': str(e)
+        })
+
 
 @app.route('/api/projection')
 @authenticate_request
@@ -1816,41 +2595,75 @@ def upload_document():
         metadata.setdefault('fileMetadata', {})
         metadata['fileMetadata']['documentType'] = document_type
 
-        client_ciphertext = encrypted_file.read()
+        file_data = encrypted_file.read()
         tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
         uploaded_by = _get_authenticated_user_id()
         encryption_service = get_encryption_service()
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        server_metadata = {
-            'client_encryption': metadata,
-            'document_type': document_type,
-            'server_encryption': {
-                'algorithm': 'AES-256-GCM',
-                'encrypted_at': now_iso
-            },
-            'file_info': {
-                'original_name': metadata['originalName'],
-                'original_size': metadata['originalSize'],
-                'original_type': metadata['originalType'],
-                'uploaded_at': now_iso,
-                'document_type': document_type
-            },
-            'document_metadata': document_metadata
-        }
+        # Check if client already encrypted the file
+        client_algorithm = metadata.get('algorithm', 'none')
+        is_client_encrypted = client_algorithm != 'none' and client_algorithm is not None
+        
+        if is_client_encrypted:
+            # Client encrypted the file - this shouldn't happen with current design
+            # but we handle it gracefully by storing as-is without double encryption
+            print(f"⚠️ Warning: Received client-encrypted file for {document_type}. Client-side encryption should be disabled.")
+            # Store the client-encrypted data directly without server encryption
+            server_encrypted_data = EncryptedData(
+                ciphertext=file_data,
+                nonce=b'',  # Empty nonce since we're not encrypting
+                key_version=None
+            )
+            server_metadata = {
+                'client_encryption': metadata,
+                'document_type': document_type,
+                'server_encryption': {
+                    'algorithm': 'none',  # No server encryption applied
+                    'encrypted_at': now_iso,
+                    'key_version': None,
+                    'nonce': None
+                },
+                'file_info': {
+                    'original_name': metadata['originalName'],
+                    'original_size': metadata['originalSize'],
+                    'original_type': metadata['originalType'],
+                    'uploaded_at': now_iso,
+                    'document_type': document_type
+                },
+                'document_metadata': document_metadata
+            }
+        else:
+            # File is plaintext - encrypt it on the server
+            server_metadata = {
+                'client_encryption': metadata,
+                'document_type': document_type,
+                'server_encryption': {
+                    'algorithm': 'AES-256-GCM',
+                    'encrypted_at': now_iso
+                },
+                'file_info': {
+                    'original_name': metadata['originalName'],
+                    'original_size': metadata['originalSize'],
+                    'original_type': metadata['originalType'],
+                    'uploaded_at': now_iso,
+                    'document_type': document_type
+                },
+                'document_metadata': document_metadata
+            }
 
-        associated_data = json.dumps(server_metadata, sort_keys=True).encode()
-        server_encrypted_data = encryption_service.encrypt_data(
-            client_ciphertext,
-            tenant_id,
-            associated_data
-        )
+            associated_data = json.dumps(server_metadata, sort_keys=True).encode()
+            server_encrypted_data = encryption_service.encrypt_data(
+                file_data,
+                tenant_id,
+                associated_data
+            )
 
-        # Include server encryption metadata (nonce/key version) for future decryption
-        server_metadata['server_encryption'].update({
-            'key_version': server_encrypted_data.key_version,
-            'nonce': base64.b64encode(server_encrypted_data.nonce).decode('ascii')
-        })
+            # Include server encryption metadata (nonce/key version) for future decryption
+            server_metadata['server_encryption'].update({
+                'key_version': server_encrypted_data.key_version,
+                'nonce': base64.b64encode(server_encrypted_data.nonce).decode('ascii')
+            })
 
         file_record = wealth_db.store_encrypted_file(
             tenant_id=tenant_id,

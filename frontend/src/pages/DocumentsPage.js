@@ -124,6 +124,7 @@ const DocumentsPage = ({
   });
   const [openSettingsType, setOpenSettingsType] = useState(null);
   const [openGlobalSettings, setOpenGlobalSettings] = useState(false);
+  const [expandedFileLists, setExpandedFileLists] = useState({});
   const settingsMenuRef = useRef(null);
   const settingsButtonRefs = useRef({});
   const globalSettingsMenuRef = useRef(null);
@@ -412,6 +413,9 @@ const DocumentsPage = ({
       return;
     }
 
+    // Preserve scroll position
+    const scrollPosition = window.scrollY || window.pageYOffset;
+
     const files = Array.from(fileList);
     const timestamp = Date.now();
     const seenKeys = new Set();
@@ -456,6 +460,7 @@ const DocumentsPage = ({
     try {
       const completed = [];
       const cancelled = [];
+      const uploadedDocuments = []; // Batch document updates
 
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
@@ -491,7 +496,23 @@ const DocumentsPage = ({
           seenKeys.add(fileKey);
         }
 
+        // Throttle progress updates to reduce re-renders (max once per 100ms)
+        let lastProgressUpdate = 0;
+        const PROGRESS_THROTTLE_MS = 100;
+        
         const emitProgress = (phase, progress, message, extra = {}) => {
+          const now = Date.now();
+          const shouldUpdate = (now - lastProgressUpdate) >= PROGRESS_THROTTLE_MS || 
+                                progress === 100 || 
+                                progress === 0 ||
+                                phase === 'processing'; // Always update processing phase
+          
+          if (!shouldUpdate && progress !== 100 && progress !== 0) {
+            return; // Skip this update
+          }
+          
+          lastProgressUpdate = now;
+          
           updateActionState(normalizedTypeKey, (current) => {
             const uploads = (current.uploads || []).map((upload) => {
               if (upload.key !== entryKey) return upload;
@@ -518,10 +539,12 @@ const DocumentsPage = ({
           });
         };
 
-        emitProgress('upload', 5, 'Encrypting file…');
+        emitProgress('upload', 5, 'Preparing file…');
 
         try {
-          const uploaded = await onUpload(normalizedTypeKey, file, {}, emitProgress);
+          // Skip data fetches during batch uploads - will fetch once at the end
+          const skipDataFetch = files.length > 1;
+          const uploaded = await onUpload(normalizedTypeKey, file, {}, emitProgress, { skipDataFetch });
 
           emitProgress('processing', 100, 'Processing complete.', { processedCount: 'complete' });
 
@@ -542,10 +565,8 @@ const DocumentsPage = ({
           }, 400);
 
           if (uploaded) {
-            setDocumentsState((prev) => {
-              const filtered = prev.filter((doc) => doc.id !== uploaded.id);
-              return [uploaded, ...filtered];
-            });
+            // Batch document updates instead of updating immediately
+            uploadedDocuments.push(uploaded);
           }
 
           completed.push(file);
@@ -566,8 +587,45 @@ const DocumentsPage = ({
         }
       }
 
+      // Batch update all uploaded documents at once to prevent multiple re-renders
+      if (uploadedDocuments.length > 0) {
+        setDocumentsState((prev) => {
+          let updated = [...prev];
+          // Remove duplicates and add new documents
+          uploadedDocuments.forEach((newDoc) => {
+            updated = updated.filter((doc) => doc.id !== newDoc.id);
+            updated.unshift(newDoc); // Add to beginning
+          });
+          return updated;
+        });
+      }
+
+      // Only refresh data once after all uploads complete (for batch uploads)
+      // For batch uploads, defer the refresh slightly to let DOM settle and prevent jitter
       if (typeof onRefresh === 'function') {
-        await onRefresh();
+        if (files.length > 1) {
+          // Defer refresh for batch uploads to prevent layout shift
+          setTimeout(async () => {
+            await onRefresh();
+            // Restore scroll after refresh completes
+            requestAnimationFrame(() => {
+              window.scrollTo(0, scrollPosition);
+            });
+          }, 150);
+        } else {
+          // Single file upload - refresh immediately
+          await onRefresh();
+        }
+      }
+
+      // Restore scroll position after all DOM updates complete (only for single file uploads)
+      // For batch uploads, scroll is restored after refresh completes
+      if (files.length === 1) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            window.scrollTo(0, scrollPosition);
+          });
+        });
       }
 
       const hadFailures = (completed.length + cancelled.length) < files.length;
@@ -591,7 +649,8 @@ const DocumentsPage = ({
 
   const handleDelete = useCallback(async (document) => {
     if (!document?.id) {
-      setConfirmState({ open: false, document: null, busy: false, error: null });
+      console.error('Cannot delete document: missing document ID', document);
+      setConfirmState({ open: false, document: null, busy: false, error: 'Document ID is missing' });
       return;
     }
 
@@ -601,6 +660,13 @@ const DocumentsPage = ({
       document?.document_metadata?.file_info?.document_type ||
       document?.metadata?.file_info?.document_type
     ) || 'unknown';
+
+    console.log('Deleting document:', {
+      id: document.id,
+      name: document.originalName || document.original_name || document.file_name,
+      type: normalizedTypeKey,
+      documentType: document.documentType || document.file_type
+    });
 
     setConfirmState((prev) => ({
       ...prev,
@@ -620,7 +686,9 @@ const DocumentsPage = ({
       await onDelete(document.id, documentType);
       setDocumentsState(prev => prev.filter(doc => doc.id !== document.id));
       setConfirmState({ open: false, document: null, busy: false, error: null });
+      console.log('Document deleted successfully');
     } catch (error) {
+      console.error('Error deleting document:', error);
       const errorMessage = error?.message || 'Failed to delete document';
       updateActionState(normalizedTypeKey, {
         error: errorMessage
@@ -928,54 +996,92 @@ const DocumentsPage = ({
                           {docsForType.length === 0 && (
                             <p className="document-empty">No documents uploaded yet.</p>
                           )}
-                          {docsForType.length > 0 && (
-                            <ul>
-                              {docsForType.map((doc) => {
-                                const docTypeValue = normalizeTypeKey(
-                                  doc.documentType ||
-                                  doc.file_type ||
-                                  doc.document_metadata?.file_info?.document_type ||
-                                  doc.metadata?.file_info?.document_type
-                                );
-                                return (
-                                <li className="document-item" key={doc.id}>
-                                  <div className="document-item-info">
-                                    <span className="document-name">
-                                      {doc.originalName || doc.original_name || doc.file_name}
-                                    </span>
-                                    <span className="document-meta">
-                                      {formatFileSize(doc.fileSize || doc.file_size)} •{' '}
-                                      {formatDateTime(doc.uploadedAt || doc.uploaded_at)}
-                                    </span>
-                                    {(() => {
-                                      const summary = doc?.documentMetadata?.statementSummary || doc?.metadata?.statementSummary;
-                                      if (summary && (summary.startDate || summary.endDate)) {
-                                        return (
-                                          <span className="document-summary">
-                                            <span style={{ color: '#6b7280' }}>Coverage:</span>
-                                            <strong>{formatDateOnly(summary.startDate) || '—'}</strong>
-                                            <span className="summary-arrow">→</span>
-                                            <strong>{formatDateOnly(summary.endDate) || '—'}</strong>
-                                          </span>
-                                        );
-                                      }
-                                      return null;
-                                    })()}
-                                  </div>
-                                  <div className="document-item-actions">
-                                    <button
-                                      className="document-delete-button"
-                                      onClick={() => promptDelete({ ...doc, documentType: docTypeValue })}
-                                      disabled={deletingId === doc.id || confirmBusy}
-                                    >
-                                      {deletingId === doc.id ? 'Deleting…' : 'Delete'}
-                                    </button>
-                                  </div>
-                                </li>
-                              );
-                              })}
-                            </ul>
-                          )}
+                          {docsForType.length > 0 && (() => {
+                            const isExpanded = expandedFileLists[typeKey] || false;
+                            const maxVisible = 3;
+                            const visibleDocs = isExpanded ? docsForType : docsForType.slice(0, maxVisible);
+                            const hasMore = docsForType.length > maxVisible;
+                            
+                            return (
+                              <>
+                                <ul>
+                                  {visibleDocs.map((doc) => {
+                                    const docTypeValue = normalizeTypeKey(
+                                      doc.documentType ||
+                                      doc.file_type ||
+                                      doc.document_metadata?.file_info?.document_type ||
+                                      doc.metadata?.file_info?.document_type
+                                    );
+                                    return (
+                                    <li className="document-item" key={doc.id}>
+                                      <div className="document-item-info">
+                                        <span className="document-name">
+                                          {doc.originalName || doc.original_name || doc.file_name}
+                                        </span>
+                                        <span className="document-meta">
+                                          {formatFileSize(doc.fileSize || doc.file_size)} •{' '}
+                                          {formatDateTime(doc.uploadedAt || doc.uploaded_at)}
+                                        </span>
+                                        {(() => {
+                                          const summary = doc?.documentMetadata?.statementSummary || doc?.metadata?.statementSummary;
+                                          if (summary && (summary.startDate || summary.endDate)) {
+                                            return (
+                                              <span className="document-summary">
+                                                <span style={{ color: '#6b7280' }}>Coverage:</span>
+                                                <strong>{formatDateOnly(summary.startDate) || '—'}</strong>
+                                                <span className="summary-arrow">→</span>
+                                                <strong>{formatDateOnly(summary.endDate) || '—'}</strong>
+                                              </span>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
+                                      </div>
+                                      <div className="document-item-actions">
+                                        <button
+                                          className="document-delete-button"
+                                          onClick={() => promptDelete({ ...doc, documentType: docTypeValue })}
+                                          disabled={deletingId === doc.id || confirmBusy}
+                                        >
+                                          {deletingId === doc.id ? 'Deleting…' : 'Delete'}
+                                        </button>
+                                      </div>
+                                    </li>
+                                  );
+                                  })}
+                                </ul>
+                                {hasMore && (
+                                  <button
+                                    className="document-list-toggle"
+                                    onClick={() => setExpandedFileLists(prev => ({
+                                      ...prev,
+                                      [typeKey]: !prev[typeKey]
+                                    }))}
+                                    style={{
+                                      width: '100%',
+                                      padding: '8px 12px',
+                                      marginTop: '8px',
+                                      border: '1px solid #e5e7eb',
+                                      borderRadius: '6px',
+                                      backgroundColor: 'white',
+                                      color: '#374151',
+                                      fontSize: '13px',
+                                      cursor: 'pointer',
+                                      fontWeight: '500'
+                                    }}
+                                  >
+                                    {isExpanded 
+                                      ? `Show less (${docsForType.length - maxVisible} hidden)`
+                                      : `Show ${docsForType.length - maxVisible} more file${docsForType.length - maxVisible === 1 ? '' : 's'}`}
+                                    <i 
+                                      className={`fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'}`}
+                                      style={{ marginLeft: '8px' }}
+                                    />
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     );

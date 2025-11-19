@@ -1358,7 +1358,7 @@
 
 .chart-wrapper {
   width: 100%;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .chart-wrapper .recharts-bar-rectangle {
@@ -1534,6 +1534,11 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
+.accounts-list-section-broker {
+  margin-top: 48px;
+  margin-bottom: 48px;
+}
+
 .accounts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -1546,6 +1551,11 @@
   border-radius: 10px;
   border: 1px solid #e5e5e5;
   transition: all 0.2s;
+}
+
+.account-card-broker {
+  padding-top: 32px;
+  padding-bottom: 32px;
 }
 
 .account-card:hover {

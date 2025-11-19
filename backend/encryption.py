@@ -324,6 +324,44 @@ class EncryptionService:
         with open(output_path, 'wb') as f:
             f.write(plaintext)
 
+    def decrypt_client_layer(self, ciphertext: bytes, session_token: str, client_metadata: Dict[str, Any]) -> bytes:
+        """
+        Decrypt client-side encryption layer using session token
+        
+        Args:
+            ciphertext: The client-encrypted data
+            session_token: User's session token for key derivation
+            client_metadata: Metadata containing nonce, salt info, and AAD
+            
+        Returns:
+            Decrypted plaintext (original file content)
+        """
+        tenant_id = client_metadata.get('tenantId', 'default')
+        
+        # Reconstruct nonce and AAD from integer arrays
+        nonce = bytes(client_metadata.get('nonce', []))
+        aad = bytes(client_metadata.get('additionalData', []))
+        
+        # Derive key matching frontend implementation:
+        # PBKDF2(sessionToken, salt='wealth-file-{tenantId}', iterations=100000, len=32, hash=SHA-256)
+        salt = f"wealth-file-{tenant_id}".encode()
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        key = kdf.derive(session_token.encode())
+        
+        # Decrypt
+        aesgcm = AESGCM(key)
+        try:
+            return aesgcm.decrypt(nonce, ciphertext, aad)
+        except InvalidTag as e:
+            raise ValueError("Client-side decryption failed - invalid tag or corrupted data") from e
+
+
 
 # Global encryption service instance
 # In production, this would be initialized with cloud KMS integration

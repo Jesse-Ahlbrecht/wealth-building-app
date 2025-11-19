@@ -133,11 +133,11 @@ const AccountsPage = ({ accounts, formatCurrency, formatDate }) => {
       )}
 
       {brokerAccounts.length > 0 && (
-        <div className="accounts-list-section">
+        <div className="accounts-list-section accounts-list-section-broker">
           <h3 className="accounts-title">Broker Accounts</h3>
           <div className="accounts-grid">
             {brokerAccounts.map((account) => (
-              <div key={account.account} className="account-card">
+              <div key={account.account} className="account-card account-card-broker">
                 <div className="account-header">
                   <div className="account-name">{account.account}</div>
                   <span className={`account-badge account-badge-${account.account.toLowerCase().replace(/ /g, '-')}`}>

@@ -39,7 +39,7 @@ const ProjectionPage = ({ projectionData, formatCurrency }) => {
           <div className="total-card">
             <div className="total-label">Average Savings Rate</div>
             <div className="total-amount positive" style={{ fontSize: '28px', fontWeight: '700' }}>
-              {projectionData.averageSavingsRate.toFixed(1)}%
+              {(projectionData.averageSavingsRate || 0).toFixed(1)}%
             </div>
           </div>
         </div>
