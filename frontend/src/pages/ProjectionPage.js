@@ -14,7 +14,7 @@ const ProjectionPage = ({ projectionData, formatCurrency }) => {
     <div className="accounts-container">
       <div className="accounts-summary">
         <h3 className="accounts-title">Wealth Projection</h3>
-        <p style={{ color: '#666', marginBottom: '24px' }}>
+        <p style={{ color: 'var(--color-text-tertiary)', marginBottom: '24px' }}>
           Project your future net worth based on your current savings rate and assumed interest rate.
         </p>
 

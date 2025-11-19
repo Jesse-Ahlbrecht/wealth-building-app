@@ -80,7 +80,7 @@ const ChartsPage = ({
         >
           <div>
             <h3 className="chart-title" style={{ marginBottom: '4px' }}>Savings Over Time</h3>
-            <div style={{ fontSize: '14px', color: '#666', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '14px', color: 'var(--color-text-tertiary)', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
               {chartView === 'absolute' ? (
                 <>
                   <div>
@@ -93,7 +93,7 @@ const ChartsPage = ({
                     >
                       {new Intl.NumberFormat('de-CH', { style: 'currency', currency: 'CHF' }).format(avgSavings)}
                     </span>
-                    <span style={{ marginLeft: '8px', color: '#999' }}>
+                    <span style={{ marginLeft: '8px', color: 'var(--color-text-light)' }}>
                       ({((avgSavings / SAVINGS_GOAL_CHF) * 100).toFixed(0)}% of goal)
                     </span>
                     {includeLoanPayments && (
@@ -104,7 +104,7 @@ const ChartsPage = ({
                   </div>
                   <div>
                     Total:{' '}
-                    <span style={{ fontWeight: 600, color: '#1a1a1a' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
                       {new Intl.NumberFormat('de-CH', { style: 'currency', currency: 'CHF' }).format(totalSavings)}
                     </span>
                   </div>
@@ -121,7 +121,7 @@ const ChartsPage = ({
                     >
                       {avgSavingRate.toFixed(1)}%
                     </span>
-                    <span style={{ marginLeft: '8px', color: '#999' }}>
+                    <span style={{ marginLeft: '8px', color: 'var(--color-text-light)' }}>
                       ({((avgSavingRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of goal)
                     </span>
                     {includeLoanPayments && (
@@ -132,7 +132,7 @@ const ChartsPage = ({
                   </div>
                   <div>
                     Total:{' '}
-                    <span style={{ fontWeight: 600, color: '#1a1a1a' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
                       {totalSavingRate.toFixed(1)}%
                     </span>
                   </div>
@@ -215,29 +215,31 @@ const ChartsPage = ({
                 }
               }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-primary)" />
               <XAxis
                 dataKey="month"
-                tick={{ fill: '#666', fontSize: 12 }}
+                tick={{ fill: 'var(--color-text-tertiary)', fontSize: 12 }}
                 angle={-45}
                 textAnchor="end"
                 height={80}
               />
               <YAxis
-                tick={{ fill: '#666', fontSize: 12 }}
+                tick={{ fill: 'var(--color-text-tertiary)', fontSize: 12 }}
                 label={{
                   value: chartView === 'absolute' ? 'Savings (CHF)' : 'Savings Rate (%)',
                   angle: -90,
                   position: 'insideLeft',
-                  style: { fill: '#666' }
+                  style: { fill: 'var(--color-text-tertiary)' }
                 }}
               />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e5e5e5',
+                  backgroundColor: 'var(--color-bg-card)',
+                  border: '1px solid var(--color-border-primary)',
                   borderRadius: '8px',
-                  padding: '12px'
+                  padding: '12px',
+                  color: 'var(--color-text-primary)',
+                  boxShadow: '0 4px 12px var(--color-shadow-md)'
                 }}
                 content={({ active, payload }) => {
                   if (active && payload && payload.length) {
@@ -245,13 +247,15 @@ const ChartsPage = ({
                     return (
                       <div
                         style={{
-                          backgroundColor: 'white',
-                          border: '1px solid #e5e5e5',
+                          backgroundColor: 'var(--color-bg-card)',
+                          border: '1px solid var(--color-border-primary)',
                           borderRadius: '8px',
-                          padding: '12px'
+                          padding: '12px',
+                          color: 'var(--color-text-primary)',
+                          boxShadow: '0 4px 12px var(--color-shadow-md)'
                         }}
                       >
-                        <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600 }}>{data.month}</p>
+                        <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{data.month}</p>
                         {chartView === 'absolute' ? (
                           <>
                             <p
@@ -278,7 +282,7 @@ const ChartsPage = ({
                                 loan payment)
                               </p>
                             )}
-                            <p style={{ margin: 0, marginTop: '4px', color: '#666', fontSize: '12px' }}>
+                            <p style={{ margin: 0, marginTop: '4px', color: 'var(--color-text-tertiary)', fontSize: '12px' }}>
                               {((data.savings / SAVINGS_GOAL_CHF) * 100).toFixed(0)}% of goal
                             </p>
                           </>
@@ -297,7 +301,7 @@ const ChartsPage = ({
                                 (includes loan payments)
                               </p>
                             )}
-                            <p style={{ margin: 0, marginTop: '4px', color: '#666', fontSize: '12px' }}>
+                            <p style={{ margin: 0, marginTop: '4px', color: 'var(--color-text-tertiary)', fontSize: '12px' }}>
                               {((data.savingRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of goal
                             </p>
                           </>
@@ -308,7 +312,7 @@ const ChartsPage = ({
                   return null;
                 }}
               />
-              <ReferenceLine y={0} stroke="#999" strokeDasharray="3 3" />
+              <ReferenceLine y={0} stroke="var(--color-text-light)" strokeDasharray="3 3" />
               {chartView === 'absolute' && (
                 <ReferenceLine
                   y={SAVINGS_GOAL_CHF}

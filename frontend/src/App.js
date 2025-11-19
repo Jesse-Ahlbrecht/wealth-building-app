@@ -767,12 +767,10 @@ const MonthDetail = ({
             
             {/* Income Total - At bottom, always visible (informational only) */}
             <div 
-              className="category-item" 
+              className="category-item category-total-row" 
               style={{ 
-                borderTop: '3px solid #1a1a1a', 
                 marginTop: '12px', 
                 paddingTop: '12px',
-                background: '#f5f5f5',
                 fontWeight: '600',
                 borderRadius: '0 0 8px 8px'
               }}>
@@ -1179,12 +1177,10 @@ const MonthDetail = ({
                 
                 {/* Section Total - At bottom, always visible (informational only) */}
                 <div 
-                  className="category-item" 
+                  className="category-item category-total-row" 
                   style={{ 
-                    borderTop: '3px solid #1a1a1a', 
                     marginTop: '12px', 
                     paddingTop: '12px',
-                    background: '#f5f5f5',
                     fontWeight: '600',
                     borderRadius: '0 0 8px 8px'
                   }}>
@@ -1211,7 +1207,7 @@ const MonthDetail = ({
                       <span style={{ 
                         fontSize: '13px', 
                         fontWeight: '400', 
-                        color: '#64748b',
+                        color: 'var(--color-text-tertiary)',
                         marginLeft: '8px'
                       }}>
                         ({formatCurrency(predictedAmount, primaryCurrency)} avg)
@@ -3294,6 +3290,9 @@ function App() {
   const [defaultCurrency, setDefaultCurrency] = useState(() => {
     return localStorage.getItem('defaultCurrency') || 'CHF';
   });
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('theme') || 'system';
+  });
   const [essentialCategories, setEssentialCategories] = useState(DEFAULT_ESSENTIAL_CATEGORIES);
   const [showEssentialCategoriesModal, setShowEssentialCategoriesModal] = useState(false);
   const [allCategories, setAllCategories] = useState([]);
@@ -3310,6 +3309,50 @@ function App() {
   const handleToggleIncludeLoanPayments = useCallback(() => {
     setIncludeLoanPayments((prev) => !prev);
   }, []);
+
+  // Get resolved theme (light/dark) based on theme preference and system settings
+  const getResolvedTheme = useCallback(() => {
+    if (theme === 'system') {
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return theme;
+  }, [theme]);
+
+  // Apply theme class to body
+  useEffect(() => {
+    const resolvedTheme = getResolvedTheme();
+    if (resolvedTheme === 'dark') {
+      document.body.classList.add('dark-theme');
+    } else {
+      document.body.classList.remove('dark-theme');
+    }
+  }, [theme, getResolvedTheme]);
+
+  // Listen for system preference changes when theme is 'system'
+  useEffect(() => {
+    if (theme !== 'system') return;
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      const resolvedTheme = getResolvedTheme();
+      if (resolvedTheme === 'dark') {
+        document.body.classList.add('dark-theme');
+      } else {
+        document.body.classList.remove('dark-theme');
+      }
+    };
+
+    // Modern browsers
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleChange);
+      return () => mediaQuery.removeEventListener('change', handleChange);
+    }
+    // Fallback for older browsers
+    else if (mediaQuery.addListener) {
+      mediaQuery.addListener(handleChange);
+      return () => mediaQuery.removeListener(handleChange);
+    }
+  }, [theme, getResolvedTheme]);
   
   console.log('🎬 App state defined, about to define refs...');
 
@@ -4314,6 +4357,12 @@ function App() {
     console.log(`💱 Default currency changed to ${currency}`);
   };
 
+  const handleThemeChange = (newTheme) => {
+    setTheme(newTheme);
+    localStorage.setItem('theme', newTheme);
+    console.log(`🎨 Theme changed to ${newTheme}`);
+  };
+
   const handleCategoryUpdate = async (newCategory) => {
     if (!categoryEditModal) return;
 
@@ -4892,6 +4941,35 @@ function App() {
                   >
                     <span className="currency-code">USD</span>
                     <span className="currency-name">US Dollar</span>
+                  </button>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h3 className="settings-section-title">Color Theme</h3>
+                <p className="settings-section-description">
+                  Choose your preferred color theme. "Use system settings" will follow your device's theme preference.
+                </p>
+                <div className="currency-selector">
+                  <button
+                    className={`currency-option ${theme === 'light' ? 'active' : ''}`}
+                    onClick={() => handleThemeChange('light')}
+                  >
+                    <span className="currency-code">Light Mode</span>
+                    <span className="currency-name">Light theme</span>
+                  </button>
+                  <button
+                    className={`currency-option ${theme === 'dark' ? 'active' : ''}`}
+                    onClick={() => handleThemeChange('dark')}
+                  >
+                    <span className="currency-code">Dark Mode</span>
+                    <span className="currency-name">Dark theme</span>
+                  </button>
+                  <button
+                    className={`currency-option ${theme === 'system' ? 'active' : ''}`}
+                    onClick={() => handleThemeChange('system')}
+                  >
+                    <span className="currency-code">Use system settings</span>
+                    <span className="currency-name">Follow device preference</span>
                   </button>
                 </div>
               </div>

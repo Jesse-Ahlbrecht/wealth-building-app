@@ -74,11 +74,11 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
       {/* Controls */}
       <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>Timeframe</label>
+          <label style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)' }}>Timeframe</label>
           <select
             value={timeframe}
             onChange={(e) => setTimeframe(parseInt(e.target.value, 10))}
-            style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '6px', fontSize: '14px' }}
+            style={{ padding: '8px 12px', border: '1px solid var(--color-border-primary)', borderRadius: '6px', fontSize: '14px', background: 'var(--color-bg-input)', color: 'var(--color-text-primary)' }}
           >
             <option value={5}>5 years</option>
             <option value={10}>10 years</option>
@@ -89,7 +89,7 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>
+          <label style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
             Annual Interest Rate (%)
           </label>
           <input
@@ -101,16 +101,18 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
             step="0.1"
             style={{
               padding: '8px 12px',
-              border: '1px solid #ddd',
+              border: '1px solid var(--color-border-primary)',
               borderRadius: '6px',
               fontSize: '14px',
-              width: '100px'
+              width: '100px',
+              background: 'var(--color-bg-input)',
+              color: 'var(--color-text-primary)'
             }}
           />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>
+          <label style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
             Monthly Savings (CHF)
           </label>
           <input
@@ -121,21 +123,26 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
             step="100"
             style={{
               padding: '8px 12px',
-              border: '1px solid #ddd',
+              border: '1px solid var(--color-border-primary)',
               borderRadius: '6px',
               fontSize: '14px',
-              width: '150px'
+              width: '150px',
+              background: 'var(--color-bg-input)',
+              color: 'var(--color-text-primary)'
             }}
           />
           <button
             onClick={() => setCustomMonthlySavings(null)}
+            className="projection-reset-button"
             style={{
               padding: '4px 8px',
               fontSize: '12px',
-              background: '#f0f0f0',
-              border: '1px solid #ddd',
+              background: 'var(--color-bg-button-secondary)',
+              border: '1px solid var(--color-border-primary)',
               borderRadius: '4px',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              color: 'var(--color-text-primary)',
+              transition: 'all 0.2s ease'
             }}
           >
             Use actual amount
@@ -147,14 +154,14 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
       <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
         <div
           style={{
-            background: '#f8f9fa',
+            background: 'var(--color-bg-bar-container)',
             padding: '20px',
             borderRadius: '8px',
-            border: '1px solid #e9ecef',
+            border: '1px solid var(--color-border-primary)',
             minWidth: '200px'
           }}
         >
-          <div style={{ fontSize: '14px', color: '#666', marginBottom: '4px' }}>Projected Net Worth</div>
+          <div style={{ fontSize: '14px', color: 'var(--color-text-tertiary)', marginBottom: '4px' }}>Projected Net Worth</div>
           <div style={{ fontSize: '28px', fontWeight: '700', color: '#22c55e' }}>
             {formatCurrency(finalProjection.netWorth, 'CHF')}
           </div>
@@ -162,29 +169,29 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
 
         <div
           style={{
-            background: '#f8f9fa',
+            background: 'var(--color-bg-bar-container)',
             padding: '20px',
             borderRadius: '8px',
-            border: '1px solid #e9ecef',
+            border: '1px solid var(--color-border-primary)',
             minWidth: '200px'
           }}
         >
-          <div style={{ fontSize: '14px', color: '#666', marginBottom: '4px' }}>Total Saved</div>
-          <div style={{ fontSize: '28px', fontWeight: '700', color: '#6366f1' }}>
+          <div style={{ fontSize: '14px', color: 'var(--color-text-tertiary)', marginBottom: '4px' }}>Total Saved</div>
+          <div style={{ fontSize: '28px', fontWeight: '700', color: 'var(--color-accent-secondary)' }}>
             {formatCurrency(totalSaved, 'CHF')}
           </div>
         </div>
 
         <div
           style={{
-            background: '#f8f9fa',
+            background: 'var(--color-bg-bar-container)',
             padding: '20px',
             borderRadius: '8px',
-            border: '1px solid #e9ecef',
+            border: '1px solid var(--color-border-primary)',
             minWidth: '200px'
           }}
         >
-          <div style={{ fontSize: '14px', color: '#666', marginBottom: '4px' }}>Interest Earned</div>
+          <div style={{ fontSize: '14px', color: 'var(--color-text-tertiary)', marginBottom: '4px' }}>Interest Earned</div>
           <div style={{ fontSize: '28px', fontWeight: '700', color: '#f59e0b' }}>
             {formatCurrency(totalInterest, 'CHF')}
           </div>
@@ -195,18 +202,20 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
       <div className="chart-wrapper">
         <ResponsiveContainer width="100%" height={400}>
           <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-            <XAxis dataKey="yearLabel" tick={{ fill: '#666', fontSize: 12 }} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-primary)" />
+            <XAxis dataKey="yearLabel" tick={{ fill: 'var(--color-text-tertiary)', fontSize: 12 }} />
             <YAxis
-              tick={{ fill: '#666', fontSize: 12 }}
+              tick={{ fill: 'var(--color-text-tertiary)', fontSize: 12 }}
               tickFormatter={(value) => formatCurrency(value, 'CHF').replace(/\s/g, '')}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: 'white',
-                border: '1px solid #e5e5e5',
+                backgroundColor: 'var(--color-bg-card)',
+                border: '1px solid var(--color-border-primary)',
                 borderRadius: '8px',
-                padding: '12px'
+                padding: '12px',
+                color: 'var(--color-text-primary)',
+                boxShadow: '0 4px 12px var(--color-shadow-md)'
               }}
               content={({ active, payload }) => {
                 if (active && payload && payload.length) {
@@ -214,13 +223,15 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
                   return (
                     <div
                       style={{
-                        backgroundColor: 'white',
-                        border: '1px solid #e5e5e5',
+                        backgroundColor: 'var(--color-bg-card)',
+                        border: '1px solid var(--color-border-primary)',
                         borderRadius: '8px',
-                        padding: '12px'
+                        padding: '12px',
+                        color: 'var(--color-text-primary)',
+                        boxShadow: '0 4px 12px var(--color-shadow-md)'
                       }}
                     >
-                      <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600 }}>{data.yearLabel}</p>
+                      <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{data.yearLabel}</p>
                       <p style={{ margin: 0, color: '#22c55e' }}>
                         Net Worth: {formatCurrency(data.netWorth, 'CHF')}
                       </p>

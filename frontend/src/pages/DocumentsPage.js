@@ -784,14 +784,14 @@ const DocumentsPage = ({
               className="document-card-menu"
               style={{ right: 0, top: '100%', marginTop: '8px' }}
             >
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: '#1f2937' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border-primary)' }}>
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
                   Reset All Data
                 </h4>
-                <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}>
+                <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: 'var(--color-text-tertiary)', lineHeight: '1.4' }}>
                   Delete all uploaded statements, accounts, transactions, loans, and documents.
                 </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#4b5563', marginBottom: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-tertiary)', marginBottom: '12px' }}>
                   <input
                     type="checkbox"
                     checked={wipeState?.keepCustomCategories ?? true}
@@ -802,12 +802,12 @@ const DocumentsPage = ({
                   <span>Keep my custom categories</span>
                 </label>
                 {wipeState?.error && (
-                  <div style={{ padding: '8px', backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '12px', borderRadius: '6px', marginBottom: '8px' }}>
+                  <div style={{ padding: '8px', backgroundColor: 'var(--color-error-bg)', color: 'var(--color-error)', fontSize: '12px', borderRadius: '6px', marginBottom: '8px' }}>
                     {wipeState.error}
                   </div>
                 )}
                 {wipeState?.success && (
-                  <div style={{ padding: '8px', backgroundColor: '#dcfce7', color: '#166534', fontSize: '12px', borderRadius: '6px', marginBottom: '8px' }}>
+                  <div style={{ padding: '8px', backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success)', fontSize: '12px', borderRadius: '6px', marginBottom: '8px' }}>
                     {wipeState.success}
                   </div>
                 )}
@@ -1027,7 +1027,7 @@ const DocumentsPage = ({
                                           if (summary && (summary.startDate || summary.endDate)) {
                                             return (
                                               <span className="document-summary">
-                                                <span style={{ color: '#6b7280' }}>Coverage:</span>
+                                                <span style={{ color: 'var(--color-text-tertiary)' }}>Coverage:</span>
                                                 <strong>{formatDateOnly(summary.startDate) || '—'}</strong>
                                                 <span className="summary-arrow">→</span>
                                                 <strong>{formatDateOnly(summary.endDate) || '—'}</strong>
@@ -1061,10 +1061,10 @@ const DocumentsPage = ({
                                       width: '100%',
                                       padding: '8px 12px',
                                       marginTop: '8px',
-                                      border: '1px solid #e5e7eb',
+                                      border: '1px solid var(--color-border-primary)',
                                       borderRadius: '6px',
-                                      backgroundColor: 'white',
-                                      color: '#374151',
+                                      backgroundColor: 'var(--color-bg-card)',
+                                      color: 'var(--color-text-primary)',
                                       fontSize: '13px',
                                       cursor: 'pointer',
                                       fontWeight: '500'
@@ -1389,8 +1389,8 @@ const DocumentsPage = ({
 
             <div className="documents-confirm-body">
               <div className="documents-wipe-warning">
-                <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: '24px', color: '#dc2626', marginBottom: '8px' }}></i>
-                <p style={{ margin: 0, fontSize: '14px', fontWeight: '500', color: '#dc2626' }}>
+                <i className="fa-solid fa-triangle-exclamation" style={{ fontSize: '24px', color: 'var(--color-error)', marginBottom: '8px' }}></i>
+                <p style={{ margin: 0, fontSize: '14px', fontWeight: '500', color: 'var(--color-error)' }}>
                   Warning: This will permanently erase all your financial data
                 </p>
               </div>
