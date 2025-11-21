@@ -1,0 +1,30 @@
+/**
+ * Styles Index
+ * 
+ * Main entry point for all stylesheets
+ * Import this file in your components instead of individual CSS files
+ */
+
+/* CSS Variables and Theme */
+@import './variables.css';
+
+/* Base Styles */
+@import './base.css';
+
+/* Header Styles */
+@import './header.css';
+
+/* Sidebar Styles */
+@import './sidebar.css';
+
+/* Component Styles */
+@import './components.css';
+
+/* Login Styles */
+@import './login.css';
+
+/* Page Styles */
+@import './pages.css';
+
+/* Documents Page Styles */
+@import './documents.css';

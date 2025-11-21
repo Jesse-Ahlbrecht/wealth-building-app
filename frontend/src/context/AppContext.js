@@ -9,7 +9,9 @@ import React, { createContext, useContext, useState } from 'react';
 const AppContext = createContext(null);
 
 export const AppProvider = ({ children }) => {
-  const [activeTab, setActiveTab] = useState('monthly-overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('activeTab') || 'monthly-overview';
+  });
   const [monthlyData, setMonthlyData] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -24,9 +26,14 @@ export const AppProvider = ({ children }) => {
     localStorage.setItem('defaultCurrency', currency);
   };
 
+  const handleActiveTabChange = (tab) => {
+    setActiveTab(tab);
+    localStorage.setItem('activeTab', tab);
+  };
+
   const value = {
     activeTab,
-    setActiveTab,
+    setActiveTab: handleActiveTabChange,
     monthlyData,
     setMonthlyData,
     accounts,

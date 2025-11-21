@@ -7,7 +7,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { transactionsAPI, categoriesAPI, predictionsAPI } from '../api';
-import { formatCurrency, formatMonth, formatDate } from '../utils';
 import { useAppContext } from '../context/AppContext';
 import MonthSummaryCard from '../components/MonthSummaryCard';
 

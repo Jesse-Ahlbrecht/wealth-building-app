@@ -209,7 +209,6 @@ const BrokerPage = () => {
               }
             } else {
               // We have backend values - interpolate proportionally to invested amount
-              const initialInvested = result[0].invested || 0;
               const finalInvested = result[result.length - 1].invested || 0;
               
               // Find final portfolio value (from backend)
@@ -598,8 +597,7 @@ const BrokerPage = () => {
                       if (!payload || !payload.value) return null;
                       const monthKey = payload.value;
                       if (typeof monthKey !== 'string') return null;
-                      const [year, month] = monthKey.split('-');
-                      const monthNum = parseInt(month, 10);
+                      const [year] = monthKey.split('-');
                       
                       // Check if this is the first month of this year
                       const isFirstMonthOfYear = index === 0 || 

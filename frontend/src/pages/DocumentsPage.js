@@ -562,7 +562,8 @@ const DocumentsPage = ({
       if (propOnRefresh) {
         await propOnRefresh();
       } else {
-        // Fallback: reload the page
+        // Fallback: reload the page, but preserve the current tab (stay on documents page)
+        localStorage.setItem('activeTab', 'data');
         window.location.reload();
       }
     } catch (error) {

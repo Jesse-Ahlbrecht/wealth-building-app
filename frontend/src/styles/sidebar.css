@@ -1,0 +1,200 @@
+.sidebar {
+  width: 320px;
+  background: var(--color-bg-sidebar);
+  border-radius: 0;
+  padding: 0;
+  box-shadow: 0 0 0 1px var(--color-border-primary), 0 2px 8px var(--color-shadow-md), 0 8px 24px var(--color-shadow-lg);
+  position: fixed;
+  top: 60px;
+  left: -320px;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 60px);
+  transition: left 0.3s ease-in-out, background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.sidebar.open {
+  left: 0;
+}
+
+.sidebar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: var(--color-bg-overlay);
+  z-index: 999;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease-in-out, visibility 0.3s ease-in-out, background-color 0.3s ease;
+}
+
+.sidebar-overlay.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sidebar-top-section {
+  background: transparent;
+  height: auto;
+  display: flex;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 16px 0;
+}
+
+.sidebar-header-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 24px;
+  color: var(--color-text-primary);
+  transition: color 0.3s ease;
+}
+
+.sidebar-header-content {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-header-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text-header);
+  letter-spacing: -0.02em;
+  position: fixed;
+  left: 72px;
+  top: 20px;
+  z-index: 1002;
+  transition: color 0.3s ease;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+
+.sidebar-tabs-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.sidebar-tab {
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease, background-color 0.3s ease, color 0.3s ease;
+  line-height: 1.4;
+  position: relative;
+}
+
+
+.sidebar-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.sidebar-tab.active {
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.sidebar-logout {
+  margin-top: auto;
+  border-top: 1px solid var(--color-border-primary);
+  padding-top: 16px;
+  color: var(--color-error);
+  font-weight: 500;
+}
+
+.sidebar-logout:hover {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+.main-content {
+  flex: 1;
+  min-width: 0;
+  margin-top: 60px;
+  padding: 32px;
+  max-width: 1400px;
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.content-header {
+  margin-bottom: 32px;
+  position: relative;
+}
+
+.content-header h2 {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+  transition: color 0.3s ease;
+}
+
+.content-header p {
+  font-size: 15px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+  transition: color 0.3s ease;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    width: 100%;
+    position: static;
+  }
+
+  .sidebar-brand {
+    margin-bottom: 24px;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .sidebar-tab {
+    flex: 1 1 calc(50% - 8px);
+    text-align: center;
+  }
+
+  .content-header {
+    margin-bottom: 24px;
+  }
+
+  .content-header h2 {
+    font-size: 24px;
+  }
+
+  .main-content {
+    /* No additional padding needed since app container provides padding */
+  }
+}

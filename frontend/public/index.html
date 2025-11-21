@@ -5,8 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
     <meta name="description" content="Wealth tracking app" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" id="favicon" />
+    <link rel="alternate icon" href="/favicon.ico" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <title>Wealth Tracker</title>
+    <script>
+      // Update favicon based on theme
+      function updateFavicon() {
+        const favicon = document.getElementById('favicon');
+        if (!favicon) return;
+        
+        const isDark = document.body.classList.contains('dark-theme') || 
+                      (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        
+        if (isDark) {
+          favicon.href = '/favicon-dark.svg';
+        } else {
+          favicon.href = '/favicon.svg';
+        }
+      }
+      
+      // Check on load
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateFavicon);
+      } else {
+        updateFavicon();
+      }
+      
+      // Watch for theme changes
+      const observer = new MutationObserver(updateFavicon);
+      if (document.body) {
+        observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      }
+      
+      // Watch for system theme changes
+      if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateFavicon);
+      }
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

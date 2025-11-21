@@ -112,31 +112,7 @@ const ChartsPage = () => {
     }
   };
 
-  // Load predictions and average essential spending for selected month
-  useEffect(() => {
-    if (selectedMonth) {
-      loadPredictionsForMonth(selectedMonth.month);
-      loadAverageEssentialSpending(selectedMonth.month);
-    }
-  }, [selectedMonth, essentialCategories]);
-
-  const loadPredictionsForMonth = async (month) => {
-    try {
-      const predictionsData = await predictionsAPI.getPredictionsForMonth(month);
-      setPredictions(prev => ({
-        ...prev,
-        [month]: Array.isArray(predictionsData) ? predictionsData : (predictionsData?.data || [])
-      }));
-    } catch (err) {
-      console.error(`Error loading predictions for ${month}:`, err);
-      setPredictions(prev => ({
-        ...prev,
-        [month]: []
-      }));
-    }
-  };
-
-  const loadAverageEssentialSpending = async (month) => {
+  const loadAverageEssentialSpending = useCallback(async (month) => {
     try {
       // Calculate average essential spending from previous 3 months
       const sortedMonths = [...summary]
@@ -173,6 +149,30 @@ const ChartsPage = () => {
     } catch (err) {
       console.error(`Error loading average essential spending for ${month}:`, err);
       setAverageEssentialSpending(prev => ({ ...prev, [month]: 0 }));
+    }
+  }, [summary, essentialCategories, includeLoanPayments]);
+
+  // Load predictions and average essential spending for selected month
+  useEffect(() => {
+    if (selectedMonth) {
+      loadPredictionsForMonth(selectedMonth.month);
+      loadAverageEssentialSpending(selectedMonth.month);
+    }
+  }, [selectedMonth, essentialCategories, loadAverageEssentialSpending]);
+
+  const loadPredictionsForMonth = async (month) => {
+    try {
+      const predictionsData = await predictionsAPI.getPredictionsForMonth(month);
+      setPredictions(prev => ({
+        ...prev,
+        [month]: Array.isArray(predictionsData) ? predictionsData : (predictionsData?.data || [])
+      }));
+    } catch (err) {
+      console.error(`Error loading predictions for ${month}:`, err);
+      setPredictions(prev => ({
+        ...prev,
+        [month]: []
+      }));
     }
   };
 

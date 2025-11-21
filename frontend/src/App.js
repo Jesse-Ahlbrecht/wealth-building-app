@@ -9,7 +9,8 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import './App.css';
+import './styles/index.css';
+import logo from './assets/logo.svg';
 
 // Context Providers
 import { AuthProvider, useAuthContext } from './context/AuthContext';
@@ -96,6 +97,9 @@ function Login({ onLogin }) {
   return (
     <div className="login-container">
       <div className="login-card">
+        <div className="login-logo">
+          <img src={logo} alt="Wealth Management Logo" />
+        </div>
         <h2>{isRegistering ? 'Create Account' : 'Welcome Back'}</h2>
         <p className="login-subtitle">
           {isRegistering ? 'Sign up to start tracking your wealth' : 'Sign in to your account'}
@@ -168,7 +172,7 @@ function Login({ onLogin }) {
  * Main App Content
  */
 function AppContent() {
-  const { isAuthenticated, isLoading, logout, user } = useAuthContext();
+  const { isAuthenticated, isLoading, logout } = useAuthContext();
   const { activeTab, setActiveTab, defaultCurrency, setDefaultCurrency, documentsProcessing, documentsProcessingCount } = useAppContext();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -184,13 +188,19 @@ function AppContent() {
     return theme;
   }, [theme]);
 
-  // Apply theme class to body
+  // Apply theme class to body and update favicon
   useEffect(() => {
     const resolvedTheme = getResolvedTheme();
     if (resolvedTheme === 'dark') {
       document.body.classList.add('dark-theme');
     } else {
       document.body.classList.remove('dark-theme');
+    }
+    
+    // Update favicon based on theme
+    const favicon = document.getElementById('favicon');
+    if (favicon) {
+      favicon.href = resolvedTheme === 'dark' ? '/favicon-dark.svg' : '/favicon.svg';
     }
   }, [theme, getResolvedTheme]);
 
@@ -298,17 +308,6 @@ function AppContent() {
             <i className="fa-solid fa-arrow-right" style={{ fontSize: '10px', marginLeft: '4px' }}></i>
           </div>
         )}
-        <div className="header-actions">
-          {user && <span className="user-name">Welcome, {user.name || user.email}</span>}
-          <button 
-            onClick={logout} 
-            className="header-icon-button"
-            aria-label="Sign Out"
-            title="Sign Out"
-          >
-            <i className="fa-solid fa-right-from-bracket"></i>
-          </button>
-        </div>
         <button
           className="settings-button"
           onClick={() => setShowSettings(true)}
@@ -330,21 +329,29 @@ function AppContent() {
       {/* Sidebar */}
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <nav className="sidebar-nav">
-          <button className="sidebar-close" onClick={closeSidebar} aria-label="Close sidebar">
-            ×
+          <div className="sidebar-tabs-container">
+            {TAB_ITEMS.map((item) => (
+              <button
+                key={item.key}
+                className={`sidebar-tab ${activeTab === item.key ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab(item.key);
+                  closeSidebar();
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <button
+            className="sidebar-tab sidebar-logout"
+            onClick={() => {
+              logout();
+              closeSidebar();
+            }}
+          >
+            Log Out
           </button>
-          {TAB_ITEMS.map((item) => (
-            <button
-              key={item.key}
-              className={`sidebar-tab ${activeTab === item.key ? 'active' : ''}`}
-              onClick={() => {
-                setActiveTab(item.key);
-                closeSidebar();
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
         </nav>
       </aside>
 
