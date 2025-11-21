@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import './styles/index.css';
 import logo from './assets/logo.svg';
 
@@ -25,6 +26,14 @@ import LoansPage from './pages/LoansPage';
 import ProjectionPage from './pages/ProjectionPage';
 import DocumentsPage from './pages/DocumentsPage';
 
+// Helper function to convert label to URL-friendly path
+const labelToPath = (label) => {
+  return '/' + label
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
+};
+
 // Constants
 const TAB_ITEMS = [
   { key: 'monthly-overview', label: 'Monthly Overview' },
@@ -34,7 +43,20 @@ const TAB_ITEMS = [
   { key: 'loans', label: 'Loans' },
   { key: 'projection', label: 'Wealth Projection' },
   { key: 'data', label: 'Manage Files' }
-];
+].map(item => ({
+  ...item,
+  path: labelToPath(item.label)
+}));
+
+// Map tab keys to paths for easy lookup
+const TAB_KEY_TO_PATH = Object.fromEntries(
+  TAB_ITEMS.map(item => [item.key, item.path])
+);
+
+// Map paths to tab keys for reverse lookup
+const PATH_TO_TAB_KEY = Object.fromEntries(
+  TAB_ITEMS.map(item => [item.path, item.key])
+);
 
 const TAB_DESCRIPTIONS = {
   'monthly-overview': 'Track current month progress and review historical spending patterns',
@@ -173,12 +195,32 @@ function Login({ onLogin }) {
  */
 function AppContent() {
   const { isAuthenticated, isLoading, logout } = useAuthContext();
-  const { activeTab, setActiveTab, defaultCurrency, setDefaultCurrency, documentsProcessing, documentsProcessingCount } = useAppContext();
+  const { defaultCurrency, setDefaultCurrency, documentsProcessing, documentsProcessingCount } = useAppContext();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('theme') || 'light';
   });
+
+  // Derive activeTab from current URL pathname
+  const getActiveTabFromPath = (pathname) => {
+    // Check if pathname matches any of our defined paths
+    if (PATH_TO_TAB_KEY[pathname]) {
+      return PATH_TO_TAB_KEY[pathname];
+    }
+    // Default to monthly-overview
+    return 'monthly-overview';
+  };
+
+  const activeTab = getActiveTabFromPath(location.pathname);
+
+  // Navigation handler that updates URL
+  const handleTabChange = (tabKey) => {
+    const path = TAB_KEY_TO_PATH[tabKey] || '/monthly-overview';
+    navigate(path);
+  };
 
   // Get resolved theme (light/dark) based on theme preference and system settings
   const getResolvedTheme = useCallback(() => {
@@ -278,7 +320,7 @@ function AppContent() {
         {documentsProcessing && activeTab !== 'data' && (
           <div 
             className="processing-alert"
-            onClick={() => setActiveTab('data')}
+            onClick={() => handleTabChange('data')}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -335,7 +377,7 @@ function AppContent() {
                 key={item.key}
                 className={`sidebar-tab ${activeTab === item.key ? 'active' : ''}`}
                 onClick={() => {
-                  setActiveTab(item.key);
+                  handleTabChange(item.key);
                   closeSidebar();
                 }}
               >
@@ -358,19 +400,64 @@ function AppContent() {
       {/* Main Content */}
       <div className="app-layout">
         <main className="main-content">
-          {activeTab !== 'data' && (
-            <div className="content-header">
-              <h2>{TAB_ITEMS.find(item => item.key === activeTab)?.label}</h2>
-              <p>{TAB_DESCRIPTIONS[activeTab]}</p>
-            </div>
-          )}
-          {activeTab === 'monthly-overview' && <MonthlyOverviewPage />}
-          {activeTab === 'charts' && <ChartsPage />}
-          {activeTab === 'accounts' && <AccountsPage />}
-          {activeTab === 'broker' && <BrokerPage />}
-          {activeTab === 'loans' && <LoansPage />}
-          {activeTab === 'projection' && <ProjectionPage />}
-          {activeTab === 'data' && <DocumentsPage />}
+          <Routes>
+            <Route path="/" element={<Navigate to="/monthly-overview" replace />} />
+            <Route path="/monthly-overview" element={
+              <>
+                <div className="content-header">
+                  <h2>{TAB_ITEMS.find(item => item.key === 'monthly-overview')?.label}</h2>
+                  <p>{TAB_DESCRIPTIONS['monthly-overview']}</p>
+                </div>
+                <MonthlyOverviewPage />
+              </>
+            } />
+            <Route path="/savings-statistics" element={
+              <>
+                <div className="content-header">
+                  <h2>{TAB_ITEMS.find(item => item.key === 'charts')?.label}</h2>
+                  <p>{TAB_DESCRIPTIONS['charts']}</p>
+                </div>
+                <ChartsPage />
+              </>
+            } />
+            <Route path="/accounts" element={
+              <>
+                <div className="content-header">
+                  <h2>{TAB_ITEMS.find(item => item.key === 'accounts')?.label}</h2>
+                  <p>{TAB_DESCRIPTIONS['accounts']}</p>
+                </div>
+                <AccountsPage />
+              </>
+            } />
+            <Route path="/broker" element={
+              <>
+                <div className="content-header">
+                  <h2>{TAB_ITEMS.find(item => item.key === 'broker')?.label}</h2>
+                  <p>{TAB_DESCRIPTIONS['broker']}</p>
+                </div>
+                <BrokerPage />
+              </>
+            } />
+            <Route path="/loans" element={
+              <>
+                <div className="content-header">
+                  <h2>{TAB_ITEMS.find(item => item.key === 'loans')?.label}</h2>
+                  <p>{TAB_DESCRIPTIONS['loans']}</p>
+                </div>
+                <LoansPage />
+              </>
+            } />
+            <Route path="/wealth-projection" element={
+              <>
+                <div className="content-header">
+                  <h2>{TAB_ITEMS.find(item => item.key === 'projection')?.label}</h2>
+                  <p>{TAB_DESCRIPTIONS['projection']}</p>
+                </div>
+                <ProjectionPage />
+              </>
+            } />
+            <Route path="/manage-files" element={<DocumentsPage />} />
+          </Routes>
         </main>
       </div>
 
@@ -470,11 +557,13 @@ function AppContent() {
  */
 function App() {
   return (
-    <AuthProvider>
-      <AppProvider>
-        <AppContent />
-      </AppProvider>
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <AppProvider>
+          <AppContent />
+        </AppProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 
