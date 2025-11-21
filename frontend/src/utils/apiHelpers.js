@@ -12,24 +12,3 @@ export const handleAPIError = (error) => {
   return error.message || 'An error occurred';
 };
 
-export const getTransactionKey = (transaction) => {
-  if (!transaction) return '';
-  const {
-    date = '',
-    account = '',
-    recipient = '',
-    description = '',
-    amount = '',
-    currency = ''
-  } = transaction;
-
-  return [
-    date,
-    account,
-    recipient,
-    description,
-    amount.toString(),
-    currency
-  ].join('|');
-};
-

@@ -16,26 +16,54 @@ export const useAuth = () => {
   useEffect(() => {
     // Load session token from storage
     const stored = sessionStorage.getItem('sessionToken');
+    console.log('Loading session token from storage:', stored ? 'found' : 'not found');
     if (stored) {
       setSessionToken(stored);
       apiClient.setSessionToken(stored);
       verifySession(stored);
     } else {
+      console.log('No stored session token, user not authenticated');
       setIsLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const verifySession = async (token) => {
     try {
       const response = await authAPI.verifySession();
-      if (response.valid) {
+      console.log('Verify session response:', response);
+      
+      // Handle nested response structure: response.data.valid or response.valid
+      const isValid = response?.data?.valid ?? response?.valid ?? false;
+      const userData = response?.data?.user ?? response?.user;
+      
+      if (isValid) {
         setIsAuthenticated(true);
-        setUser(response.user);
+        if (userData) {
+          setUser(userData);
+        }
+        // Ensure token is saved (in case it wasn't saved before)
+        if (token) {
+          sessionStorage.setItem('sessionToken', token);
+          apiClient.setSessionToken(token);
+        }
       } else {
-        logout();
+        console.warn('Session invalid, clearing auth state');
+        // Session invalid - clear everything
+        setSessionToken(null);
+        setUser(null);
+        setIsAuthenticated(false);
+        sessionStorage.removeItem('sessionToken');
+        apiClient.setSessionToken(null);
       }
     } catch (error) {
-      logout();
+      console.error('Session verification failed:', error);
+      // Session verification failed - clear everything
+      setSessionToken(null);
+      setUser(null);
+      setIsAuthenticated(false);
+      sessionStorage.removeItem('sessionToken');
+      apiClient.setSessionToken(null);
     } finally {
       setIsLoading(false);
     }
@@ -44,9 +72,13 @@ export const useAuth = () => {
   const login = async (email, password) => {
     try {
       const response = await authAPI.login(email, password);
-      setSessionToken(response.session_token);
+      const token = response.session_token;
+      setSessionToken(token);
       setUser(response.user);
       setIsAuthenticated(true);
+      // Save token to sessionStorage for persistence across page refreshes
+      sessionStorage.setItem('sessionToken', token);
+      apiClient.setSessionToken(token);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -58,6 +90,9 @@ export const useAuth = () => {
     setSessionToken(null);
     setUser(null);
     setIsAuthenticated(false);
+    // Clear token from sessionStorage
+    sessionStorage.removeItem('sessionToken');
+    apiClient.setSessionToken(null);
   };
 
   const register = async (email, password, name) => {

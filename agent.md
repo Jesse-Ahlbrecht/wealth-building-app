@@ -10,7 +10,7 @@ We are building a personal wealth management tool that ingests sensitive banking
 ## Architectural Principles
 
 - **Frontend-first data shaping**: After the API authenticates and authorizes a request, it returns the user’s full data domain (transactions, accounts, projections). Filtering, aggregation, and visualization happen in the React SPA using memoized selectors to keep latency low.
-- **Zero implicit trust**: Treat every boundary–browser, API, database, object storage–as hostile by default. Enforce explicit authn/authz, signed payloads, and double encryption (client + server) for statement artifacts.
+- **Zero implicit trust**: Treat every boundary–browser, API, database, object storage–as hostile by default. Enforce explicit authn/authz, signed payloads, and  encryption (server) for statement artifacts.
 - **Stateless API surface**: Flask endpoints remain idempotent and stateless aside from encrypted storage operations. Session affinity lives in short-lived JWT/PASETO tokens validated per call.
 - **Separation of concerns**: Keep ingestion/parsing helpers pure and testable. Route functions should orchestrate parsers, encryption helpers, and response formatters without embedding business logic.
 

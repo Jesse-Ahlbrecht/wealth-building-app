@@ -198,12 +198,37 @@ def verify_email():
 def verify_session():
     """Verify current session is valid"""
     if g.session_claims:
+        # Get user info from database if available
+        user_id = g.session_claims.get('sub')
+        user_data = None
+        
+        if user_id:
+            try:
+                user = user_manager.get_user_by_id(int(user_id))
+                if user:
+                    user_data = {
+                        'id': user['id'],
+                        'email': user['email'],
+                        'name': user['name'],
+                        'tenant': user['tenant_id'],
+                        'email_verified': user.get('email_verified', False)
+                    }
+            except Exception as e:
+                print(f"Error fetching user data: {e}")
+        
+        # Fallback to claims if user not found in DB
+        if not user_data:
+            user_data = {
+                'id': g.session_claims.get('sub'),
+                'email': g.session_claims.get('email'),
+                'name': g.session_claims.get('name'),
+                'tenant': g.session_claims.get('tenant'),
+                'email_verified': g.session_claims.get('email_verified', False)
+            }
+        
         return success_response(data={
             'valid': True,
-            'user': {
-                'id': g.session_claims.get('sub'),
-                'tenant': g.session_claims.get('tenant')
-            }
+            'user': user_data
         })
     else:
         return error_response('Invalid session', 401)

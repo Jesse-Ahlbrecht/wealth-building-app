@@ -33,3 +33,16 @@ export const getColorForPercentage = (percentage) => {
   }
 };
 
+// Format currency with proper symbol and locale
+export const formatCurrency = (amount, currency = 'CHF') => {
+  if (!Number.isFinite(amount)) return `${currency} 0.00`;
+  
+  const formatted = new Intl.NumberFormat('de-CH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.abs(amount));
+  
+  const sign = amount < 0 ? '-' : '';
+  return `${sign}${currency} ${formatted}`;
+};
+

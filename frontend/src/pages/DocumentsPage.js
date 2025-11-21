@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { useAppContext } from '../context/AppContext';
 
 const API_BASE_URL = 'http://localhost:5001';
 
@@ -94,18 +95,20 @@ const normalizeTypeKey = (value) =>
 const DocumentsPage = ({
   documentTypes,
   documents,
-  loading,
+  loading: propLoading,
   onUpload,
   onDelete,
   onDeleteAll,
-  onRefresh,
+  onRefresh: propOnRefresh,
   onWipeData,
   onWipeDataConfirm,
   wipeState = {}
 }) => {
+  const { setDocumentsProcessing, setDocumentsProcessingCount } = useAppContext();
   const [actionState, setActionState] = useState({});
   const [deletingId, setDeletingId] = useState(null);
-  const [documentsState, setDocumentsState] = useState(documents);
+  const [documentsState, setDocumentsState] = useState(Array.isArray(documents) ? documents : []);
+  const [loading, setLoading] = useState(propLoading || false);
   const [confirmState, setConfirmState] = useState({
     open: false,
     document: null,
@@ -124,6 +127,26 @@ const DocumentsPage = ({
   useEffect(() => {
     duplicateStateRef.current = duplicateState;
   }, [duplicateState]);
+
+  // Track processing state and update global context
+  useEffect(() => {
+    // Count documents that are currently processing (processingProgress < 100 and > 0)
+    let processingCount = 0;
+    Object.values(actionState).forEach((state) => {
+      if (state.uploads) {
+        state.uploads.forEach((upload) => {
+          const processingProgress = upload.processingProgress || 0;
+          if (processingProgress > 0 && processingProgress < 100) {
+            processingCount++;
+          }
+        });
+      }
+    });
+
+    // Update global processing state
+    setDocumentsProcessingCount(processingCount);
+    setDocumentsProcessing(processingCount > 0);
+  }, [actionState, setDocumentsProcessing, setDocumentsProcessingCount]);
   
   const [bulkConfirmState, setBulkConfirmState] = useState({
     open: false,
@@ -135,6 +158,13 @@ const DocumentsPage = ({
   const [openSettingsType, setOpenSettingsType] = useState(null);
   const [openGlobalSettings, setOpenGlobalSettings] = useState(false);
   const [expandedFileLists, setExpandedFileLists] = useState({});
+  const [internalWipeState, setInternalWipeState] = useState({
+    showConfirm: false,
+    keepCustomCategories: true,
+    loading: false,
+    error: null,
+    success: null
+  });
   const settingsMenuRef = useRef(null);
   const settingsButtonRefs = useRef({});
   const globalSettingsMenuRef = useRef(null);
@@ -144,7 +174,14 @@ const DocumentsPage = ({
   const bulkConfirmType = bulkConfirmState.typeKey;
   const bulkConfirmBusy = bulkConfirmState.busy;
   const categoryMismatchResolverRef = useRef(null);
-  const showWipeConfirm = Boolean(wipeState?.showConfirm);
+  
+  // Use internal wipeState if not provided as prop
+  const effectiveWipeState = wipeState && Object.keys(wipeState).length > 0 ? wipeState : {
+    ...internalWipeState,
+    setShowConfirm: (show) => setInternalWipeState(prev => ({ ...prev, showConfirm: show })),
+    setKeepCustomCategories: (keep) => setInternalWipeState(prev => ({ ...prev, keepCustomCategories: keep }))
+  };
+  const showWipeConfirm = Boolean(effectiveWipeState?.showConfirm);
 
   // Close any open settings menus when the wipe confirmation modal is visible
   useEffect(() => {
@@ -269,8 +306,274 @@ const DocumentsPage = ({
   }, []);
 
   React.useEffect(() => {
-    setDocumentsState(documents);
+    setDocumentsState(Array.isArray(documents) ? documents : []);
   }, [documents]);
+
+  // Fetch documents if not provided as prop
+  useEffect(() => {
+    if (!documents && !propLoading) {
+      loadDocuments();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadDocuments = useCallback(async (showLoading = true) => {
+    try {
+      if (showLoading) {
+        setLoading(true);
+      }
+      const { documentsAPI } = await import('../api');
+      const response = await documentsAPI.getDocuments();
+      
+      console.log('Documents API response:', response);
+      
+      // Handle different response formats
+      let documents = [];
+      if (Array.isArray(response)) {
+        // Direct array response
+        documents = response;
+      } else if (response && Array.isArray(response.documents)) {
+        // {success: true, documents: [...]}
+        documents = response.documents;
+      } else if (response && response.data && Array.isArray(response.data.documents)) {
+        // Nested structure
+        documents = response.data.documents;
+      } else if (response && response.data && Array.isArray(response.data)) {
+        // Array in data field
+        documents = response.data;
+      } else {
+        console.warn('Unexpected response format:', response);
+      }
+      
+      console.log('Loaded documents:', documents.length, documents);
+      setDocumentsState(documents);
+    } catch (err) {
+      console.error('Error loading documents:', err);
+      // Reset documents state on error to prevent showing stale data
+      setDocumentsState([]);
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  }, [setLoading, setDocumentsState]);
+
+  // Create onRefresh wrapper that can be called silently
+  // Wrap in useMemo to prevent it from changing on every render
+  const onRefresh = useMemo(() => {
+    return propOnRefresh 
+      ? (...args) => {
+          // If custom onRefresh provided, call it (it may not support showLoading)
+          if (args.length > 0 && args[0] === false) {
+            // Silent refresh requested but custom handler doesn't support it
+            // Call it anyway without parameters
+            return propOnRefresh();
+          }
+          return propOnRefresh(...args);
+        }
+      : (showLoading = true) => loadDocuments(showLoading);
+  }, [propOnRefresh, loadDocuments]);
+
+  // Default implementations for callbacks if not provided
+  const handleUpload = useMemo(() => onUpload || (async (typeKey, file, metadata, progressCallback, options) => {
+    console.log('[handleUpload] Starting upload:', { typeKey, fileName: file?.name, fileSize: file?.size });
+    try {
+      const { apiClient } = await import('../api');
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('documentType', typeKey);
+      
+      console.log('[handleUpload] Calling API with FormData:', { typeKey, fileName: file?.name });
+      
+      // Use XMLHttpRequest for upload progress tracking (fetch doesn't support it)
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const url = `${apiClient.baseURL}/api/documents/upload`;
+        const sessionToken = apiClient.sessionToken || (typeof window !== 'undefined' ? sessionStorage.getItem('sessionToken') : null);
+        
+        // Track upload progress
+        if (progressCallback && typeof progressCallback === 'function') {
+          xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+              const percentComplete = Math.round((e.loaded / e.total) * 100);
+              // Don't go to 100% until we get the response
+              const progress = Math.min(percentComplete, 95);
+              progressCallback('upload', progress, `Uploading... ${progress}%`);
+            }
+          });
+        }
+        
+        // Handle response
+        xhr.addEventListener('load', () => {
+          // Handle 401 auth errors
+          if (xhr.status === 401) {
+            // Clear session and reload
+            sessionStorage.removeItem('sessionToken');
+            localStorage.removeItem('sessionToken');
+            localStorage.removeItem('user');
+            window.location.reload();
+            reject(new Error('Authentication required'));
+            return;
+          }
+          
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const responseData = JSON.parse(xhr.responseText);
+              // Extract data from signed response
+              const data = responseData.data !== undefined ? responseData.data : responseData;
+              
+              console.log('[handleUpload] API response received:', data);
+              
+              // Call progress callback to indicate upload is complete
+              if (progressCallback && typeof progressCallback === 'function') {
+                progressCallback('upload', 100, 'Upload complete');
+              }
+              
+              resolve(data);
+            } catch (error) {
+              console.error('[handleUpload] Error parsing response:', error);
+              reject(new Error('Failed to parse response'));
+            }
+          } else {
+            // Handle error response
+            try {
+              const errorData = JSON.parse(xhr.responseText);
+              const errorMessage = errorData.error || errorData.message || `Upload failed with status ${xhr.status}`;
+              reject(new Error(errorMessage));
+            } catch (e) {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+            }
+          }
+        });
+        
+        // Handle errors
+        xhr.addEventListener('error', () => {
+          reject(new Error('Network error during upload'));
+        });
+        
+        xhr.addEventListener('abort', () => {
+          reject(new Error('Upload aborted'));
+        });
+        
+        // Start upload
+        xhr.open('POST', url);
+        if (sessionToken) {
+          xhr.setRequestHeader('Authorization', `Bearer ${sessionToken}`);
+        }
+        // Don't set Content-Type header - let browser set it with boundary for multipart/form-data
+        xhr.send(formData);
+        
+        // Call progress callback to indicate upload is starting
+        if (progressCallback && typeof progressCallback === 'function') {
+          progressCallback('upload', 0, 'Starting upload...');
+        }
+      }).then((result) => {
+        // Log the response structure for debugging
+        if (!result || !result.document) {
+          console.warn('Upload response missing document:', result);
+        }
+        
+        // Optimistically add the uploaded document to state without full refresh
+        if (result && result.document) {
+          setDocumentsState((prev) => {
+            // Remove if already exists (prevent duplicates)
+            const filtered = prev.filter((doc) => doc.id !== result.document.id);
+            // Add new document to the beginning
+            return [result.document, ...filtered];
+          });
+        } else {
+          // Fallback: refresh if document not in response
+          console.log('Document not in response, refreshing...');
+          onRefresh();
+        }
+        
+        return result;
+      });
+    } catch (error) {
+      console.error('Upload error:', error);
+      console.error('Upload error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      if (error.message === 'Authentication required') {
+        // Clear session and reload
+        sessionStorage.removeItem('sessionToken');
+        localStorage.removeItem('sessionToken');
+        localStorage.removeItem('user');
+        window.location.reload();
+      }
+      throw error;
+    }
+  }), [onUpload, onRefresh]);
+
+  const performDelete = useMemo(() => onDelete || (async (documentId, documentType) => {
+    try {
+      const { documentsAPI } = await import('../api');
+      await documentsAPI.deleteDocument(documentId);
+      await onRefresh();
+      return 1;
+    } catch (error) {
+      console.error('Delete error:', error);
+      throw error;
+    }
+  }), [onDelete, onRefresh]);
+
+  const handleDeleteAll = useMemo(() => onDeleteAll || (async (typeKey) => {
+    try {
+      const { documentsAPI } = await import('../api');
+      await documentsAPI.deleteDocumentsByType(typeKey);
+      await onRefresh();
+      return 0; // Return count - would need to count before delete
+    } catch (error) {
+      console.error('Delete all error:', error);
+      throw error;
+    }
+  }), [onDeleteAll, onRefresh]);
+
+  const handleWipeData = onWipeData || (() => {
+    if (effectiveWipeState?.setShowConfirm) {
+      effectiveWipeState.setShowConfirm(true);
+    }
+  });
+
+  const handleWipeDataConfirm = onWipeDataConfirm || (async () => {
+    try {
+      // Set loading state
+      setInternalWipeState(prev => ({ ...prev, loading: true, error: null, success: null }));
+      
+      const { documentsAPI } = await import('../api');
+      const keepCategories = effectiveWipeState?.keepCustomCategories ?? true;
+      console.log('Calling wipeData with keepCustomCategories:', keepCategories);
+      
+      const response = await documentsAPI.wipeData(keepCategories);
+      console.log('Wipe data response:', response);
+      
+      // Set success state
+      setInternalWipeState(prev => ({ 
+        ...prev, 
+        loading: false, 
+        success: 'All data has been deleted successfully',
+        showConfirm: false
+      }));
+      
+      // Refresh the page data
+      if (propOnRefresh) {
+        await propOnRefresh();
+      } else {
+        // Fallback: reload the page
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error('Wipe data error:', error);
+      setInternalWipeState(prev => ({ 
+        ...prev, 
+        loading: false, 
+        error: error.message || 'Failed to delete data. Please try again.'
+      }));
+    }
+  });
 
   React.useEffect(() => {
     if (!openSettingsType) {
@@ -354,7 +657,16 @@ const DocumentsPage = ({
   }, [openGlobalSettings]);
 
   const augmentedDocumentTypes = useMemo(() => {
-    const normalizedBase = (documentTypes || []).map((type) => {
+    // Default document types if not provided
+    const defaultDocumentTypes = documentTypes || [
+      { key: 'bank_statement_dkb', label: 'DKB Bank Statement', category: 'bank', description: 'CSV exports from Deutsche Kreditbank (DKB) Girokonto or Tagesgeld accounts.', extensions: ['.csv'] },
+      { key: 'bank_statement_yuh', label: 'YUH Activity Export', category: 'bank', description: 'Activity exports from the YUH app stored as CSV files.', extensions: ['.csv'] },
+      { key: 'broker_viac_pdf', label: 'VIAC Trade Confirmation', category: 'broker', description: 'Trade confirmation PDFs generated by VIAC.', extensions: ['.pdf'] },
+      { key: 'broker_ing_diba_csv', label: 'ING DiBa Depot Overview', category: 'broker', description: 'Depot overview CSV exports from ING DiBa.', extensions: ['.csv'] },
+      { key: 'loan_kfw_pdf', label: 'KfW Loan Statement', category: 'loan', description: 'KfW student loan account statements as PDF files.', extensions: ['.pdf'] }
+    ];
+
+    const normalizedBase = (defaultDocumentTypes || []).map((type) => {
       const normalizedKey = normalizeTypeKey(type.key);
       const category = type.category || inferDocumentCategory(type.key || normalizedKey);
       return {
@@ -367,7 +679,7 @@ const DocumentsPage = ({
     const knownKeys = new Set(normalizedBase.map((type) => type.key));
     const extras = [];
 
-    documentsState.forEach((doc) => {
+    (documentsState || []).forEach((doc) => {
       const key = normalizeTypeKey(
         doc?.documentType ||
         doc?.file_type ||
@@ -415,7 +727,7 @@ const DocumentsPage = ({
       map[type.key] = [];
     });
 
-    documentsState.forEach((doc) => {
+    (documentsState || []).forEach((doc) => {
       const typeKey = normalizeTypeKey(
         doc?.documentType ||
         doc?.file_type ||
@@ -440,7 +752,7 @@ const DocumentsPage = ({
   }, [augmentedDocumentTypes, documentsState]);
 
   const promptDeleteAll = useCallback((typeKey) => {
-    if (typeof onDeleteAll !== 'function') {
+    if (typeof handleDeleteAll !== 'function') {
       return;
     }
     const docsForType = documentsByType[typeKey] || [];
@@ -457,7 +769,7 @@ const DocumentsPage = ({
       busy: false,
       error: null
     });
-  }, [documentsByType, onDeleteAll]);
+  }, [documentsByType, handleDeleteAll]);
 
   const closeBulkConfirm = useCallback(() => {
     setBulkConfirmState((prev) => {
@@ -511,13 +823,73 @@ const DocumentsPage = ({
     });
   }, []);
 
+  const detectDocumentType = useCallback(async (file) => {
+    if (!file) return null;
+    
+    try {
+      // Get session token from sessionStorage (consistent with useAuth hook)
+      const sessionToken = typeof window !== 'undefined' ? sessionStorage.getItem('sessionToken') : null;
+      if (!sessionToken) {
+        console.warn('No session token available for document type detection');
+        return null;
+      }
+      
+      // Create FormData with file
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      
+      // Call backend detection endpoint
+      const response = await fetch(`${API_BASE_URL}/api/documents/detect-type`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: formData
+      });
+      
+      if (response.status === 401) {
+        // Authentication failed - clear session
+        sessionStorage.removeItem('sessionToken');
+        localStorage.removeItem('sessionToken');
+        localStorage.removeItem('user');
+        // Trigger page reload to show login screen
+        window.location.reload();
+        return null;
+      }
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error detecting document type:', errorData.error);
+        return null;
+      }
+      
+      const responseData = await response.json();
+      console.log('Detection response for', file.name, ':', responseData);
+      
+      // Handle wrapped response from authentication decorator
+      const data = responseData.data || responseData;
+      const documentType = data.documentType || null;
+      
+      if (!documentType) {
+        console.warn(`Could not detect document type for ${file.name}`);
+      }
+      
+      return documentType;
+    } catch (error) {
+      console.error('Error detecting document type for', file.name, ':', error);
+      return null;
+    }
+  }, []);
 
-
-  const handleFilesSelected = useCallback(async (typeKey, fileList) => {
+  const handleFilesSelected = useCallback(async (typeKey, fileList, options = {}) => {
+    console.log('[handleFilesSelected] Starting upload for type:', typeKey, 'files:', fileList?.length);
     const normalizedTypeKey = normalizeTypeKey(typeKey) || 'unknown';
     if (!fileList || fileList.length === 0) {
+      console.warn('[handleFilesSelected] No files provided');
       return;
     }
+    
+    const { skipDuplicateCheck = false } = options;
 
     // Preserve scroll position
     const scrollPosition = window.scrollY || window.pageYOffset;
@@ -550,7 +922,7 @@ const DocumentsPage = ({
       const normalizedName = normalizeFileName(docName);
       return `${normalizedName}::${Number(docSize)}`;
     };
-    documentsState.forEach((doc) => {
+    (documentsState || []).forEach((doc) => {
       const name = doc?.originalName || doc?.original_name || doc?.file_name;
       const size =
         doc?.fileSize ??
@@ -570,7 +942,7 @@ const DocumentsPage = ({
       uploadProgress: 0,
       uploadMessage: 'Preparing upload…',
       processingProgress: 0,
-      processingMessage: 'Waiting to start…',
+      processingMessage: 'Waiting to start... (0%)',
       status: 'uploading'
     }));
 
@@ -589,130 +961,125 @@ const DocumentsPage = ({
       const movedToOtherCategories = new Set(); // Track files moved to other categories
       const PROGRESS_THROTTLE_MS = 100;
 
-      // Step 1a: Check for duplicates within the current upload batch first
-      const filesToCheck = files.map((file, index) => {
-        const fileKey = computeDocKey(file.name, file.size);
-        console.log(`[Batch Duplicate Check] File ${index}: name="${file.name}", size=${file.size}, fileKey="${fileKey}"`);
-        return {
+      // Step 1: Check ALL files for duplicates (both within batch and against existing documents)
+      // Skip if duplicate check was already done (e.g., in handleAutoDetectUpload)
+      let filesAfterDuplicateCheck = [];
+      
+      if (skipDuplicateCheck) {
+        // Skip duplicate checking - files already checked in handleAutoDetectUpload
+        filesAfterDuplicateCheck = files.map((file, index) => ({
           file,
           entryKey: newEntries[index].key,
-          fileKey
-        };
-      });
-
-      const batchSeenKeys = new Set();
-      const batchSeenFiles = new Map(); // Track which entryKey corresponds to which fileKey
-      const batchDuplicates = [];
-      const filesAfterBatchCheck = [];
-      
-      // First pass: detect duplicates within the batch
-      for (const { file, entryKey, fileKey } of filesToCheck) {
-        if (!fileKey) {
-          // File without valid key, skip duplicate check but still process
-          filesAfterBatchCheck.push({ file, entryKey, fileKey });
-          continue;
-        }
-        
-        if (batchSeenKeys.has(fileKey)) {
-          // This file is a duplicate within the current batch
-          const originalEntryKey = batchSeenFiles.get(fileKey);
-          batchDuplicates.push({ 
-            file, 
-            entryKey, 
-            fileKey, 
-            isBatchDuplicate: true,
-            originalEntryKey 
-          });
-          console.log(`Batch duplicate detected: ${file.name} (${file.size} bytes) matches entryKey ${originalEntryKey}`);
-        } else {
-          // First occurrence of this file
-          batchSeenKeys.add(fileKey);
-          batchSeenFiles.set(fileKey, entryKey);
-          filesAfterBatchCheck.push({ file, entryKey, fileKey });
-        }
-      }
-
-      console.log(`Batch duplicate check: ${batchDuplicates.length} duplicates found out of ${filesToCheck.length} files`);
-
-      // Show batch duplicate modal if there are duplicates within the batch
-      if (batchDuplicates.length > 0) {
-        // Create a mock duplicates array for the modal (showing it's a batch duplicate)
-        const batchDuplicatesWithMock = batchDuplicates.map(({ file, entryKey }) => ({
-          file,
-          entryKey,
-          duplicates: [{ originalName: 'Duplicate in current upload', isBatchDuplicate: true }]
+          fileKey: computeDocKey(file.name, file.size)
         }));
-        
-        const batchDuplicateResolutions = await requestBatchDuplicateConfirmation(batchDuplicatesWithMock);
-        
-        // Process batch duplicate resolutions
-        batchDuplicates.forEach(({ file, entryKey }) => {
-          const proceed = batchDuplicateResolutions[entryKey];
-          if (!proceed) {
-            updateActionState(normalizedTypeKey, (current) => {
-              const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
-              return { ...current, uploads };
-            });
-            cancelled.push(file);
-          } else {
-            // User chose to proceed, add to files to check against existing documents
-            filesAfterBatchCheck.push({ file, entryKey, fileKey: computeDocKey(file.name, file.size) });
-          }
-        });
-      }
-
-      // Step 1b: Check for duplicates against already-uploaded documents
-      const filesWithDuplicates = [];
-      const filesAfterDuplicateCheck = [];
-      
-      for (const { file, entryKey, fileKey } of filesAfterBatchCheck) {
-        const fileNormalizedName = normalizeFileName(file.name);
-        const duplicates = documentsState.filter((doc) => {
-          const docName = doc?.originalName || doc?.original_name || doc?.file_name;
-          const docSize =
-            doc?.fileSize ??
-            doc?.file_size ??
-            doc?.metadata?.file_info?.original_size ??
-            doc?.metadata?.file_info?.originalSize;
-          const docNormalizedName = normalizeFileName(docName);
-          return docNormalizedName === fileNormalizedName && Number(docSize) === Number(file.size);
+      } else {
+        // Normal duplicate checking flow
+        const filesToCheck = files.map((file, index) => {
+          const fileKey = computeDocKey(file.name, file.size);
+          console.log(`[Duplicate Check] File ${index}: name="${file.name}", size=${file.size}, fileKey="${fileKey}"`);
+          return {
+            file,
+            entryKey: newEntries[index].key,
+            fileKey
+          };
         });
 
-        // Check for duplicates against existing documents
-        const isDuplicate = duplicates.length > 0 && fileKey;
-        if (isDuplicate) {
-          filesWithDuplicates.push({ file, entryKey, duplicates });
-        } else {
-          if (fileKey) {
-            seenKeys.add(fileKey);
-          }
-          filesAfterDuplicateCheck.push({ file, entryKey, fileKey });
-        }
-      }
-
-      // Show batch duplicate modal if there are any duplicates
-      if (filesWithDuplicates.length > 0) {
-        const duplicateResolutions = await requestBatchDuplicateConfirmation(filesWithDuplicates);
+        const batchSeenKeys = new Set();
+        const batchSeenFiles = new Map(); // Track which entryKey corresponds to which fileKey
+        const allDuplicates = []; // Combined list of all duplicates
+        // Note: filesAfterDuplicateCheck is already declared above, don't redeclare it
         
-        // Process duplicate resolutions
-        filesWithDuplicates.forEach(({ file, entryKey }) => {
-          const proceed = duplicateResolutions[entryKey];
-          if (!proceed) {
-            updateActionState(normalizedTypeKey, (current) => {
-              const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
-              return { ...current, uploads };
-            });
-            cancelled.push(file);
+        // First pass: detect duplicates within the batch AND against existing documents
+        for (const { file, entryKey, fileKey } of filesToCheck) {
+          if (!fileKey) {
+            // File without valid key, skip duplicate check but still process
+            filesAfterDuplicateCheck.push({ file, entryKey, fileKey });
+            continue;
+          }
+          
+          let isDuplicate = false;
+          let duplicateInfo = null;
+          
+          // Check 1: Is this a duplicate within the current batch?
+          if (batchSeenKeys.has(fileKey)) {
+            const originalEntryKey = batchSeenFiles.get(fileKey);
+            isDuplicate = true;
+            duplicateInfo = {
+              file, 
+              entryKey, 
+              fileKey, 
+              duplicates: [{ originalName: 'Duplicate in current upload', isBatchDuplicate: true }],
+              isBatchDuplicate: true,
+              originalEntryKey 
+            };
+            console.log(`Batch duplicate detected: ${file.name} (${file.size} bytes) matches entryKey ${originalEntryKey}`);
           } else {
-            // User chose to proceed, add to files to process
-            const fileKey = computeDocKey(file.name, file.size);
+            // Check 2: Is this a duplicate against already-uploaded documents?
+            const fileNormalizedName = normalizeFileName(file.name);
+            const existingDuplicates = (documentsState || []).filter((doc) => {
+              const docName = doc?.originalName || doc?.original_name || doc?.file_name;
+              const docSize =
+                doc?.fileSize ??
+                doc?.file_size ??
+                doc?.metadata?.file_info?.original_size ??
+                doc?.metadata?.file_info?.originalSize;
+              const docNormalizedName = normalizeFileName(docName);
+              return docNormalizedName === fileNormalizedName && Number(docSize) === Number(file.size);
+            });
+
+            if (existingDuplicates.length > 0) {
+              isDuplicate = true;
+              duplicateInfo = {
+                file,
+                entryKey,
+                fileKey,
+                duplicates: existingDuplicates,
+                isBatchDuplicate: false
+              };
+              console.log(`Existing duplicate detected: ${file.name} (${file.size} bytes) matches ${existingDuplicates.length} existing document(s)`);
+            }
+          }
+          
+          if (isDuplicate && duplicateInfo) {
+            // This file is a duplicate - add to duplicates list
+            allDuplicates.push(duplicateInfo);
+          } else {
+            // Not a duplicate - add to files to process
+            batchSeenKeys.add(fileKey);
+            batchSeenFiles.set(fileKey, entryKey);
             if (fileKey) {
               seenKeys.add(fileKey);
             }
             filesAfterDuplicateCheck.push({ file, entryKey, fileKey });
           }
-        });
-      }
+        }
+
+        console.log(`Duplicate check complete: ${allDuplicates.length} duplicates found out of ${filesToCheck.length} files`);
+
+        // Show ONE modal for ALL duplicates (both batch and existing)
+        if (allDuplicates.length > 0) {
+          const duplicateResolutions = await requestBatchDuplicateConfirmation(allDuplicates);
+          
+          // Process all duplicate resolutions
+          allDuplicates.forEach(({ file, entryKey, fileKey }) => {
+            const proceed = duplicateResolutions[entryKey];
+            if (!proceed) {
+              // User chose to skip this duplicate
+              updateActionState(normalizedTypeKey, (current) => {
+                const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+                return { ...current, uploads };
+              });
+              cancelled.push(file);
+            } else {
+              // User chose to proceed with this duplicate - add to files to process
+              if (fileKey) {
+                seenKeys.add(fileKey);
+              }
+              filesAfterDuplicateCheck.push({ file, entryKey, fileKey });
+            }
+          });
+        }
+      } // End of skipDuplicateCheck else block
 
       // Step 2: Detect document types for all remaining files in parallel
       // Only proceed if there are files to process
@@ -726,13 +1093,24 @@ const DocumentsPage = ({
         return;
       }
 
-      const typeDetectionResults = await Promise.all(
+      // Detect document types with error handling - don't fail entire upload if detection fails
+      const typeDetectionResults = await Promise.allSettled(
         filesAfterDuplicateCheck.map(async ({ file, entryKey, fileKey }) => {
-          // Detect document type
-          const detectedType = await detectDocumentType(file);
-          return { file, entryKey, fileKey, detectedType };
+          try {
+            // Detect document type
+            const detectedType = await detectDocumentType(file);
+            return { file, entryKey, fileKey, detectedType };
+          } catch (error) {
+            console.error(`Error detecting type for ${file.name}:`, error);
+            // Return null detectedType on error - upload will proceed to selected category
+            return { file, entryKey, fileKey, detectedType: null };
+          }
         })
-      );
+      ).then(results => results.map(result => 
+        result.status === 'fulfilled' 
+          ? result.value 
+          : { file: null, entryKey: null, fileKey: null, detectedType: null }
+      ));
 
       // Step 3: Collect mismatches and show batch modal
       const filesWithMismatches = [];
@@ -861,7 +1239,7 @@ const DocumentsPage = ({
             uploadProgress: 5,
             uploadMessage: 'Preparing upload…',
             processingProgress: 0,
-            processingMessage: 'Waiting to start…',
+            processingMessage: 'Waiting to start... (0%)',
             status: 'uploading'
           };
           
@@ -878,37 +1256,233 @@ const DocumentsPage = ({
         }
 
         try {
+          console.log(`[Upload] Starting upload for ${file.name} to type ${targetTypeKey}`);
           const skipDataFetch = files.length > 1;
-          const uploaded = await onUpload(targetTypeKey, file, {}, emitProgress, { skipDataFetch });
+          const uploaded = await handleUpload(targetTypeKey, file, {}, emitProgress, { skipDataFetch });
+          console.log(`[Upload] Upload completed for ${file.name}:`, uploaded);
 
-          emitProgress('processing', 100, 'Processing complete.', { processedCount: 'complete' });
-
-          updateActionState(targetTypeKey, (current) => {
-            const uploads = (current.uploads || []).map((upload) => (
-              upload.key === entryKey
-                ? { ...upload, status: 'success' }
-                : upload
-            ));
-            const hasOtherUploads = uploads.some(u => u.key !== entryKey && u.status === 'uploading');
-            return { 
-              ...current, 
-              uploads,
-              uploading: hasOtherUploads,
-              success: filesToProcess.length === 1 ? `${file.name} uploaded` : null
+          // Start polling for processing progress if document was uploaded
+          const documentId = uploaded?.document?.id || uploaded?.id;
+          if (documentId) {
+            let pollInterval = null;
+            let pollCount = 0;
+            const MAX_POLLS = 300; // Stop after 5 minutes (300 * 1 second)
+            
+            // Mark upload as complete, but keep status as 'uploading' until processing completes
+            emitProgress('upload', 100, 'Upload complete');
+            emitProgress('processing', 0, 'Starting processing... (0%)');
+            
+            const pollProgress = async () => {
+              try {
+                pollCount++;
+                
+                // Stop polling if we've exceeded max polls
+                if (pollCount > MAX_POLLS) {
+                  emitProgress('processing', 100, 'Processing taking longer than expected...', { processedCount: 'complete' });
+                  // Mark as success and remove after timeout
+                  updateActionState(targetTypeKey, (current) => {
+                    const uploads = (current.uploads || []).map((upload) => (
+                      upload.key === entryKey
+                        ? { ...upload, status: 'success' }
+                        : upload
+                    ));
+                    const hasOtherUploads = uploads.some(u => u.key !== entryKey && u.status === 'uploading');
+                    return { 
+                      ...current, 
+                      uploads,
+                      uploading: hasOtherUploads
+                    };
+                  });
+                  
+                  // Remove after delay
+                  setTimeout(() => {
+                    updateActionState(targetTypeKey, (current) => {
+                      const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+                      const hasOtherUploads = uploads.length > 0;
+                      return { 
+                        ...current, 
+                        uploads,
+                        uploading: hasOtherUploads ? current.uploading : false
+                      };
+                    });
+                  }, 2000);
+                  return;
+                }
+                
+                const { documentsAPI } = await import('../api');
+                const progressData = await documentsAPI.getUploadProgress(documentId);
+                
+                console.log(`[Processing Progress] Document ${documentId}:`, progressData);
+                
+                if (progressData && progressData.progress !== undefined) {
+                  const progress = progressData.progress || 0;
+                  const message = progressData.message || 'Processing...';
+                  const processed = progressData.processed;
+                  const total = progressData.total;
+                  
+                  // Update progress - always show percentage, optionally show count
+                  // Only include count if both processed and total are valid numbers (not null/undefined)
+                  const hasValidCount = processed != null && total != null && 
+                                       typeof processed === 'number' && typeof total === 'number';
+                  
+                  let messageWithProgress;
+                  if (hasValidCount) {
+                    // Message already includes count from backend, just add percentage
+                    messageWithProgress = `${message} (${progress}%)`;
+                  } else {
+                    // Just show percentage
+                    messageWithProgress = `${message} (${progress}%)`;
+                  }
+                  
+                  emitProgress('processing', progress, messageWithProgress, {
+                    processedCount: hasValidCount ? `${processed}/${total}` : undefined
+                  });
+                  
+                  // Continue polling if not complete
+                  if (progress < 100 && progressData.status !== 'complete') {
+                    pollInterval = setTimeout(pollProgress, 1000); // Poll every second
+                  } else {
+                    // Processing complete - mark as success
+                    emitProgress('processing', 100, 'Processing complete.', { processedCount: 'complete' });
+                    
+                    updateActionState(targetTypeKey, (current) => {
+                      const uploads = (current.uploads || []).map((upload) => (
+                        upload.key === entryKey
+                          ? { ...upload, status: 'success' }
+                          : upload
+                      ));
+                      const hasOtherUploads = uploads.some(u => u.key !== entryKey && u.status === 'uploading');
+                      return { 
+                        ...current, 
+                        uploads,
+                        uploading: hasOtherUploads,
+                        success: filesToProcess.length === 1 ? `${file.name} processed` : null
+                      };
+                    });
+                    
+                    // Remove upload entry after showing success for 2 seconds
+                    setTimeout(() => {
+                      updateActionState(targetTypeKey, (current) => {
+                        const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+                        const hasOtherUploads = uploads.length > 0;
+                        return { 
+                          ...current, 
+                          uploads,
+                          uploading: hasOtherUploads ? current.uploading : false
+                        };
+                      });
+                    }, 2000);
+                    
+                    if (pollInterval) {
+                      clearTimeout(pollInterval);
+                    }
+                  }
+                } else {
+                  // Fallback: assume processing is done if no progress data
+                  console.warn(`[Processing Progress] No progress data for document ${documentId}, assuming complete`);
+                  emitProgress('processing', 100, 'Processing complete.', { processedCount: 'complete' });
+                  
+                  updateActionState(targetTypeKey, (current) => {
+                    const uploads = (current.uploads || []).map((upload) => (
+                      upload.key === entryKey
+                        ? { ...upload, status: 'success' }
+                        : upload
+                    ));
+                    const hasOtherUploads = uploads.some(u => u.key !== entryKey && u.status === 'uploading');
+                    return { 
+                      ...current, 
+                      uploads,
+                      uploading: hasOtherUploads
+                    };
+                  });
+                  
+                  setTimeout(() => {
+                    updateActionState(targetTypeKey, (current) => {
+                      const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+                      const hasOtherUploads = uploads.length > 0;
+                      return { 
+                        ...current, 
+                        uploads,
+                        uploading: hasOtherUploads ? current.uploading : false
+                      };
+                    });
+                  }, 2000);
+                  
+                  if (pollInterval) {
+                    clearTimeout(pollInterval);
+                  }
+                }
+              } catch (error) {
+                console.error('Error polling progress:', error);
+                // On error, mark as complete but log the error
+                emitProgress('processing', 100, 'Processing complete.', { processedCount: 'complete' });
+                
+                updateActionState(targetTypeKey, (current) => {
+                  const uploads = (current.uploads || []).map((upload) => (
+                    upload.key === entryKey
+                      ? { ...upload, status: 'success' }
+                      : upload
+                  ));
+                  const hasOtherUploads = uploads.some(u => u.key !== entryKey && u.status === 'uploading');
+                  return { 
+                    ...current, 
+                    uploads,
+                    uploading: hasOtherUploads
+                  };
+                });
+                
+                setTimeout(() => {
+                  updateActionState(targetTypeKey, (current) => {
+                    const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+                    const hasOtherUploads = uploads.length > 0;
+                    return { 
+                      ...current, 
+                      uploads,
+                      uploading: hasOtherUploads ? current.uploading : false
+                    };
+                  });
+                }, 2000);
+                
+                if (pollInterval) {
+                  clearTimeout(pollInterval);
+                }
+              }
             };
-          });
-
-          setTimeout(() => {
+            
+            // Start polling after a short delay to allow backend to start processing
+            pollInterval = setTimeout(pollProgress, 500);
+          } else {
+            // No document ID, can't poll - mark upload complete but warn
+            console.warn('[Upload] No document ID returned, cannot track processing progress');
+            emitProgress('upload', 100, 'Upload complete');
+            emitProgress('processing', 100, 'Processing status unknown');
+            
             updateActionState(targetTypeKey, (current) => {
-              const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
-              const hasOtherUploads = uploads.length > 0;
+              const uploads = (current.uploads || []).map((upload) => (
+                upload.key === entryKey
+                  ? { ...upload, status: 'success' }
+                  : upload
+              ));
+              const hasOtherUploads = uploads.some(u => u.key !== entryKey && u.status === 'uploading');
               return { 
                 ...current, 
                 uploads,
-                uploading: hasOtherUploads ? current.uploading : false
+                uploading: hasOtherUploads
               };
             });
-          }, 400);
+            
+            setTimeout(() => {
+              updateActionState(targetTypeKey, (current) => {
+                const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+                const hasOtherUploads = uploads.length > 0;
+                return { 
+                  ...current, 
+                  uploads,
+                  uploading: hasOtherUploads ? current.uploading : false
+                };
+              });
+            }, 2000);
+          }
 
           if (isMoved && isCorrectCategory) {
             movedToOtherCategories.add(file.name);
@@ -972,21 +1546,17 @@ const DocumentsPage = ({
         });
       }
 
-      // Only refresh data once after all uploads complete (for batch uploads)
-      // For batch uploads, defer the refresh slightly to let DOM settle and prevent jitter
-      if (typeof onRefresh === 'function') {
-        if (files.length > 1) {
-          // Defer refresh for batch uploads to prevent layout shift
-          setTimeout(async () => {
-            await onRefresh();
-            // Restore scroll after refresh completes
-            requestAnimationFrame(() => {
-              window.scrollTo(0, scrollPosition);
-            });
-          }, 150);
+      // Silently refresh data in background without showing loading state
+      // Only refresh if we didn't already update state optimistically
+      if (uploadedDocuments.length === 0 && typeof onRefresh === 'function') {
+        // Background refresh without loading indicator
+        if (onRefresh === loadDocuments) {
+          loadDocuments(false).catch(err => console.error('Background refresh failed:', err));
         } else {
-          // Single file upload - refresh immediately
-          await onRefresh();
+          // If custom onRefresh, call it but don't show loading
+          setTimeout(() => {
+            onRefresh().catch(err => console.error('Background refresh failed:', err));
+          }, 500);
         }
       }
 
@@ -1027,12 +1597,20 @@ const DocumentsPage = ({
         });
       });
     } catch (error) {
+      console.error('[handleFilesSelected] Upload failed with error:', error);
+      console.error('[handleFilesSelected] Error stack:', error?.stack);
+      console.error('[handleFilesSelected] Error details:', {
+        message: error?.message,
+        name: error?.name,
+        type: normalizedTypeKey,
+        filesCount: files?.length
+      });
       updateActionState(normalizedTypeKey, {
         uploading: false,
         error: error?.message || 'Upload failed'
       });
     }
-  }, [onUpload, onRefresh, updateActionState, documentsState, requestBatchDuplicateConfirmation, requestBatchCategoryMismatch]);
+  }, [handleUpload, onRefresh, loadDocuments, updateActionState, documentsState, requestBatchDuplicateConfirmation, requestBatchCategoryMismatch, detectDocumentType]);
 
   const handleDelete = useCallback(async (document) => {
     if (!document?.id) {
@@ -1070,7 +1648,7 @@ const DocumentsPage = ({
         document?.document_metadata?.file_info?.document_type ||
         document?.metadata?.file_info?.document_type
       ) || 'unknown';
-      await onDelete(document.id, documentType);
+      await performDelete(document.id, documentType);
       setDocumentsState(prev => prev.filter(doc => doc.id !== document.id));
       setConfirmState({ open: false, document: null, busy: false, error: null });
       console.log('Document deleted successfully');
@@ -1088,11 +1666,11 @@ const DocumentsPage = ({
     } finally {
       setDeletingId(null);
     }
-  }, [onDelete, updateActionState]);
+  }, [performDelete, updateActionState]);
 
   const handleBulkDeleteConfirm = useCallback(async () => {
     const typeKey = bulkConfirmState.typeKey;
-    if (!typeKey || typeof onDeleteAll !== 'function') {
+    if (!typeKey || !handleDeleteAll) {
       closeBulkConfirm();
       return;
     }
@@ -1104,7 +1682,7 @@ const DocumentsPage = ({
     }));
 
     try {
-      const deletedCount = await onDeleteAll(typeKey);
+      const deletedCount = await handleDeleteAll(typeKey);
 
       if (deletedCount > 0) {
         setDocumentsState((prev) => prev.filter((doc) => {
@@ -1143,7 +1721,7 @@ const DocumentsPage = ({
         error: error?.message || 'Failed to delete documents'
       }));
     }
-  }, [bulkConfirmState, onDeleteAll, updateActionState, closeBulkConfirm]);
+  }, [bulkConfirmState, handleDeleteAll, updateActionState, closeBulkConfirm]);
 
   const [autoDetectUploading, setAutoDetectUploading] = useState(false);
   const autoDetectFileInputRef = useRef(null);
@@ -1170,57 +1748,6 @@ const DocumentsPage = ({
     return type ? type.label : humanizeDocumentType(typeKey);
   }, [documentTypes]);
 
-  const detectDocumentType = useCallback(async (file) => {
-    if (!file) return null;
-    
-    try {
-      // Get session token from localStorage
-      const sessionToken = typeof window !== 'undefined' ? localStorage.getItem('sessionToken') : null;
-      if (!sessionToken) {
-        console.warn('No session token available for document type detection');
-        return null;
-      }
-      
-      // Create FormData with file
-      const formData = new FormData();
-      formData.append('file', file, file.name);
-      
-      // Call backend detection endpoint
-      const response = await fetch(`${API_BASE_URL}/api/documents/detect-type`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${sessionToken}`
-        },
-        body: formData
-      });
-      
-      if (response.status === 401) {
-        // Authentication failed - clear session
-        localStorage.removeItem('sessionToken');
-        localStorage.removeItem('user');
-        // Trigger page reload to show login screen
-        window.location.reload();
-        return null;
-      }
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Error detecting document type:', errorData.error);
-        return null;
-      }
-      
-      const responseData = await response.json();
-      console.log('Detection response for', file.name, ':', responseData);
-      
-      // Handle wrapped response from authentication decorator
-      const data = responseData.data || responseData;
-      return data.documentType || null;
-    } catch (error) {
-      console.error('Error detecting document type for', file.name, ':', error);
-      return null;
-    }
-  }, []);
-
   const handleAutoDetectUpload = useCallback(async (fileList) => {
     if (!fileList || fileList.length === 0) return;
     
@@ -1228,18 +1755,145 @@ const DocumentsPage = ({
     setAutoDetectUploading(true);
     
     try {
-      // Create file copies for detection (to avoid consuming the original file objects)
-      // We'll store both the original file and create a new File from blob for detection
+      // Step 1: Check ALL files for duplicates BEFORE detecting types
+      const normalizeFileName = (fileName) => {
+        if (!fileName) return '';
+        try {
+          fileName = decodeURIComponent(fileName);
+        } catch (e) {
+          // If decoding fails, use original
+        }
+        fileName = fileName.replace(/\s*[-_]?\s*(\(?\d+\)?|Copy|copy)\s*(?=\.[^.]+$)/i, '');
+        fileName = fileName.replace(/\s+/g, ' ').trim();
+        return fileName.toLowerCase();
+      };
+
+      const computeDocKey = (docName, docSize) => {
+        if (!docName || docSize === undefined || docSize === null) {
+          return null;
+        }
+        const normalizedName = normalizeFileName(docName);
+        return `${normalizedName}::${Number(docSize)}`;
+      };
+
+      // Build seenKeys from existing documents
+      const seenKeys = new Set();
+      (documentsState || []).forEach((doc) => {
+        const name = doc?.originalName || doc?.original_name || doc?.file_name;
+        const size =
+          doc?.fileSize ??
+          doc?.file_size ??
+          doc?.metadata?.file_info?.original_size ??
+          doc?.metadata?.file_info?.originalSize ??
+          doc?.metadata?.file_info?.original_size;
+        const key = computeDocKey(name, size);
+        if (key) {
+          seenKeys.add(key);
+        }
+      });
+
+      // Check for duplicates within batch and against existing documents
+      const batchSeenKeys = new Set();
+      const batchSeenFiles = new Map();
+      const allDuplicates = [];
+      const filesToProcess = [];
+      
+      for (const file of files) {
+        const fileKey = computeDocKey(file.name, file.size);
+        if (!fileKey) {
+          // File without valid key, skip duplicate check but still process
+          filesToProcess.push(file);
+          continue;
+        }
+        
+        let isDuplicate = false;
+        let duplicateInfo = null;
+        
+        // Check 1: Is this a duplicate within the current batch?
+        if (batchSeenKeys.has(fileKey)) {
+          isDuplicate = true;
+          duplicateInfo = {
+            file,
+            fileKey,
+            duplicates: [{ originalName: 'Duplicate in current upload', isBatchDuplicate: true }],
+            isBatchDuplicate: true
+          };
+        } else {
+          // Check 2: Is this a duplicate against already-uploaded documents?
+          const fileNormalizedName = normalizeFileName(file.name);
+          const existingDuplicates = (documentsState || []).filter((doc) => {
+            const docName = doc?.originalName || doc?.original_name || doc?.file_name;
+            const docSize =
+              doc?.fileSize ??
+              doc?.file_size ??
+              doc?.metadata?.file_info?.original_size ??
+              doc?.metadata?.file_info?.originalSize;
+            const docNormalizedName = normalizeFileName(docName);
+            return docNormalizedName === fileNormalizedName && Number(docSize) === Number(file.size);
+          });
+          
+          if (existingDuplicates.length > 0) {
+            isDuplicate = true;
+            duplicateInfo = {
+              file,
+              fileKey,
+              duplicates: existingDuplicates,
+              isBatchDuplicate: false
+            };
+          }
+        }
+        
+        if (isDuplicate && duplicateInfo) {
+          allDuplicates.push(duplicateInfo);
+        } else {
+          batchSeenKeys.add(fileKey);
+          batchSeenFiles.set(fileKey, file);
+          if (fileKey) {
+            seenKeys.add(fileKey);
+          }
+          filesToProcess.push(file);
+        }
+      }
+
+      // Show ONE modal for ALL duplicates if any found
+      if (allDuplicates.length > 0) {
+        // Create entryKeys for duplicates (needed for modal)
+        const timestamp = Date.now();
+        const duplicatesWithKeys = allDuplicates.map((dup, idx) => ({
+          ...dup,
+          entryKey: `auto_${timestamp}_${idx}_${dup.file.name}`
+        }));
+        
+        const duplicateResolutions = await requestBatchDuplicateConfirmation(duplicatesWithKeys);
+        
+        // Process duplicate resolutions - add files user wants to proceed with back to filesToProcess
+        duplicatesWithKeys.forEach(({ file, entryKey, fileKey }) => {
+          const proceed = duplicateResolutions[entryKey];
+          if (proceed) {
+            // User chose to proceed with this duplicate
+            if (fileKey) {
+              seenKeys.add(fileKey);
+            }
+            filesToProcess.push(file);
+          }
+        });
+      }
+
+      // If no files to process after duplicate check, return early
+      if (filesToProcess.length === 0) {
+        setAutoDetectUploading(false);
+        return;
+      }
+
+      // Step 2: Detect types for remaining files
       const filesWithBlobs = await Promise.all(
-        files.map(async (file) => {
-          // Create a new File object from the blob so we can reuse the original
+        filesToProcess.map(async (file) => {
           const blob = file.slice ? file.slice(0, file.size, file.type) : file;
           const fileCopy = new File([blob], file.name, { type: file.type });
           return { original: file, copy: fileCopy };
         })
       );
       
-      // Detect types for all files using copies
       const detectionPromises = filesWithBlobs.map(async ({ original, copy }) => {
         const detectedType = await detectDocumentType(copy);
         return { file: original, detectedType };
@@ -1268,9 +1922,10 @@ const DocumentsPage = ({
       console.log('Grouped by type:', Object.keys(filesByType));
       console.log('Unknown files:', unknownFiles.map(f => f.name));
       
-      // Upload files grouped by type
+      // Upload files grouped by type (duplicate checking already done, so skip it in handleFilesSelected)
       for (const [typeKey, typeFiles] of Object.entries(filesByType)) {
-        await handleFilesSelected(typeKey, typeFiles);
+        // Pass a flag to skip duplicate checking since we already did it
+        await handleFilesSelected(typeKey, typeFiles, { skipDuplicateCheck: true });
       }
       
       // Show warning for unknown files using modal
@@ -1293,7 +1948,7 @@ const DocumentsPage = ({
         autoDetectFileInputRef.current.value = '';
       }
     }
-  }, [detectDocumentType, handleFilesSelected]);
+  }, [detectDocumentType, handleFilesSelected, documentsState, requestBatchDuplicateConfirmation]);
 
   return (
     <div className="documents-page">
@@ -1301,10 +1956,10 @@ const DocumentsPage = ({
         <div>
           <h3>Manage Files</h3>
           <p>
-            Upload bank statements, broker reports, or loan documents.
+            Upload and manage statements, broker reports, and loan documents
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
           <label
             className="document-card-settings-button"
             style={{
@@ -1360,33 +2015,33 @@ const DocumentsPage = ({
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--color-text-tertiary)', marginBottom: '12px' }}>
                   <input
                     type="checkbox"
-                    checked={wipeState?.keepCustomCategories ?? true}
-                    onChange={(event) => wipeState?.setKeepCustomCategories?.(event.target.checked)}
-                    disabled={wipeState?.loading}
+                    checked={effectiveWipeState?.keepCustomCategories ?? true}
+                    onChange={(event) => effectiveWipeState?.setKeepCustomCategories?.(event.target.checked)}
+                    disabled={effectiveWipeState?.loading}
                     style={{ cursor: 'pointer' }}
                   />
                   <span>Keep my custom categories</span>
                 </label>
-                {wipeState?.error && (
+                {effectiveWipeState?.error && (
                   <div style={{ padding: '8px', backgroundColor: 'var(--color-error-bg)', color: 'var(--color-error)', fontSize: '12px', borderRadius: '6px', marginBottom: '8px' }}>
-                    {wipeState.error}
+                    {effectiveWipeState.error}
                   </div>
                 )}
-                {wipeState?.success && (
+                {effectiveWipeState?.success && (
                   <div style={{ padding: '8px', backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success)', fontSize: '12px', borderRadius: '6px', marginBottom: '8px' }}>
-                    {wipeState.success}
+                    {effectiveWipeState.success}
                   </div>
                 )}
                 <button
                   className="danger-button"
                   onClick={() => {
                     setOpenGlobalSettings(false);
-                    onWipeData();
+                    handleWipeData();
                   }}
-                  disabled={wipeState?.loading}
+                  disabled={effectiveWipeState?.loading}
                   style={{ width: '100%', fontSize: '13px', padding: '8px 12px' }}
                 >
-                  {wipeState?.loading ? 'Deleting…' : 'Delete all data'}
+                  {effectiveWipeState?.loading ? 'Deleting…' : 'Delete all data'}
                 </button>
               </div>
             </div>
@@ -1489,6 +2144,11 @@ const DocumentsPage = ({
                             accept={computeAccept(type.extensions)}
                             multiple
                             onChange={(event) => {
+                              console.log('[FileInput] Files selected:', event.target.files?.length, 'for type:', typeKey);
+                              if (!event.target.files || event.target.files.length === 0) {
+                                console.warn('[FileInput] No files in event');
+                                return;
+                              }
                               handleFilesSelected(typeKey, event.target.files);
                               event.target.value = '';
                             }}
@@ -1538,8 +2198,10 @@ const DocumentsPage = ({
                                       style={{ width: `${upload.processingProgress || 0}%` }}
                                     />
                                   </div>
-                                  <span className="progress-message">{upload.processingMessage}</span>
-                                  {upload.processedCount && (
+                                  <span className="progress-message">
+                                    {upload.processingMessage || `Processing... (${Math.round(upload.processingProgress || 0)}%)`}
+                                  </span>
+                                  {upload.processedCount && upload.processedCount !== 'complete' && (
                                     <span className="progress-count">{upload.processedCount}</span>
                                   )}
                                 </div>
@@ -1807,17 +2469,41 @@ const DocumentsPage = ({
               <div>
                 <h3>Duplicate documents detected</h3>
                 <p>
-                  {duplicateState.files.some(f => f.duplicates?.[0]?.isBatchDuplicate) ? (
-                    <>
-                      <strong>{duplicateState.files.length}</strong> file{duplicateState.files.length === 1 ? '' : 's'} appear{duplicateState.files.length === 1 ? 's' : ''} multiple times in the current upload.
+                  {(() => {
+                    const batchDuplicates = duplicateState.files.filter(f => f.duplicates?.[0]?.isBatchDuplicate);
+                    const existingDuplicates = duplicateState.files.filter(f => !f.duplicates?.[0]?.isBatchDuplicate);
+                    
+                    if (batchDuplicates.length > 0 && existingDuplicates.length > 0) {
+                      return (
+                        <>
+                          Found <strong>{duplicateState.files.length}</strong> duplicate file{duplicateState.files.length === 1 ? '' : 's'}:
+                          <ul style={{ marginTop: '8px', marginLeft: '20px' }}>
+                            {batchDuplicates.length > 0 && (
+                              <li><strong>{batchDuplicates.length}</strong> file{batchDuplicates.length === 1 ? '' : 's'} appear{batchDuplicates.length === 1 ? 's' : ''} multiple times in the current upload</li>
+                            )}
+                            {existingDuplicates.length > 0 && (
+                              <li><strong>{existingDuplicates.length}</strong> file{existingDuplicates.length === 1 ? '' : 's'} match{existingDuplicates.length === 1 ? 'es' : ''} documents you have already imported</li>
+                            )}
+                          </ul>
                       Would you like to skip the duplicate{duplicateState.files.length === 1 ? '' : 's'}?
                     </>
-                  ) : (
-                    <>
-                      <strong>{duplicateState.files.length}</strong> file{duplicateState.files.length === 1 ? '' : 's'} appear{duplicateState.files.length === 1 ? 's' : ''} to match documents you have already imported.
+                      );
+                    } else if (batchDuplicates.length > 0) {
+                      return (
+                        <>
+                          <strong>{batchDuplicates.length}</strong> file{batchDuplicates.length === 1 ? '' : 's'} appear{batchDuplicates.length === 1 ? 's' : ''} multiple times in the current upload.
+                          Would you like to skip the duplicate{batchDuplicates.length === 1 ? '' : 's'}?
+                        </>
+                      );
+                    } else {
+                      return (
+                        <>
+                          <strong>{existingDuplicates.length}</strong> file{existingDuplicates.length === 1 ? '' : 's'} appear{existingDuplicates.length === 1 ? 's' : ''} to match documents you have already imported.
                       Duplicate data will be filtered out. Continue with upload?
                     </>
-                  )}
+                      );
+                    }
+                  })()}
                 </p>
               </div>
               <button
@@ -2019,7 +2705,7 @@ const DocumentsPage = ({
         </div>
       )}
 
-      {wipeState?.showConfirm && (
+      {showWipeConfirm && (
         <div
           className="modal-overlay open"
           onClick={() => wipeState?.setShowConfirm?.(false)}
@@ -2033,7 +2719,7 @@ const DocumentsPage = ({
                 <h3>Delete all data?</h3>
                 <p>
                   This will delete <strong>all accounts, transactions, loans, documents, and other financial data</strong>.
-                  {wipeState?.keepCustomCategories ? ' Your custom categories will remain.' : ' All custom categories will also be deleted.'}
+                  {effectiveWipeState?.keepCustomCategories ? ' Your custom categories will remain.' : ' All custom categories will also be deleted.'}
                   {' '}<strong>This action cannot be undone.</strong>
                 </p>
               </div>
@@ -2041,7 +2727,7 @@ const DocumentsPage = ({
                 className="modal-close-btn"
                 onClick={(event) => {
                   event.stopPropagation();
-                  wipeState?.setShowConfirm?.(false);
+                  effectiveWipeState?.setShowConfirm?.(false);
                 }}
                 aria-label="Close confirmation"
               >
@@ -2056,6 +2742,11 @@ const DocumentsPage = ({
                   Warning: This will permanently erase all your financial data
                 </p>
               </div>
+              {effectiveWipeState?.error && (
+                <div style={{ padding: '8px', backgroundColor: 'var(--color-error-bg)', color: 'var(--color-error)', fontSize: '12px', borderRadius: '6px', marginTop: '12px' }}>
+                  {effectiveWipeState.error}
+                </div>
+              )}
             </div>
 
             <div className="documents-confirm-actions">
@@ -2063,8 +2754,9 @@ const DocumentsPage = ({
                 className="documents-cancel-button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  wipeState?.setShowConfirm?.(false);
+                  effectiveWipeState?.setShowConfirm?.(false);
                 }}
+                disabled={effectiveWipeState?.loading}
               >
                 Cancel
               </button>
@@ -2072,12 +2764,11 @@ const DocumentsPage = ({
                 className="danger-button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (typeof onWipeDataConfirm === 'function') {
-                    onWipeDataConfirm();
-                  }
+                  handleWipeDataConfirm();
                 }}
+                disabled={effectiveWipeState?.loading}
               >
-                Delete all data
+                {effectiveWipeState?.loading ? 'Deleting…' : 'Delete all data'}
               </button>
             </div>
           </div>

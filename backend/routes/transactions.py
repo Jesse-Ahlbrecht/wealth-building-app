@@ -47,6 +47,8 @@ def get_summary():
         db_transactions = wealth_db.get_transactions(tenant_id, limit=10000, offset=0)
 
         print(f"Total transactions from database: {len(db_transactions)}")
+        if db_transactions:
+            print(f"Sample transaction: date={db_transactions[0].get('transaction_date')}, amount={db_transactions[0].get('amount')}, type={db_transactions[0].get('transaction_type')}")
         
         if len(db_transactions) == 0:
             # No transactions found - return empty array (user will see onboarding)
@@ -190,5 +192,6 @@ def get_summary():
         })
 
     print(f"Returning summary with {len(summary)} months")
+    print(f"Sample month data: {summary[0] if summary else 'No months'}")
     return jsonify(summary)
 

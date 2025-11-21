@@ -11,14 +11,41 @@ import {
   Tooltip,
   Legend
 } from 'recharts';
-import { EUR_TO_CHF_RATE } from '../utils/finance';
+import { brokerAPI } from '../api';
+import { formatCurrency, formatDate, EUR_TO_CHF_RATE } from '../utils';
 
-const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
+const BrokerPage = () => {
+  const [broker, setBroker] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [ingDibaPurchaseDate, setIngDibaPurchaseDate] = useState(null);
   const [showPurchaseDateModal, setShowPurchaseDateModal] = useState(false);
   const [purchaseDateInput, setPurchaseDateInput] = useState('');
   const [historicalValuation, setHistoricalValuation] = useState(null);
   const [loadingHistorical, setLoadingHistorical] = useState(false);
+
+  // Load broker data on mount
+  useEffect(() => {
+    loadBroker();
+  }, []);
+
+  const loadBroker = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await brokerAPI.getBroker();
+      console.log('Broker API response:', data);
+      console.log('Broker summary:', data?.summary);
+      console.log('Broker holdings:', data?.holdings);
+      console.log('Broker transactions:', data?.transactions);
+      setBroker(data);
+    } catch (err) {
+      console.error('Error loading broker data:', err);
+      setError(err.message || 'Failed to load broker data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Load purchase date from localStorage on mount
   useEffect(() => {
@@ -71,19 +98,11 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
   // Fetch historical valuation data
   useEffect(() => {
     const fetchHistoricalValuation = async () => {
-      if (!broker || !sessionToken) return;
+      if (!broker) return;
       
       setLoadingHistorical(true);
       try {
-        const headers = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionToken}`
-        };
-        // Use cached valuation by default (backend returns cached data unless ?refresh=true)
-        const response = await fetch('http://localhost:5001/api/broker/historical-valuation', { headers });
-        const wrappedData = await response.json();
-        const data = wrappedData.data?.data || wrappedData.data || wrappedData;
-        
+        const data = await brokerAPI.getHistoricalValuation();
         setHistoricalValuation(data);
       } catch (error) {
         console.error('Error fetching historical valuation:', error);
@@ -94,7 +113,7 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
     };
     
     fetchHistoricalValuation();
-  }, [broker, sessionToken]);
+  }, [broker]);
 
   // Aggregate historical valuation to one point per month for evenly spaced X axis,
   // generating a continuous monthly series between first and last data point
@@ -242,10 +261,34 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
         })()
       : [];
 
-  if (!broker) {
+  if (loading) {
     return (
       <div className="accounts-container">
         <div className="loading">Loading broker data...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="accounts-container">
+        <div className="error-message">
+          {error}
+          <button onClick={loadBroker} className="btn-secondary" style={{ marginTop: '16px' }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!broker) {
+    return (
+      <div className="accounts-container">
+        <div className="empty-state">
+          <h3>No Broker Data</h3>
+          <p>Upload broker statements to see your investment information here.</p>
+        </div>
       </div>
     );
   }
@@ -268,6 +311,7 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
   let cumulativeInvestedEUR = 0;
   const ingDibaTotalCost = summary.ing_diba ? summary.ing_diba.total_invested : 0;
   const ingDibaCurrentValue = summary.ing_diba ? summary.ing_diba.total_current_value : 0;
+  const viacTotal = summary.viac ? summary.viac.total_invested : 0;
 
   // Sort transactions by date
   const sortedTransactions = [...transactions].sort(
@@ -295,6 +339,14 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
       date: formatDate(new Date(firstDate.getTime() - 24 * 60 * 60 * 1000)),
       totalInvested: 0
     });
+  } else if (ingDibaTotalCost > 0 || viacTotal > 0) {
+    // If we have holdings but no transactions, start from 30 days ago
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30);
+    portfolioChartData.push({
+      date: formatDate(startDate),
+      totalInvested: 0
+    });
   }
 
   // Build cumulative investment data from VIAC transactions
@@ -315,15 +367,27 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
   });
 
   // Add current value as final point (today)
-  const viacTotal = summary.viac ? summary.viac.total_invested : 0;
-  const totalInvestedCHF = viacTotal + ingDibaTotalCost * EUR_TO_CHF_RATE;
-  const totalCurrentValueInCHF = viacTotal + ingDibaCurrentValue * EUR_TO_CHF_RATE;
+  // If no transactions, use the summary totals directly
+  if (sortedTransactions.length === 0 && (ingDibaTotalCost > 0 || viacTotal > 0)) {
+    const totalInvestedCHF = viacTotal + ingDibaTotalCost * EUR_TO_CHF_RATE;
+    const totalCurrentValueInCHF = viacTotal + (ingDibaCurrentValue || ingDibaTotalCost) * EUR_TO_CHF_RATE;
+    
+    portfolioChartData.push({
+      date: formatDate(new Date()),
+      totalInvested: totalInvestedCHF,
+      currentValue: totalCurrentValueInCHF
+    });
+  } else if (sortedTransactions.length > 0) {
+    // Add final point with current values
+    const totalInvestedCHF = viacTotal + ingDibaTotalCost * EUR_TO_CHF_RATE;
+    const totalCurrentValueInCHF = viacTotal + ingDibaCurrentValue * EUR_TO_CHF_RATE;
 
-  portfolioChartData.push({
-    date: formatDate(new Date()),
-    totalInvested: totalInvestedCHF,
-    currentValue: totalCurrentValueInCHF
-  });
+    portfolioChartData.push({
+      date: formatDate(new Date()),
+      totalInvested: totalInvestedCHF,
+      currentValue: totalCurrentValueInCHF
+    });
+  }
 
   return (
     <div className="accounts-container">
@@ -417,14 +481,15 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
       <div className="accounts-summary">
         <h3 className="accounts-title">Broker Summary</h3>
         {/* Portfolio Total Card - Full width at top */}
-        {((summary.viac && summary.viac.total_invested) || (summary.ing_diba && summary.ing_diba.total_current_value)) && (
+        {((summary.viac && summary.viac.total_invested > 0) || (summary.ing_diba && (summary.ing_diba.total_current_value > 0 || summary.ing_diba.total_invested > 0))) && (
           <div style={{ marginBottom: '24px' }}>
             <div className="total-card" style={{ maxWidth: '400px' }}>
               <div className="total-label">Portfolio Total</div>
               <div className="total-amount positive">
                 {formatCurrency(
                   (summary.viac ? summary.viac.total_invested : 0) +
-                  (summary.ing_diba ? summary.ing_diba.total_current_value * EUR_TO_CHF_RATE : 0),
+                  ((summary.ing_diba && summary.ing_diba.total_current_value) ? summary.ing_diba.total_current_value * EUR_TO_CHF_RATE : 
+                   (summary.ing_diba && summary.ing_diba.total_invested) ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0),
                   'CHF'
                 )}
               </div>
@@ -482,7 +547,7 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
             <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
               Loading historical market data...
             </div>
-          ) : monthlyHistoricalSeries && monthlyHistoricalSeries.length > 0 ? (
+          ) : (monthlyHistoricalSeries && monthlyHistoricalSeries.length > 0) ? (
             <div className="chart-wrapper">
               <ResponsiveContainer width="100%" height={600}>
                 <AreaChart 
@@ -740,7 +805,7 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-          ) : (
+          ) : portfolioChartData && portfolioChartData.length > 0 ? (
           <div className="chart-wrapper">
             <ResponsiveContainer width="100%" height={400}>
               <LineChart data={portfolioChartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
@@ -820,6 +885,10 @@ const BrokerPage = ({ broker, formatCurrency, formatDate, sessionToken }) => {
               </LineChart>
             </ResponsiveContainer>
           </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+              No chart data available. Upload broker statements to see portfolio value over time.
+            </div>
           )}
         </div>
       </div>

@@ -31,8 +31,8 @@ def get_accounts():
 
     try:
         # Import parser here to avoid circular dependency
-        from parsers.broker_parser import BrokerParser
-        parser = BrokerParser()
+        from parsers.bank_statement_parser import BankStatementParser
+        parser = BankStatementParser()
         
         accounts = wealth_db.get_accounts(tenant_id)
 
@@ -111,25 +111,9 @@ def get_accounts():
                             
                             metadata_json = json.dumps(verification_metadata, sort_keys=True).encode()
                             try:
+                                # Decrypt server layer - files are only encrypted server-side now
                                 decrypted = encryption_service.decrypt_data(encrypted_data, tenant_id, metadata_json)
                             except ValueError:
-                                continue
-                        
-                        client_metadata = encryption_metadata.get('client_encryption')
-                        is_client_encrypted = (
-                            client_metadata 
-                            and client_metadata.get('algorithm') != 'none'
-                            and client_metadata.get('nonce')
-                        )
-                        
-                        if is_client_encrypted and g.session_token:
-                            try:
-                                decrypted = encryption_service.decrypt_client_layer(
-                                    decrypted, 
-                                    g.session_token, 
-                                    client_metadata
-                                )
-                            except Exception:
                                 continue
                         
                         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(doc['original_name'])[1]) as tmp:

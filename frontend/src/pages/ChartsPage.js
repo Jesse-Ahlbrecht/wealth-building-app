@@ -1,3 +1,15 @@
+/**
+ * Charts Page - Fully Restored
+ * 
+ * Displays savings statistics over time with interactive charts.
+ * Features:
+ * - Click and drag to select custom time ranges
+ * - Click on bars to view month details
+ * - Interactive hover states
+ * - Month detail view with category breakdown
+ * - Essential/non-essential spending analysis
+ */
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   ResponsiveContainer,
@@ -10,57 +22,211 @@ import {
   ReferenceLine,
   Cell
 } from 'recharts';
+import { transactionsAPI, categoriesAPI, predictionsAPI } from '../api';
+import {
+  formatCurrency,
+  formatMonth
+} from '../utils';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
   getColorForPercentage
 } from '../utils/finance';
+import MonthSummaryCard from '../components/MonthSummaryCard';
+import { useAppContext } from '../context/AppContext';
 
-const ChartsPage = ({
-  chartData,
-  timeRange,
-  onChangeTimeRange,
-  chartView,
-  onChangeChartView,
-  includeLoanPayments,
-  onToggleIncludeLoanPayments,
-  summary,
-  formatMonth,
-  formatCurrency,
-  formatDate,
-  expandedCategories,
-  toggleCategory,
-  categorySorts,
-  toggleSort,
-  getSortedTransactions,
-  handleCategoryEdit,
-  pendingCategoryChange,
-  showEssentialSplit,
-  essentialCategories,
-  categoryEditModal,
-  handlePredictionClick,
-  handleDismissPrediction,
-  setShowEssentialCategoriesModal,
-  defaultCurrency,
-  getTransactionKey,
-  selectedMonth,
-  onSelectMonth,
-  MonthDetailComponent
-}) => {
+const ChartsPage = () => {
+  // Context
+  const { defaultCurrency } = useAppContext();
+
+  // Data state
+  const [summary, setSummary] = useState([]);
+  const [essentialCategories, setEssentialCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // UI state
+  const [timeRange, setTimeRange] = useState('1y');
+  const [chartView, setChartView] = useState('absolute');
+  const [includeLoanPayments, setIncludeLoanPayments] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [showEssentialSplit, setShowEssentialSplit] = useState(false);
+  
+  // Category management state
+  const [expandedCategories, setExpandedCategories] = useState({});
+  const [expandedSections, setExpandedSections] = useState({});
+  const [predictions, setPredictions] = useState({});
+  const [averageEssentialSpending, setAverageEssentialSpending] = useState({});
+  
+  // Drag selection state
   const chartContainerRef = useRef(null);
-  const customButtonRef = useRef(null); // Ref for Custom button to position tooltip
-  const isDraggingRef = useRef(false); // Track if we're currently dragging
+  const customButtonRef = useRef(null);
+  const isDraggingRef = useRef(false);
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionStart, setSelectionStart] = useState(null);
   const [selectionEnd, setSelectionEnd] = useState(null);
-  const [selectedRange, setSelectedRange] = useState(null); // { startIndex, endIndex }
-  const [hasMoved, setHasMoved] = useState(false); // Track if mouse moved during drag
-  const [hoveredIndex, setHoveredIndex] = useState(null); // Track hovered bar index
-  const [showCustomHelp, setShowCustomHelp] = useState(false); // Show help popup for custom selection
+  const [selectedRange, setSelectedRange] = useState(null);
+  const [hasMoved, setHasMoved] = useState(false);
+  const [hoveredIndex, setHoveredIndex] = useState(null);
+  const [showCustomHelp, setShowCustomHelp] = useState(false);
+
+  // Load data on mount
+  useEffect(() => {
+    loadSummary();
+    loadEssentialCategories();
+  }, []);
+
+  const loadSummary = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await transactionsAPI.getSummary();
+      
+      let summaryData = [];
+      if (Array.isArray(response)) {
+        summaryData = response;
+      } else if (response && Array.isArray(response.data)) {
+        summaryData = response.data;
+      } else if (response && response.summary && Array.isArray(response.summary)) {
+        summaryData = response.summary;
+      }
+      
+      setSummary(summaryData);
+    } catch (err) {
+      console.error('Error loading summary:', err);
+      setError(err.message || 'Failed to load chart data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadEssentialCategories = async () => {
+    try {
+      const response = await categoriesAPI.getEssentialCategories();
+      const categories = response?.categories || response || [];
+      setEssentialCategories(categories);
+    } catch (err) {
+      console.error('Error loading essential categories:', err);
+      // Use defaults if loading fails
+      setEssentialCategories(['Rent', 'Insurance', 'Groceries', 'Utilities']);
+    }
+  };
+
+  // Load predictions and average essential spending for selected month
+  useEffect(() => {
+    if (selectedMonth) {
+      loadPredictionsForMonth(selectedMonth.month);
+      loadAverageEssentialSpending(selectedMonth.month);
+    }
+  }, [selectedMonth, essentialCategories]);
+
+  const loadPredictionsForMonth = async (month) => {
+    try {
+      const predictionsData = await predictionsAPI.getPredictionsForMonth(month);
+      setPredictions(prev => ({
+        ...prev,
+        [month]: Array.isArray(predictionsData) ? predictionsData : (predictionsData?.data || [])
+      }));
+    } catch (err) {
+      console.error(`Error loading predictions for ${month}:`, err);
+      setPredictions(prev => ({
+        ...prev,
+        [month]: []
+      }));
+    }
+  };
+
+  const loadAverageEssentialSpending = async (month) => {
+    try {
+      // Calculate average essential spending from previous 3 months
+      const sortedMonths = [...summary]
+        .sort((a, b) => new Date(b.month + '-01') - new Date(a.month + '-01'));
+      
+      const currentMonthIndex = sortedMonths.findIndex(m => m.month === month);
+      const startIndex = currentMonthIndex >= 0 ? currentMonthIndex + 1 : 0;
+      const previousMonths = sortedMonths.slice(startIndex, startIndex + 3);
+
+      if (previousMonths.length === 0) {
+        setAverageEssentialSpending(prev => ({ ...prev, [month]: 0 }));
+        return;
+      }
+
+      const totals = previousMonths.map(m => {
+        if (!m || !m.expenseCategories) return 0;
+        return Object.entries(m.expenseCategories)
+          .filter(([cat]) => {
+            const isLoanPayment = cat.toLowerCase().includes('loan payment');
+            if (includeLoanPayments && isLoanPayment) return false;
+            if (!includeLoanPayments && isLoanPayment) return true;
+            return essentialCategories.some(
+              essentialCat => essentialCat.toLowerCase() === cat.toLowerCase()
+            );
+          })
+          .reduce((sum, [, catData]) => {
+            const amount = typeof catData === 'number' ? catData : (catData?.total || 0);
+            return sum + amount;
+          }, 0);
+      });
+
+      const average = totals.reduce((a, b) => a + b, 0) / totals.length;
+      setAverageEssentialSpending(prev => ({ ...prev, [month]: average }));
+    } catch (err) {
+      console.error(`Error loading average essential spending for ${month}:`, err);
+      setAverageEssentialSpending(prev => ({ ...prev, [month]: 0 }));
+    }
+  };
+
+  // Transform summary data for charts
+  const chartData = summary
+    .sort((a, b) => new Date(a.month + '-01') - new Date(b.month + '-01'))
+    .map((month) => {
+      // Calculate loan payment amount from expense categories
+      let monthlyLoanPayment = 0;
+      if (month.expenseCategories || month.expense_categories) {
+        const expenseCategories = month.expenseCategories || month.expense_categories || {};
+        const loanCategory = Object.keys(expenseCategories).find(cat => 
+          cat.toLowerCase().includes('loan payment') || cat.toLowerCase().includes('loan')
+        );
+        if (loanCategory) {
+          const loanData = expenseCategories[loanCategory];
+          monthlyLoanPayment = typeof loanData === 'number' ? loanData : (loanData?.total || 0);
+        }
+      }
+
+      // Calculate adjusted savings based on includeLoanPayments toggle
+      const baseSavings = month.savings || 0;
+      const adjustedSavings = includeLoanPayments ? baseSavings + monthlyLoanPayment : baseSavings;
+      
+      // Calculate adjusted savings rate
+      const income = month.income || 0;
+      const adjustedSavingsRate = income > 0 ? ((adjustedSavings / income) * 100) : 0;
+      const baseSavingsRate = month.saving_rate || month.savingRate || 0;
+
+      return {
+        month: formatMonth(month.month),
+        monthKey: month.month,
+        savings: adjustedSavings,
+        savingRate: includeLoanPayments ? adjustedSavingsRate : baseSavingsRate,
+        income: income,
+        expenses: month.expenses || 0,
+        loanPayment: monthlyLoanPayment
+      };
+    });
+
+  const handleDismissPrediction = async (prediction) => {
+    try {
+      await predictionsAPI.dismissPrediction(prediction.prediction_key, prediction.recurrence_type);
+      // Reload predictions for the selected month
+      if (selectedMonth) {
+        await loadPredictionsForMonth(selectedMonth.month);
+      }
+    } catch (err) {
+      console.error('Error dismissing prediction:', err);
+    }
+  };
 
   // Helper function to lighten a color
   const lightenColor = (color, amount) => {
-    // Handle rgb() format
     const rgbMatch = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
     if (rgbMatch) {
       const r = Math.min(255, Math.round(parseInt(rgbMatch[1]) + (255 - parseInt(rgbMatch[1])) * amount));
@@ -68,7 +234,6 @@ const ChartsPage = ({
       const b = Math.min(255, Math.round(parseInt(rgbMatch[3]) + (255 - parseInt(rgbMatch[3])) * amount));
       return `rgb(${r}, ${g}, ${b})`;
     }
-    // Handle hex format
     if (color.startsWith('#')) {
       const hex = color.slice(1);
       const r = Math.min(255, Math.round(parseInt(hex.slice(0, 2), 16) + (255 - parseInt(hex.slice(0, 2), 16)) * amount));
@@ -76,12 +241,11 @@ const ChartsPage = ({
       const b = Math.min(255, Math.round(parseInt(hex.slice(4, 6), 16) + (255 - parseInt(hex.slice(4, 6), 16)) * amount));
       return `rgb(${r}, ${g}, ${b})`;
     }
-    return color; // Return original if format not recognized
+    return color;
   };
 
   // Filter data based on time range or selected range
   const getFilteredData = () => {
-    // If there's a selected range, use that
     if (selectedRange !== null) {
       const { startIndex, endIndex } = selectedRange;
       const start = Math.min(startIndex, endIndex);
@@ -89,9 +253,8 @@ const ChartsPage = ({
       return chartData.slice(start, end);
     }
 
-    // Otherwise use time range filter
     if (timeRange === 'all') return chartData;
-    if (timeRange === 'custom') return chartData; // Custom without selection shows all
+    if (timeRange === 'custom') return chartData;
 
     const months = timeRange === '3m' ? 3 : timeRange === '6m' ? 6 : 12;
     return chartData.slice(-months);
@@ -103,58 +266,29 @@ const ChartsPage = ({
   const getDataIndexFromX = useCallback((clientX, clientY) => {
     if (!chartContainerRef.current || filteredData.length === 0) return null;
     
-    // Find the recharts-wrapper element to get accurate chart dimensions
     const chartWrapper = chartContainerRef.current.querySelector('.recharts-wrapper');
     if (!chartWrapper) return null;
     
     const wrapperRect = chartWrapper.getBoundingClientRect();
     
-    // Find axis elements to determine plotting area boundaries
     const xAxis = chartWrapper.querySelector('.recharts-cartesian-axis-x');
     const yAxis = chartWrapper.querySelector('.recharts-cartesian-axis-y');
     
     let plotAreaLeft, plotAreaRight, plotAreaTop, plotAreaBottom, plotAreaWidth;
     
     if (xAxis && yAxis) {
-      // Use axis positions if available
       const yAxisRect = yAxis.getBoundingClientRect();
       const xAxisRect = xAxis.getBoundingClientRect();
       
-      // RECHARTS LAYOUT:
-      // The yAxis group usually contains the ticks/labels to the left of the axis line.
-      // But often recharts draws the axis line itself at the right edge of this group.
-      // We'll assume the plotting area starts at the right edge of the Y-axis rect.
-      // The xAxis usually contains ticks/labels below the axis line.
-      // We'll assume the plotting area ends at the top edge of the X-axis rect.
-      // Additionally, we should add a small buffer if needed or check bounding boxes of ticks.
-
       plotAreaLeft = yAxisRect.right;
-      plotAreaRight = xAxisRect.right; // The X axis spans the full width usually
-      
-      // In recharts, the x-axis (bottom) usually has its 'top' at the bottom of the chart area
-      // BUT sometimes the X axis rect only includes the text labels, or starts slightly lower.
-      // A safer bet for 'bottom' of plot area is the top of the X-axis bounding box.
+      plotAreaRight = xAxisRect.right;
       plotAreaBottom = xAxisRect.top;
-
-      // For the top of the plot area, Y-axis usually goes all the way up. 
-      // Let's use the top of the Y-axis bounding box.
       plotAreaTop = yAxisRect.top;
-      
-      // Correction: The xAxisRect.left usually aligns with yAxisRect.right roughly.
-      // But if we drag past the right edge of the chart, we shouldn't select.
-      // Let's verify plotAreaRight. Actually, the xAxis element spans the width of the chart area usually.
-      // Let's use the xAxis width to determine the right boundary more accurately if possible.
-      // Alternatively, finding the 'recharts-surface' or chart background rect might be better?
-      // Let's stick to: Left = Y-Axis Right, Right = X-Axis Right, Top = Y-Axis Top, Bottom = X-Axis Top.
-
       plotAreaWidth = plotAreaRight - plotAreaLeft;
       
-      // Strict check: if click is on the ticks (left of plotAreaLeft) or labels (below plotAreaBottom)
-      // The bounds check below handles it:
       if (clientX < plotAreaLeft || clientX > plotAreaRight) return null;
       if (clientY < plotAreaTop || clientY > plotAreaBottom) return null;
     } else {
-      // Fallback to margin-based calculation if axes aren't found
       const marginLeft = 20;
       const marginRight = 30;
       const marginTop = 20;
@@ -165,7 +299,6 @@ const ChartsPage = ({
       plotAreaBottom = wrapperRect.bottom - marginBottom;
       plotAreaWidth = plotAreaRight - plotAreaLeft;
       
-      // Check if click is within reasonable bounds
       if (clientX < wrapperRect.left || clientX > wrapperRect.right) return null;
       if (clientY < wrapperRect.top || clientY > wrapperRect.bottom) return null;
     }
@@ -179,18 +312,15 @@ const ChartsPage = ({
 
   // Handle mouse down - start selection
   const handleMouseDown = useCallback((e) => {
-    // Only start selection if clicking in the chart area (not on buttons or controls)
     const chartElement = e.target.closest('.recharts-wrapper');
     if (!chartElement) return;
     
-    // Don't start selection if clicking on axes text specifically
     if (e.target.tagName === 'text' && (
         e.target.closest('.recharts-xAxis') || 
         e.target.closest('.recharts-yAxis') ||
         e.target.closest('.recharts-cartesian-axis-tick')
     )) return;
 
-    // Don't start selection if clicking on axes
     const isAxisClick = e.target.closest('.recharts-cartesian-axis') || 
                        e.target.closest('.recharts-xAxis') || 
                        e.target.closest('.recharts-yAxis') ||
@@ -198,124 +328,108 @@ const ChartsPage = ({
                        e.target.closest('.recharts-label');
     if (isAxisClick) return;
     
-    // Don't start selection if clicking on buttons or controls
-    if (e.target.closest('button')) return;
-    
-    // Check if click is within the plotting area (not on axes) - check both X and Y
     const index = getDataIndexFromX(e.clientX, e.clientY);
-    if (index === null) return; // Don't start selection if outside plotting area
+    if (index === null) return;
     
-    // Prevent default to avoid scrolling and text selection during drag
-    e.preventDefault();
-    
+    isDraggingRef.current = true;
     setIsSelecting(true);
-    isDraggingRef.current = true; // Mark that we're starting a drag
-    setHasMoved(false); // Reset movement tracking
-    
     setSelectionStart(index);
     setSelectionEnd(index);
+    setHasMoved(false);
+    e.preventDefault();
   }, [getDataIndexFromX]);
 
   // Handle mouse move - update selection
   const handleMouseMove = useCallback((e) => {
-    if (!isSelecting || selectionStart === null) return;
-    
-    // Prevent default to avoid scrolling during drag
-    e.preventDefault();
-    
-    // Don't update selection if hovering over axes
-    const isAxisHover = e.target.closest('.recharts-cartesian-axis') || 
-                       e.target.closest('.recharts-xAxis') || 
-                       e.target.closest('.recharts-yAxis') ||
-                       e.target.closest('.recharts-cartesian-axis-tick') ||
-                       e.target.closest('.recharts-label');
-    if (isAxisHover) return;
-    
-    // Check if mouse is within the plotting area (check both X and Y)
-    const index = getDataIndexFromX(e.clientX, e.clientY);
-    
-    if (index !== null) {
-      // Check if mouse actually moved to a different index
-      if (index !== selectionEnd) {
-        setHasMoved(true);
-      }
-      setSelectionEnd(index);
+    if (!isDraggingRef.current) {
+      const index = getDataIndexFromX(e.clientX, e.clientY);
+      setHoveredIndex(index);
+      return;
     }
-  }, [isSelecting, selectionStart, selectionEnd, getDataIndexFromX]);
+    
+    const index = getDataIndexFromX(e.clientX, e.clientY);
+    if (index === null) return;
+    
+    setSelectionEnd(index);
+    if (index !== selectionStart) {
+      setHasMoved(true);
+    }
+  }, [getDataIndexFromX, selectionStart]);
 
   // Handle mouse up - finalize selection
   const handleMouseUp = useCallback(() => {
-    if (!isSelecting) return;
+    if (!isDraggingRef.current) return;
     
+    isDraggingRef.current = false;
     setIsSelecting(false);
-    isDraggingRef.current = false; // Mark that drag is complete
     
-    // Only create selection if mouse actually moved (dragged) and indices are different
-    if (selectionStart !== null && selectionEnd !== null && hasMoved && selectionStart !== selectionEnd) {
-      // Map indices from filteredData back to chartData
-      let baseIndex = 0;
+    if (hasMoved && selectionStart !== null && selectionEnd !== null) {
+      const start = Math.min(selectionStart, selectionEnd);
+      const end = Math.max(selectionStart, selectionEnd);
       
-      if (selectedRange !== null) {
-        // If we already have a selected range, the filteredData is a slice of chartData
-        baseIndex = Math.min(selectedRange.startIndex, selectedRange.endIndex);
+      if (start !== end) {
+        setSelectedRange({ startIndex: start, endIndex: end });
+        setTimeRange('custom');
       } else {
-        // Otherwise, calculate base index from timeRange
-        if (timeRange !== 'all') {
-          const months = timeRange === '3m' ? 3 : timeRange === '6m' ? 6 : 12;
-          baseIndex = Math.max(0, chartData.length - months);
+        const monthData = filteredData[start];
+        if (monthData) {
+          const fullMonthData = summary.find(m => m.month === monthData.monthKey);
+          if (fullMonthData) {
+            setSelectedMonth(fullMonthData);
+            setTimeout(() => {
+              document.getElementById('drilldown-details')?.scrollIntoView({ 
+                behavior: 'smooth',
+                block: 'start'
+              });
+            }, 100);
+          }
         }
       }
-      
-      const startIndex = baseIndex + Math.min(selectionStart, selectionEnd);
-      const endIndex = baseIndex + Math.max(selectionStart, selectionEnd);
-      
-      setSelectedRange({ startIndex, endIndex });
-      
-      // Switch to custom time range when a selection is made
-      onChangeTimeRange('custom');
+    } else if (selectionStart !== null) {
+      const monthData = filteredData[selectionStart];
+      if (monthData) {
+        const fullMonthData = summary.find(m => m.month === monthData.monthKey);
+        if (fullMonthData) {
+          setSelectedMonth(fullMonthData);
+          setTimeout(() => {
+            document.getElementById('drilldown-details')?.scrollIntoView({ 
+              behavior: 'smooth',
+              block: 'start'
+            });
+          }, 100);
+        }
+      }
     }
     
-    // Always clear selection state on mouse up
     setSelectionStart(null);
     setSelectionEnd(null);
     setHasMoved(false);
-  }, [isSelecting, selectionStart, selectionEnd, hasMoved, selectedRange, timeRange, chartData.length, onChangeTimeRange]);
+  }, [hasMoved, selectionStart, selectionEnd, filteredData, summary]);
 
-  // Clear selection when time range changes (except when switching to custom)
+  // Attach event listeners for mouse move and up
   useEffect(() => {
-    if (timeRange !== 'custom') {
-      setSelectedRange(null);
-    }
-  }, [timeRange]);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
 
-  // Close tooltip when clicking outside
-  useEffect(() => {
-    if (!showCustomHelp) return;
-
-    const handleClickOutside = (e) => {
-      if (customButtonRef.current && !customButtonRef.current.contains(e.target)) {
-        setShowCustomHelp(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [showCustomHelp]);
+  }, [handleMouseMove, handleMouseUp]);
 
-  // Add global mouse event listeners
-  useEffect(() => {
-    if (isSelecting) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      
-      return () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-      };
+  // Handle time range change
+  const handleTimeRangeChange = (range) => {
+    setTimeRange(range);
+    setSelectedRange(null);
+    if (range !== 'custom') {
+      setShowCustomHelp(false);
     }
-  }, [isSelecting, handleMouseMove, handleMouseUp]);
+  };
+
+  // Toggle include loan payments
+  const handleToggleIncludeLoanPayments = () => {
+    setIncludeLoanPayments(prev => !prev);
+  };
 
   // Calculate averages and totals
   const totalSavings = filteredData.reduce((sum, month) => sum + month.savings, 0);
@@ -323,7 +437,37 @@ const ChartsPage = ({
   const totalSavingRate = filteredData.reduce((sum, month) => sum + month.savingRate, 0);
   const avgSavingRate = filteredData.length ? totalSavingRate / filteredData.length : 0;
 
-  const MonthDetail = MonthDetailComponent;
+  if (loading) {
+    return (
+      <div className="charts-container">
+        <div className="loading">Loading chart data...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="charts-container">
+        <div className="error-message">
+          {error}
+          <button onClick={loadSummary} className="btn-secondary" style={{ marginTop: '16px' }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartData.length === 0) {
+    return (
+      <div className="charts-container">
+        <div className="empty-state">
+          <h3>No Data Available</h3>
+          <p>Upload bank statements to see your savings statistics here.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="charts-container" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
@@ -351,7 +495,7 @@ const ChartsPage = ({
                         color: getColorForPercentage((avgSavings / SAVINGS_GOAL_CHF) * 100)
                       }}
                     >
-                      {new Intl.NumberFormat('de-CH', { style: 'currency', currency: 'CHF' }).format(avgSavings)}
+                      {formatCurrency(avgSavings, 'CHF')}
                     </span>
                     <span style={{ marginLeft: '8px', color: 'var(--color-text-light)' }}>
                       ({((avgSavings / SAVINGS_GOAL_CHF) * 100).toFixed(0)}% of goal)
@@ -360,7 +504,7 @@ const ChartsPage = ({
                   <div>
                     Total:{' '}
                     <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                      {new Intl.NumberFormat('de-CH', { style: 'currency', currency: 'CHF' }).format(totalSavings)}
+                      {formatCurrency(totalSavings, 'CHF')}
                     </span>
                   </div>
                 </>
@@ -392,50 +536,47 @@ const ChartsPage = ({
           </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <div className="time-range-selector">
-              <button
+            <button
                 className={`time-range-btn ${timeRange === '3m' ? 'active' : ''}`}
-                onClick={() => onChangeTimeRange('3m')}
-              >
-                3M
-              </button>
-              <button
+              onClick={() => handleTimeRangeChange('3m')}
+            >
+              3M
+            </button>
+            <button
                 className={`time-range-btn ${timeRange === '6m' ? 'active' : ''}`}
-                onClick={() => onChangeTimeRange('6m')}
-              >
-                6M
-              </button>
-              <button
+              onClick={() => handleTimeRangeChange('6m')}
+            >
+              6M
+            </button>
+            <button
                 className={`time-range-btn ${timeRange === '1y' ? 'active' : ''}`}
-                onClick={() => onChangeTimeRange('1y')}
-              >
-                1Y
-              </button>
-              <button
+              onClick={() => handleTimeRangeChange('1y')}
+            >
+              1Y
+            </button>
+            <button
                 className={`time-range-btn ${timeRange === 'all' ? 'active' : ''}`}
-                onClick={() => onChangeTimeRange('all')}
-              >
-                All
-              </button>
-              <div style={{ position: 'relative' }}>
-                <button
-                  ref={customButtonRef}
+              onClick={() => handleTimeRangeChange('all')}
+            >
+              All
+            </button>
+            <div style={{ position: 'relative' }}>
+              <button
+                ref={customButtonRef}
                   className={`time-range-btn ${timeRange === 'custom' || selectedRange !== null ? 'active' : ''}`}
-                  onClick={() => {
+                onClick={() => {
                     if (selectedRange === null) {
-                      // If no selection exists, show help tooltip
                       setShowCustomHelp(true);
-                      onChangeTimeRange('custom');
-                      // Auto-hide after 5 seconds
+                      handleTimeRangeChange('custom');
                       setTimeout(() => setShowCustomHelp(false), 5000);
                     } else {
-                      // If selection exists, keep it and ensure custom is selected
-                      onChangeTimeRange('custom');
+                  handleTimeRangeChange('custom');
                     }
-                  }}
+                }}
                   title={selectedRange ? 'Custom range selected' : 'Click to learn how to select a custom range'}
-                >
-                  Custom
-                </button>
+              >
+                Custom
+              </button>
                 {showCustomHelp && customButtonRef.current && (
                   <div
                     style={{
@@ -492,34 +633,34 @@ const ChartsPage = ({
                         borderBottom: '6px solid var(--color-border-primary)'
                       }}
                     />
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
+          </div>
             <div className="chart-toggle">
-              <button
+            <button
                 className={`chart-toggle-btn ${chartView === 'absolute' ? 'active' : ''}`}
-                onClick={() => onChangeChartView('absolute')}
-              >
+              onClick={() => setChartView('absolute')}
+            >
                 Absolute
-              </button>
-              <button
+            </button>
+            <button
                 className={`chart-toggle-btn ${chartView === 'relative' ? 'active' : ''}`}
-                onClick={() => onChangeChartView('relative')}
-              >
+              onClick={() => setChartView('relative')}
+            >
                 Rate
               </button>
             </div>
             <div className="loan-payment-toggle">
               <button
                 className={`chart-toggle-btn ${includeLoanPayments ? 'active' : ''}`}
-                onClick={onToggleIncludeLoanPayments}
+                onClick={handleToggleIncludeLoanPayments}
                 title="Include monthly loan payments in savings calculation"
               >
                 Include Loans
-              </button>
-            </div>
+            </button>
           </div>
+        </div>
         </div>
         <div 
           className="chart-wrapper" 
@@ -528,7 +669,7 @@ const ChartsPage = ({
           style={{ 
             position: 'relative', 
             cursor: isSelecting ? 'crosshair' : 'default',
-            userSelect: isSelecting ? 'none' : 'auto' // Prevent text selection during drag
+            userSelect: isSelecting ? 'none' : 'auto'
           }}
         >
           <ResponsiveContainer width="100%" height={400}>
@@ -550,10 +691,9 @@ const ChartsPage = ({
                 if (data && data.activePayload && data.activePayload[0]) {
                   const clickedData = data.activePayload[0].payload;
                   // Find the full month data from summary
-                  const monthData = summary.find((m) => formatMonth(m.month) === clickedData.month);
+                  const monthData = summary.find((m) => formatMonth(m.month) === clickedData.monthKey);
                   if (monthData) {
-                    onSelectMonth(monthData);
-                    // Scroll to drilldown details after a short delay to allow rendering
+                    setSelectedMonth(monthData);
                     setTimeout(() => {
                       const element = document.getElementById('drilldown-details');
                       if (element) {
@@ -564,25 +704,24 @@ const ChartsPage = ({
                 }
               }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-primary)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-secondary)" />
               <XAxis
                 dataKey="month"
-                tick={{ fill: 'var(--color-text-tertiary)', fontSize: 12 }}
+                stroke="var(--color-text-tertiary)"
                 angle={-45}
                 textAnchor="end"
-                height={80}
+                height={60}
+                style={{ fontSize: '12px' }}
               />
-              <YAxis
-                tick={{ fill: 'var(--color-text-tertiary)', fontSize: 12 }}
-                label={{
-                  value: chartView === 'absolute' ? 'Savings (CHF)' : 'Savings Rate (%)',
-                  angle: -90,
-                  position: 'insideLeft',
-                  style: { fill: 'var(--color-text-tertiary)' }
-                }}
+              <YAxis 
+                stroke="var(--color-text-tertiary)" 
+                style={{ fontSize: '12px' }}
+                tickFormatter={(value) => chartView === 'absolute' 
+                  ? `${(value / 1000).toFixed(0)}k`
+                  : `${value}%`
+                }
               />
               <Tooltip
-                cursor={{ fill: 'transparent' }}
                 contentStyle={{
                   backgroundColor: 'var(--color-bg-card)',
                   border: '1px solid var(--color-border-primary)',
@@ -591,75 +730,12 @@ const ChartsPage = ({
                   color: 'var(--color-text-primary)',
                   boxShadow: '0 4px 12px var(--color-shadow-md)'
                 }}
-                content={({ active, payload }) => {
-                  if (active && payload && payload.length) {
-                    const data = payload[0].payload;
-                    return (
-                      <div
-                        style={{
-                          backgroundColor: 'var(--color-bg-card)',
-                          border: '1px solid var(--color-border-primary)',
-                          borderRadius: '8px',
-                          padding: '12px',
-                          color: 'var(--color-text-primary)',
-                          boxShadow: '0 4px 12px var(--color-shadow-md)'
-                        }}
-                      >
-                        <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{data.month}</p>
-                        {chartView === 'absolute' ? (
-                          <>
-                            <p
-                              style={{
-                                margin: 0,
-                                color: getColorForPercentage((data.savings / SAVINGS_GOAL_CHF) * 100)
-                              }}
-                            >
-                              Savings:{' '}
-                              {new Intl.NumberFormat('de-CH', {
-                                style: 'currency',
-                                currency: 'CHF',
-                                minimumFractionDigits: 2
-                              }).format(data.savings)}
-                            </p>
-                            {includeLoanPayments && data.loanPayment > 0 && (
-                              <p style={{ margin: 0, marginTop: '2px', color: '#f59e0b', fontSize: '11px' }}>
-                                (includes{' '}
-                                {new Intl.NumberFormat('de-CH', {
-                                  style: 'currency',
-                                  currency: 'CHF',
-                                  minimumFractionDigits: 2
-                                }).format(data.loanPayment)}{' '}
-                                loan payment)
-                              </p>
-                            )}
-                            <p style={{ margin: 0, marginTop: '4px', color: 'var(--color-text-tertiary)', fontSize: '12px' }}>
-                              {((data.savings / SAVINGS_GOAL_CHF) * 100).toFixed(0)}% of goal
-                            </p>
-                          </>
-                        ) : (
-                          <>
-                            <p
-                              style={{
-                                margin: 0,
-                                color: getColorForPercentage((data.savingRate / SAVINGS_RATE_GOAL) * 100)
-                              }}
-                            >
-                              Savings Rate: {data.savingRate.toFixed(1)}%
-                            </p>
-                            {includeLoanPayments && data.loanPayment > 0 && (
-                              <p style={{ margin: 0, marginTop: '2px', color: '#f59e0b', fontSize: '11px' }}>
-                                (includes loan payments)
-                              </p>
-                            )}
-                            <p style={{ margin: 0, marginTop: '4px', color: 'var(--color-text-tertiary)', fontSize: '12px' }}>
-                              {((data.savingRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of goal
-                            </p>
-                          </>
-                        )}
-                      </div>
-                    );
+                formatter={(value, name) => {
+                  if (chartView === 'absolute') {
+                    return [formatCurrency(value, 'CHF'), 'Savings'];
+                  } else {
+                    return [`${value.toFixed(1)}%`, 'Savings Rate'];
                   }
-                  return null;
                 }}
               />
               <ReferenceLine y={0} stroke="var(--color-text-light)" strokeDasharray="3 3" />
@@ -670,7 +746,7 @@ const ChartsPage = ({
                   strokeDasharray="5 5"
                   strokeWidth={2}
                   label={{
-                    value: `Goal: ${new Intl.NumberFormat('de-CH', { style: 'currency', currency: 'CHF' }).format(SAVINGS_GOAL_CHF)}`,
+                    value: `Goal: ${formatCurrency(SAVINGS_GOAL_CHF, 'CHF')}`,
                     position: 'insideTopLeft',
                     fill: '#f59e0b',
                     fontSize: 12,
@@ -685,35 +761,29 @@ const ChartsPage = ({
                     const percentage = (entry.savings / SAVINGS_GOAL_CHF) * 100;
                     const baseColor = getColorForPercentage(percentage);
                     
-                    // Check if this bar is within the selection range
                     const isSelected = isSelecting && selectionStart !== null && selectionEnd !== null && 
                                       index >= Math.min(selectionStart, selectionEnd) && 
                                       index <= Math.max(selectionStart, selectionEnd);
                     
-                    // Check if this bar is being hovered
                     const isHovered = index === hoveredIndex;
                     
-                    // Make color lighter and more vibrant when selected or hovered
                     const fillColor = (isSelected || isHovered) ? lightenColor(baseColor, 0.3) : baseColor;
                     
                     return <Cell key={`cell-${index}`} fill={fillColor} />;
                   })}
                 </Bar>
               ) : (
-                <Bar dataKey="savingRate" radius={[8, 8, 0, 0]} name="Savings Rate (%)">
+                <Bar dataKey="savingRate" radius={[8, 8, 0, 0]} name="Savings Rate">
                   {filteredData.map((entry, index) => {
                     const percentage = (entry.savingRate / SAVINGS_RATE_GOAL) * 100;
                     const baseColor = getColorForPercentage(percentage);
                     
-                    // Check if this bar is within the selection range
                     const isSelected = isSelecting && selectionStart !== null && selectionEnd !== null && 
                                       index >= Math.min(selectionStart, selectionEnd) && 
                                       index <= Math.max(selectionStart, selectionEnd);
                     
-                    // Check if this bar is being hovered
                     const isHovered = index === hoveredIndex;
                     
-                    // Make color lighter and more vibrant when selected or hovered
                     const fillColor = (isSelected || isHovered) ? lightenColor(baseColor, 0.3) : baseColor;
                     
                     return <Cell key={`cell-${index}`} fill={fillColor} />;
@@ -723,41 +793,59 @@ const ChartsPage = ({
             </BarChart>
           </ResponsiveContainer>
         </div>
+        <div className="chart-hint" style={{ textAlign: 'center', marginTop: '8px', color: 'var(--color-text-tertiary)', fontSize: '12px' }}>
+          💡 Click on a bar to see details, or drag to select a custom range
+        </div>
       </div>
+
+      {/* Category View Toggle - Only show when month is selected */}
+      {selectedMonth && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '24px', marginBottom: '16px' }}>
+          <div className="chart-toggle">
+            <button
+              className={`chart-toggle-btn ${showEssentialSplit ? '' : 'active'}`}
+              onClick={() => setShowEssentialSplit(false)}
+            >
+              All Categories
+            </button>
+            <button
+              className={`chart-toggle-btn ${showEssentialSplit ? 'active' : ''}`}
+              onClick={() => setShowEssentialSplit(true)}
+            >
+              Essentials Split
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Drilldown Details */}
       {selectedMonth && (
         <div id="drilldown-details" style={{ position: 'relative', scrollMarginTop: '100px' }}>
           <button
             className="drilldown-close"
-            onClick={() => onSelectMonth(null)}
+            onClick={() => setSelectedMonth(null)}
             title="Close details"
           >
             ✕
           </button>
-          <MonthDetail
+          <div className="current-month-container">
+            <MonthSummaryCard
             month={selectedMonth}
-            expandedCategories={expandedCategories}
-            toggleCategory={toggleCategory}
-            categorySorts={categorySorts}
-            toggleSort={toggleSort}
-            getSortedTransactions={getSortedTransactions}
-            formatCurrency={formatCurrency}
-            formatMonth={formatMonth}
-            formatDate={formatDate}
-            handleCategoryEdit={handleCategoryEdit}
-            pendingCategoryChange={pendingCategoryChange}
+              isCurrentMonth={false}
+              defaultCurrency={defaultCurrency}
             showEssentialSplit={showEssentialSplit}
             essentialCategories={essentialCategories}
-            categoryEditModal={categoryEditModal}
+              expandedCategories={expandedCategories}
+              setExpandedCategories={setExpandedCategories}
+              expandedSections={expandedSections}
+              setExpandedSections={setExpandedSections}
+              allMonthsData={summary}
             includeLoanPayments={includeLoanPayments}
-            handlePredictionClick={handlePredictionClick}
-            handleDismissPrediction={handleDismissPrediction}
-            setShowEssentialCategoriesModal={setShowEssentialCategoriesModal}
-            defaultCurrency={defaultCurrency}
-            getTransactionKey={getTransactionKey}
-            allMonthsData={summary}
-          />
+              predictions={predictions[selectedMonth.month] || []}
+              averageEssentialSpending={averageEssentialSpending[selectedMonth.month] || 0}
+              onDismissPrediction={handleDismissPrediction}
+            />
+          </div>
         </div>
       )}
     </div>

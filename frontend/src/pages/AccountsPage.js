@@ -1,11 +1,140 @@
-import React from 'react';
+/**
+ * Accounts Page - Fully Restored
+ * 
+ * Displays bank account balances with net worth breakdown.
+ * Features:
+ * - Net worth overview
+ * - Categorized accounts (cash, broker, loans)
+ * - Separate totals for each category
+ * - Transaction history per account
+ */
+
+import React, { useState, useEffect } from 'react';
+import { accountsAPI } from '../api';
+import { formatCurrency, formatDate } from '../utils';
 import { EUR_TO_CHF_RATE } from '../utils/finance';
 
-const AccountsPage = ({ accounts, formatCurrency, formatDate }) => {
-  if (!accounts) {
+const AccountsPage = () => {
+  const [accounts, setAccounts] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    loadAccounts();
+  }, []);
+
+  const loadAccounts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await accountsAPI.getAccounts();
+      
+      // Handle different response formats
+      let accountsData = null;
+      if (response && response.accounts) {
+        // Direct format: { accounts: [...], totals: {...} }
+        accountsData = response;
+      } else if (response && response.data && response.data.accounts) {
+        // Wrapped format: { data: { accounts: [...], totals: {...} } }
+        accountsData = response.data;
+      } else if (Array.isArray(response)) {
+        // Array format: wrap it
+        accountsData = { accounts: response, totals: {} };
+      } else {
+        accountsData = response;
+      }
+      
+      console.log('Accounts data loaded:', accountsData);
+      console.log('Accounts data structure:', {
+        hasAccounts: !!accountsData?.accounts,
+        accountsLength: accountsData?.accounts?.length,
+        accountsType: Array.isArray(accountsData?.accounts),
+        fullData: accountsData
+      });
+      setAccounts(accountsData);
+    } catch (err) {
+      console.error('Error loading accounts:', err);
+      setError(err.message || 'Failed to load account data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
     return (
       <div className="accounts-container">
         <div className="loading">Loading account data...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="accounts-container">
+        <div className="error-message">
+          {error}
+          <button onClick={loadAccounts} className="btn-secondary" style={{ marginTop: '16px' }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Debug logging
+  console.log('Rendering AccountsPage:', {
+    accounts,
+    hasAccounts: !!accounts?.accounts,
+    accountsLength: accounts?.accounts?.length,
+    accountsIsArray: Array.isArray(accounts?.accounts)
+  });
+
+  if (!accounts) {
+    return (
+      <div className="accounts-container">
+        <div className="empty-state">
+          <h3>No Account Data</h3>
+          <p>Accounts data is null or undefined.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!accounts.accounts) {
+    return (
+      <div className="accounts-container">
+        <div className="empty-state">
+          <h3>No Account Data</h3>
+          <p>Accounts array is missing. Data structure: {JSON.stringify(Object.keys(accounts || {}))}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!Array.isArray(accounts.accounts)) {
+    return (
+      <div className="accounts-container">
+        <div className="empty-state">
+          <h3>No Account Data</h3>
+          <p>Accounts data is not in the expected format.</p>
+          <p style={{ fontSize: '12px', marginTop: '8px', color: 'var(--color-text-tertiary)' }}>
+            Expected array, got: {typeof accounts.accounts}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (accounts.accounts.length === 0) {
+    return (
+      <div className="accounts-container">
+        <div className="empty-state">
+          <h3>No Account Data</h3>
+          <p>Upload bank statements to see your account balances here.</p>
+          <p style={{ fontSize: '12px', marginTop: '8px', color: 'var(--color-text-tertiary)' }}>
+            No accounts found in database. Make sure you've uploaded bank statements.
+          </p>
+        </div>
       </div>
     );
   }
@@ -73,7 +202,7 @@ const AccountsPage = ({ accounts, formatCurrency, formatDate }) => {
               <div className="total-amount positive" style={{ fontSize: '28px', fontWeight: '700' }}>
                 {formatCurrency(cashTotalInChf, 'CHF')}
               </div>
-              <div style={{ fontSize: '13px', marginTop: '8px', color: '#666' }}>
+              <div style={{ fontSize: '13px', marginTop: '8px', color: 'var(--color-text-tertiary)' }}>
                 {cashAccounts.length} account{cashAccounts.length > 1 ? 's' : ''}
               </div>
             </div>
@@ -85,7 +214,7 @@ const AccountsPage = ({ accounts, formatCurrency, formatDate }) => {
               <div className="total-amount positive" style={{ fontSize: '28px', fontWeight: '700' }}>
                 {formatCurrency(brokerTotalInChf, 'CHF')}
               </div>
-              <div style={{ fontSize: '13px', marginTop: '8px', color: '#666' }}>
+              <div style={{ fontSize: '13px', marginTop: '8px', color: 'var(--color-text-tertiary)' }}>
                 {brokerAccounts.length} account{brokerAccounts.length > 1 ? 's' : ''}
               </div>
             </div>
@@ -97,7 +226,7 @@ const AccountsPage = ({ accounts, formatCurrency, formatDate }) => {
               <div className="total-amount negative" style={{ fontSize: '28px', fontWeight: '700' }}>
                 {formatCurrency(loanTotalInChf, 'CHF')}
               </div>
-              <div style={{ fontSize: '13px', marginTop: '8px', color: '#666' }}>
+              <div style={{ fontSize: '13px', marginTop: '8px', color: 'var(--color-text-tertiary)' }}>
                 {loanAccounts.length} loan{loanAccounts.length > 1 ? 's' : ''}
               </div>
             </div>

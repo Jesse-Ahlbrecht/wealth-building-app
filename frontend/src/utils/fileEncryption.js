@@ -1,17 +1,16 @@
 /**
- * Client-Side File Encryption Utilities
+ * File Encryption Utilities
  * 
- * NOTE: This is a stub - full implementation exists in fileUpload.js
- * TODO: Extract and consolidate encryption logic
+ * NOTE: Client-side encryption has been removed.
+ * Files are now uploaded as raw files and encrypted server-side.
  */
 
+// These functions are kept for backward compatibility but are no longer used
 export const encryptFile = async (file, sessionToken, tenantId) => {
-  // TODO: Extract from fileUpload.js
-  throw new Error('Use createFileUpload from fileUpload.js for now');
+  throw new Error('Client-side encryption has been removed. Upload files directly.');
 };
 
 export const decryptFile = async (encryptedData, sessionToken, metadata) => {
-  // TODO: Implement if needed
-  throw new Error('Not implemented yet');
+  throw new Error('Client-side decryption has been removed.');
 };
 

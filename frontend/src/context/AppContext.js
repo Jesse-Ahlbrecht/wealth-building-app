@@ -13,6 +13,16 @@ export const AppProvider = ({ children }) => {
   const [monthlyData, setMonthlyData] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [defaultCurrency, setDefaultCurrency] = useState(() => {
+    return localStorage.getItem('defaultCurrency') || 'CHF';
+  });
+  const [documentsProcessing, setDocumentsProcessing] = useState(false);
+  const [documentsProcessingCount, setDocumentsProcessingCount] = useState(0);
+
+  const handleCurrencyChange = (currency) => {
+    setDefaultCurrency(currency);
+    localStorage.setItem('defaultCurrency', currency);
+  };
 
   const value = {
     activeTab,
@@ -23,6 +33,12 @@ export const AppProvider = ({ children }) => {
     setAccounts,
     loading,
     setLoading,
+    defaultCurrency,
+    setDefaultCurrency: handleCurrencyChange,
+    documentsProcessing,
+    setDocumentsProcessing,
+    documentsProcessingCount,
+    setDocumentsProcessingCount,
   };
 
   return (

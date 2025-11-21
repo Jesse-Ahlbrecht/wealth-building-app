@@ -80,7 +80,16 @@ def download_statement(file_id: str):
 @require_auth
 def wipe_data():
     """Wipe all tenant data"""
-    return document_service.wipe_tenant_data()
+    print(f"🔍 Wipe data endpoint called")
+    try:
+        result = document_service.wipe_tenant_data()
+        print(f"✅ Wipe data successful: {result}")
+        return result
+    except Exception as e:
+        print(f"❌ Error in wipe_data route: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 @documents_bp.route('/essential-categories', methods=['GET'])

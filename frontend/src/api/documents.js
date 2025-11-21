@@ -48,7 +48,35 @@ export const documentsAPI = {
   },
 
   async wipeData(keepCategories) {
-    return apiClient.post('/api/wipe-data', { keep_categories: keepCategories });
+    return apiClient.post('/api/wipe-data', { keep_custom_categories: keepCategories });
+  },
+
+  async getUploadProgress(documentId) {
+    const sessionToken = typeof window !== 'undefined' ? sessionStorage.getItem('sessionToken') : null;
+    const response = await fetch(`${apiClient.baseURL}/api/upload-progress/${documentId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${sessionToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get progress: ${response.statusText}`);
+    }
+    
+    const responseData = await response.json();
+    // Extract data from signed response (wrapped by auth middleware)
+    const data = responseData.data !== undefined ? responseData.data : responseData;
+    
+    // Ensure we have valid progress data
+    return {
+      status: data.status || 'processing',
+      progress: data.progress !== undefined ? data.progress : 0,
+      message: data.message || 'Processing...',
+      processed: data.processed !== undefined && data.processed !== null ? data.processed : undefined,
+      total: data.total !== undefined && data.total !== null ? data.total : undefined
+    };
   }
 };
 

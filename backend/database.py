@@ -225,38 +225,48 @@ class WealthDatabase:
             print(f"Duplicate found across files: {transaction_data.get('recipient', 'Unknown')} on {transaction_data.get('date')} - skipping")
             return None  # Return None to indicate it was skipped
 
-        with self.db.get_cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO transactions (
-                    tenant_id, account_id, transaction_date, amount, currency,
-                    transaction_type, encrypted_description, encrypted_recipient,
-                    encrypted_reference, category, subcategory, tags,
-                    transaction_hash, source_document_id, key_version
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s,
-                    encrypt_tenant_data(%s, %s), encrypt_tenant_data(%s, %s), encrypt_tenant_data(%s, %s),
-                    %s, %s, %s, %s, %s, 'v1'
-                )
-                RETURNING id, transaction_date, amount, currency, transaction_type,
-                         category, subcategory, tags, transaction_hash, created_at
-            """, (
-                tenant_db_id, account_id,
-                transaction_data['date'], transaction_data['amount'], transaction_data.get('currency', 'EUR'),
-                transaction_data['type'],
-                transaction_data.get('description'), tenant_db_id,
-                transaction_data.get('recipient'), tenant_db_id,
-                transaction_data.get('reference', ''), tenant_db_id,
-                transaction_data.get('category'), transaction_data.get('subcategory'),
-                transaction_data.get('tags', []), transaction_hash, source_document_id
-            ))
+        try:
+            with self.db.get_cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO transactions (
+                        tenant_id, account_id, transaction_date, amount, currency,
+                        transaction_type, encrypted_description, encrypted_recipient,
+                        encrypted_reference, category, subcategory, tags,
+                        transaction_hash, source_document_id, key_version
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s,
+                        encrypt_tenant_data(%s, %s), encrypt_tenant_data(%s, %s), encrypt_tenant_data(%s, %s),
+                        %s, %s, %s, %s, %s, 'v1'
+                    )
+                    RETURNING id, transaction_date, amount, currency, transaction_type,
+                             category, subcategory, tags, transaction_hash, created_at
+                """, (
+                    tenant_db_id, account_id,
+                    transaction_data['date'], transaction_data['amount'], transaction_data.get('currency', 'EUR'),
+                    transaction_data['type'],
+                    transaction_data.get('description'), tenant_db_id,
+                    transaction_data.get('recipient'), tenant_db_id,
+                    transaction_data.get('reference', ''), tenant_db_id,
+                    transaction_data.get('category'), transaction_data.get('subcategory'),
+                    transaction_data.get('tags', []), transaction_hash, source_document_id
+                ))
 
-            result = cursor.fetchone()
-            return {
-                'id': result[0], 'transaction_date': result[1], 'amount': result[2],
-                'currency': result[3], 'transaction_type': result[4], 'category': result[5],
-                'subcategory': result[6], 'tags': result[7], 'transaction_hash': result[8],
-                'created_at': result[9]
-            }
+                result = cursor.fetchone()
+                return {
+                    'id': result[0], 'transaction_date': result[1], 'amount': result[2],
+                    'currency': result[3], 'transaction_type': result[4], 'category': result[5],
+                    'subcategory': result[6], 'tags': result[7], 'transaction_hash': result[8],
+                    'created_at': result[9]
+                }
+        except Exception as e:
+            # Handle duplicate key violations (race condition or missed duplicate check)
+            error_str = str(e)
+            if 'duplicate key' in error_str.lower() or '23505' in error_str or 'failed transaction block' in error_str.lower():
+                # Duplicate transaction - return None to indicate it was skipped
+                print(f"Duplicate transaction (race condition): {transaction_data.get('recipient', 'Unknown')} on {transaction_data.get('date')} - skipping")
+                return None
+            # Re-raise other errors
+            raise
 
     def _calculate_transaction_hash(self, account_id: int, transaction_data: Dict[str, Any]) -> str:
         """Calculate transaction hash for duplicate detection"""
@@ -420,6 +430,139 @@ class WealthDatabase:
                 'balance': result[3], 'currency': result[4], 'institution': result[5],
                 'created_at': result[6]
             }
+
+    def create_loan(self, tenant_id: str, loan_data: Dict[str, Any], source_document_id: int = None) -> Dict[str, Any]:
+        """Create or update a loan record"""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            # Encrypt sensitive data
+            encrypted_account_number = None
+            encrypted_lender = None
+
+            if loan_data.get('account_number'):
+                cursor.execute("SELECT encrypt_tenant_data(%s, %s)", [loan_data['account_number'], tenant_db_id])
+                encrypted_account_number = cursor.fetchone()[0]
+
+            if loan_data.get('lender'):
+                cursor.execute("SELECT encrypt_tenant_data(%s, %s)", [loan_data['lender'], tenant_db_id])
+                encrypted_lender = cursor.fetchone()[0]
+            elif loan_data.get('program'):
+                # Use program as lender if lender not provided
+                cursor.execute("SELECT encrypt_tenant_data(%s, %s)", [loan_data['program'], tenant_db_id])
+                encrypted_lender = cursor.fetchone()[0]
+
+            # Check if loan with same account number already exists
+            account_number = loan_data.get('account_number', '')
+            if account_number:
+                cursor.execute("""
+                    SELECT id FROM loans 
+                    WHERE tenant_id = %s AND active = TRUE
+                    AND decrypt_tenant_data(encrypted_account_number, %s) = %s
+                """, [tenant_db_id, tenant_db_id, account_number])
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Update existing loan
+                    loan_id = existing[0]
+                    cursor.execute("""
+                        UPDATE loans SET
+                            current_balance = %s,
+                            interest_rate = %s,
+                            monthly_payment = %s,
+                            updated_at = CURRENT_TIMESTAMP,
+                            key_version = 'v1'
+                        WHERE id = %s
+                    """, [
+                        loan_data.get('current_balance', 0),
+                        loan_data.get('interest_rate', 0),
+                        loan_data.get('monthly_payment', 0),
+                        loan_id
+                    ])
+                    cursor.execute("""
+                        SELECT id, loan_name, current_balance, interest_rate, monthly_payment,
+                               currency, loan_type, origination_date, created_at, updated_at
+                        FROM loans WHERE id = %s
+                    """, [loan_id])
+                    result = cursor.fetchone()
+                    return {
+                        'id': result[0], 'loan_name': result[1], 'current_balance': result[2],
+                        'interest_rate': result[3], 'monthly_payment': result[4],
+                        'currency': result[5], 'loan_type': result[6],
+                        'origination_date': result[7], 'created_at': result[8], 'updated_at': result[9]
+                    }
+
+            # Create new loan
+            loan_name = loan_data.get('loan_name') or loan_data.get('program') or loan_data.get('account', 'Loan')
+            contract_date = loan_data.get('contract_date')
+            if isinstance(contract_date, str):
+                try:
+                    from datetime import datetime
+                    contract_date = datetime.fromisoformat(contract_date.replace('Z', '+00:00')).date()
+                except:
+                    contract_date = None
+            
+            cursor.execute("""
+                INSERT INTO loans (
+                    tenant_id, loan_name, encrypted_account_number, encrypted_lender,
+                    principal_amount, current_balance, interest_rate, monthly_payment,
+                    currency, loan_type, origination_date, key_version
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'v1')
+                RETURNING id, loan_name, current_balance, interest_rate, monthly_payment,
+                          currency, loan_type, origination_date, created_at, updated_at
+            """, [
+                tenant_db_id, loan_name, encrypted_account_number, encrypted_lender,
+                loan_data.get('current_balance', 0),  # Use current_balance as principal if principal not provided
+                loan_data.get('current_balance', 0),
+                loan_data.get('interest_rate', 0),
+                loan_data.get('monthly_payment', 0),
+                loan_data.get('currency', 'EUR'),
+                loan_data.get('loan_type') or loan_data.get('type', 'student'),
+                contract_date
+            ])
+
+            result = cursor.fetchone()
+            return {
+                'id': result[0], 'loan_name': result[1], 'current_balance': result[2],
+                'interest_rate': result[3], 'monthly_payment': result[4],
+                'currency': result[5], 'loan_type': result[6],
+                'origination_date': result[7], 'created_at': result[8], 'updated_at': result[9]
+            }
+
+    def get_loans(self, tenant_id: str) -> List[Dict[str, Any]]:
+        """Get all active loans for a tenant"""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT id, loan_name,
+                       decrypt_tenant_data(encrypted_account_number, %s) as account_number,
+                       decrypt_tenant_data(encrypted_lender, %s) as lender,
+                       principal_amount, current_balance, interest_rate, monthly_payment,
+                       currency, loan_type, origination_date, created_at, updated_at
+                FROM loans
+                WHERE tenant_id = %s AND active = TRUE
+                ORDER BY loan_name
+            """, [tenant_db_id, tenant_db_id, tenant_db_id])
+
+            loans = []
+            for row in cursor.fetchall():
+                loans.append({
+                    'id': row[0],
+                    'loan_name': row[1],
+                    'account_number': row[2] or '',
+                    'lender': row[3] or '',
+                    'principal_amount': float(row[4]) if row[4] else 0,
+                    'current_balance': float(row[5]) if row[5] else 0,
+                    'interest_rate': float(row[6]) if row[6] else 0,
+                    'monthly_payment': float(row[7]) if row[7] else 0,
+                    'currency': row[8] or 'EUR',
+                    'loan_type': row[9] or 'student',
+                    'origination_date': row[10].isoformat() if row[10] else None,
+                    'created_at': row[11].isoformat() if row[11] else None,
+                    'updated_at': row[12].isoformat() if row[12] else None
+                })
+            return loans
 
     def get_categories(self, tenant_id: str) -> Dict[str, List[Dict[str, Any]]]:
         """Get all categories for a tenant"""

@@ -7,6 +7,7 @@ Supports monthly, quarterly, and yearly recurrence patterns.
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+from datetime import date as date_class
 from typing import List, Dict, Any, Set, Tuple
 import hashlib
 import statistics
@@ -144,7 +145,7 @@ class RecurringPatternDetector:
                 
                 # Use same day-of-month, or last day if it doesn't exist
                 try:
-                    expected_date = datetime(expected_year, expected_month, last_date.day)
+                    expected_date = date_class(expected_year, expected_month, last_date.day)
                 except ValueError:
                     # Day doesn't exist in this month (e.g., Jan 31 -> Feb 31)
                     # Use last day of the month
@@ -154,7 +155,7 @@ class RecurringPatternDetector:
                     else:
                         next_month = expected_month + 1
                         next_year = expected_year
-                    expected_date = datetime(next_year, next_month, 1) - timedelta(days=1)
+                    expected_date = (datetime(next_year, next_month, 1) - timedelta(days=1)).date()
                 
                 # Check if current transaction is within window of expected date
                 days_diff = abs((date - expected_date).days)
@@ -379,6 +380,9 @@ class RecurringPatternDetector:
                 last_date = pattern['last_date']
                 if isinstance(last_date, str):
                     last_date = datetime.fromisoformat(last_date)
+                elif isinstance(last_date, date_class):
+                    # Convert date to datetime for comparison
+                    last_date = datetime.combine(last_date, datetime.min.time())
                 
                 # Calculate expected next payment date (one month after last payment)
                 if last_date.month == 12:
@@ -417,6 +421,9 @@ class RecurringPatternDetector:
                 last_date = pattern['last_date']
                 if isinstance(last_date, str):
                     last_date = datetime.fromisoformat(last_date)
+                elif isinstance(last_date, date_class):
+                    # Convert date to datetime for comparison
+                    last_date = datetime.combine(last_date, datetime.min.time())
                 
                 # Calculate expected next payment date (3 months after last payment)
                 expected_month = last_date.month + 3
@@ -456,6 +463,9 @@ class RecurringPatternDetector:
                 last_date = pattern['last_date']
                 if isinstance(last_date, str):
                     last_date = datetime.fromisoformat(last_date)
+                elif isinstance(last_date, date_class):
+                    # Convert date to datetime for comparison
+                    last_date = datetime.combine(last_date, datetime.min.time())
                 
                 # Calculate expected next payment date (1 year after last payment)
                 expected_year = last_date.year + 1

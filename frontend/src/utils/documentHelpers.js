@@ -8,7 +8,7 @@ export const normalizeTypeKey = (value) =>
 export const normalizeDocumentRecord = (doc) => {
   if (!doc) return doc;
   
-  let metadata = doc.documentMetadata ?? doc.metadata ?? doc.encryption_metadata;
+  let metadata = doc.documentMetadata ?? doc.metadata ?? {};
   if (typeof metadata === 'string') {
     try {
       metadata = JSON.parse(metadata);
@@ -33,8 +33,7 @@ export const normalizeDocumentRecord = (doc) => {
     documentType,
     documentMetadata: metadata,
     metadata,
-    fileInfo,
-    clientMetadata: metadata.client_encryption || doc.clientMetadata
+    fileInfo
   };
 };
 

@@ -42,18 +42,40 @@ def get_broker():
                         print(f"⚠️ Broker document {doc.get('id')} not found in database")
                         continue
                     
-                    encryption_metadata = full_doc.get('encryption_metadata') or {}
-                    if isinstance(encryption_metadata, str):
-                        try:
-                            encryption_metadata = json.loads(encryption_metadata)
-                        except json.JSONDecodeError as e:
-                            print(f"⚠️ Invalid encryption metadata for broker document {doc.get('id')}: {e}")
-                            continue
+                    # Get encryption metadata - check both encryption_metadata and metadata fields
+                    # PostgreSQL JSONB might return as dict or string depending on driver
+                    encryption_metadata_raw = full_doc.get('encryption_metadata') or full_doc.get('metadata')
+                    encryption_metadata = {}
                     
-                    nonce_b64 = encryption_metadata.get('server_encryption', {}).get('nonce', '')
-                    if not nonce_b64:
-                        print(f"⚠️ Missing nonce in encryption metadata for broker document {doc.get('id')}")
+                    if encryption_metadata_raw is None:
+                        print(f"⚠️ No encryption metadata found for broker document {doc.get('id')}")
                         continue
+                    elif isinstance(encryption_metadata_raw, dict):
+                        encryption_metadata = encryption_metadata_raw
+                    elif isinstance(encryption_metadata_raw, str):
+                        try:
+                            encryption_metadata = json.loads(encryption_metadata_raw)
+                        except json.JSONDecodeError as e:
+                            print(f"⚠️ Invalid encryption metadata JSON for broker document {doc.get('id')}: {e}")
+                            continue
+                    else:
+                        print(f"⚠️ Unexpected encryption metadata type for broker document {doc.get('id')}: {type(encryption_metadata_raw)}")
+                        continue
+                    
+                    # Get server encryption info
+                    server_encryption = encryption_metadata.get('server_encryption', {})
+                    nonce_b64 = server_encryption.get('nonce')
+                    key_version = server_encryption.get('key_version')
+                    
+                    if not nonce_b64 or not key_version:
+                        print(f"⚠️ Missing encryption information for broker document {doc.get('id')}: nonce={bool(nonce_b64)}, key_version={bool(key_version)}")
+                        print(f"   Encryption metadata keys: {list(encryption_metadata.keys())}")
+                        print(f"   Server encryption keys: {list(server_encryption.keys())}")
+                        continue
+                    
+                    # Normalize key_version - "default" should be treated as None (use latest active key)
+                    # The encryption service will resolve None to the active key version
+                    normalized_key_version = None if key_version == 'default' else key_version
                     
                     try:
                         nonce = base64.b64decode(nonce_b64)
@@ -61,46 +83,86 @@ def get_broker():
                         print(f"⚠️ Invalid nonce format for broker document {doc.get('id')}: {e}")
                         continue
                     
-                    key_version = encryption_metadata.get('server_encryption', {}).get('key_version', 'none')
-                    if key_version == 'none':
-                        print(f"No server encryption found for broker document {doc.get('id')}, skipping")
-                        continue
+                    # Reconstruct the original metadata structure used during encryption
+                    # The associated_data was created BEFORE nonce/key_version were added
+                    # Also, checksum is added to file_info AFTER encryption in store_encrypted_file
+                    # So we need to create a copy without those fields for associated_data
+                    original_metadata = encryption_metadata.copy()
                     
-                    # Decrypt server layer
-                    associated_data = json.dumps(encryption_metadata, sort_keys=True).encode()
-                    server_encrypted = EncryptedData(
-                        ciphertext=full_doc['encrypted_data'],
-                        nonce=nonce,
-                        key_version=key_version,
-                        algorithm='AES-256-GCM',
-                        encrypted_at=encryption_metadata.get('server_encryption', {}).get('encrypted_at', '')
-                    )
+                    # Remove fields from server_encryption that were added after encryption
+                    if 'server_encryption' in original_metadata:
+                        server_encryption_copy = original_metadata['server_encryption'].copy()
+                        # Remove fields that were added after encryption
+                        server_encryption_copy.pop('nonce', None)
+                        server_encryption_copy.pop('key_version', None)
+                        original_metadata['server_encryption'] = server_encryption_copy
                     
-                    client_ciphertext = encryption_service.decrypt_data(server_encrypted, tenant_id, associated_data)
+                    # Remove checksum from file_info (added after encryption in store_encrypted_file)
+                    if 'file_info' in original_metadata:
+                        file_info_copy = original_metadata['file_info'].copy()
+                        file_info_copy.pop('checksum', None)
+                        original_metadata['file_info'] = file_info_copy
                     
-                    # Decrypt client layer
-                    client_nonce_b64 = encryption_metadata.get('client_encryption', {}).get('nonce', '')
-                    if not client_nonce_b64:
-                        print(f"⚠️ Missing client nonce for broker document {doc.get('id')}")
-                        continue
+                    # Decrypt server layer - files are only encrypted server-side now
+                    # Try multiple approaches to handle different encryption scenarios
+                    decrypted_data = None
                     
-                    client_nonce = base64.b64decode(client_nonce_b64)
-                    client_algorithm = encryption_metadata.get('client_encryption', {}).get('algorithm', 'AES-GCM')
-                    client_key_b64 = encryption_metadata.get('client_encryption', {}).get('key', '')
+                    # Also create a version of full metadata without checksum (for fallback attempts)
+                    full_metadata_no_checksum = encryption_metadata.copy()
+                    if 'file_info' in full_metadata_no_checksum:
+                        file_info_no_checksum = full_metadata_no_checksum['file_info'].copy()
+                        file_info_no_checksum.pop('checksum', None)
+                        full_metadata_no_checksum['file_info'] = file_info_no_checksum
                     
-                    if not client_key_b64:
-                        print(f"⚠️ Missing client key for broker document {doc.get('id')}")
-                        continue
+                    decryption_attempts = [
+                        # Method 1: Original metadata without nonce/key_version/checksum (correct way) with normalized key_version
+                        ('original_metadata_normalized', lambda: json.dumps(original_metadata, sort_keys=True).encode(), normalized_key_version),
+                        # Method 2: Original metadata with stored key_version
+                        ('original_metadata_stored', lambda: json.dumps(original_metadata, sort_keys=True).encode(), key_version),
+                        # Method 3: Full metadata without checksum (in case encryption was done after adding nonce/key_version)
+                        ('full_metadata_no_checksum', lambda: json.dumps(full_metadata_no_checksum, sort_keys=True).encode(), normalized_key_version),
+                        # Method 4: Full metadata with checksum (unlikely but worth trying)
+                        ('full_metadata', lambda: json.dumps(encryption_metadata, sort_keys=True).encode(), normalized_key_version),
+                        # Method 5: Try with None key_version (use latest active key)
+                        ('none_key_version', lambda: json.dumps(original_metadata, sort_keys=True).encode(), None),
+                    ]
                     
-                    client_key = base64.b64decode(client_key_b64)
+                    for method_name, get_associated_data, try_key_version in decryption_attempts:
+                        try:
+                            server_encrypted = EncryptedData(
+                                ciphertext=full_doc['encrypted_data'],
+                                nonce=nonce,
+                                key_version=try_key_version,
+                                algorithm='AES-256-GCM',
+                                encrypted_at=server_encryption.get('encrypted_at', '')
+                            )
+                            
+                            associated_data_attempt = get_associated_data()
+                            decrypted_data = encryption_service.decrypt_data(server_encrypted, tenant_id, associated_data_attempt)
+                            print(f"✅ Decryption succeeded for broker document {doc.get('id')} using method: {method_name}")
+                            break
+                        except Exception as attempt_error:
+                            if method_name == decryption_attempts[-1][0]:  # Last attempt
+                                print(f"❌ All decryption attempts failed for broker document {doc.get('id')}")
+                                print(f"   Document ID: {doc.get('id')}")
+                                print(f"   Stored key version: {key_version}")
+                                print(f"   Normalized key version: {normalized_key_version}")
+                                print(f"   Nonce length: {len(nonce)}")
+                                print(f"   Ciphertext length: {len(full_doc.get('encrypted_data', b''))}")
+                                # Print metadata structure for debugging
+                                debug_metadata = {
+                                    'document_type': encryption_metadata.get('document_type'),
+                                    'server_encryption_keys': list(encryption_metadata.get('server_encryption', {}).keys()),
+                                    'file_info_keys': list(encryption_metadata.get('file_info', {}).keys()),
+                                    'original_metadata_keys': list(original_metadata.keys()),
+                                    'original_file_info_keys': list(original_metadata.get('file_info', {}).keys()),
+                                }
+                                print(f"   Metadata structure: {json.dumps(debug_metadata, indent=2)}")
+                                print(f"   Original metadata (for associated_data): {json.dumps(original_metadata, indent=2, default=str)}")
+                                # Skip this document but continue processing others
+                                continue
                     
-                    # Decrypt client layer
-                    if client_algorithm == 'AES-GCM':
-                        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-                        aead = AESGCM(client_key)
-                        decrypted_data = aead.decrypt(client_nonce, client_ciphertext, None)
-                    else:
-                        print(f"⚠️ Unsupported client encryption algorithm: {client_algorithm}")
+                    if decrypted_data is None:
                         continue
                     
                     # Save to temp file and parse
@@ -117,16 +179,25 @@ def get_broker():
                         transactions.extend(parsed_transactions)
                     elif doc_type == 'broker_ing_diba_csv':
                         parsed_holdings = parser.parse_ing_diba(tmp_path)
+                        print(f"   Parsed {len(parsed_holdings)} ING DiBa holdings")
                         # Aggregate by ISIN
                         for holding in parsed_holdings:
-                            isin = holding['isin']
+                            isin = holding.get('isin', '')
+                            if not isin:
+                                print(f"   Warning: Holding missing ISIN: {holding}")
+                                continue
                             if isin not in holdings_dict:
-                                holdings_dict[isin] = holding
+                                holdings_dict[isin] = holding.copy()  # Make a copy to avoid reference issues
+                                print(f"   Added new holding: ISIN={isin}, account={holding.get('account')}, total_cost={holding.get('total_cost')}")
                             else:
-                                # Sum shares and costs
-                                holdings_dict[isin]['shares'] += holding['shares']
-                                holdings_dict[isin]['total_cost'] += holding['total_cost']
-                                holdings_dict[isin]['current_value'] += holding['current_value']
+                                # Sum shares and costs, preserve account field
+                                holdings_dict[isin]['shares'] += holding.get('shares', 0)
+                                holdings_dict[isin]['total_cost'] += holding.get('total_cost', 0)
+                                holdings_dict[isin]['current_value'] += holding.get('current_value', 0)
+                                # Ensure account field is preserved
+                                if 'account' not in holdings_dict[isin] and holding.get('account'):
+                                    holdings_dict[isin]['account'] = holding.get('account')
+                                print(f"   Aggregated holding: ISIN={isin}, total_cost={holdings_dict[isin]['total_cost']}")
                         
                 except Exception as e:
                     print(f"Error processing broker document {doc.get('id')}: {e}")
@@ -147,26 +218,81 @@ def get_broker():
     # Convert holdings dict to list
     holdings = list(holdings_dict.values())
     
-    # Calculate total invested and current value
+    print(f"📊 Broker data summary:")
+    print(f"   Transactions: {len(transactions)}")
+    print(f"   Holdings: {len(holdings)}")
+    for i, holding in enumerate(holdings):
+        print(f"   Holding {i}: account={holding.get('account')}, currency={holding.get('currency')}, total_cost={holding.get('total_cost')}, current_value={holding.get('current_value')}")
+    
+    # Calculate totals by account type
+    viac_total_invested = 0
+    ing_diba_total_invested = 0
+    ing_diba_total_current_value = 0
+    
+    # Calculate VIAC totals from transactions (VIAC uses transactions, not holdings)
+    for transaction in transactions:
+        if transaction.get('currency') == 'CHF':
+            viac_total_invested += abs(transaction.get('amount', 0))
+    
+    print(f"   VIAC total from transactions: {viac_total_invested}")
+    
+    # Calculate ING DiBa totals from holdings
     for holding in holdings:
+        account = holding.get('account', '')
         currency = holding.get('currency', 'EUR')
-        if currency == 'CHF':
-            total_invested_chf += holding.get('total_cost', 0)
-        elif currency == 'EUR':
-            total_invested_eur += holding.get('total_cost', 0)
-            total_current_value_eur += holding.get('current_value', 0)
+        total_cost = holding.get('total_cost', 0)
+        current_value = holding.get('current_value', 0)
+        
+        print(f"   Processing holding: account='{account}', currency='{currency}', total_cost={total_cost}, current_value={current_value}")
+        
+        if account == 'ING DiBa':
+            ing_diba_total_invested += total_cost
+            ing_diba_total_current_value += current_value
+        elif account == 'VIAC':
+            # VIAC holdings (if any) - but usually VIAC uses transactions
+            if currency == 'CHF':
+                viac_total_invested += total_cost
     
-    # Calculate profit/loss
-    profit_loss_eur = total_current_value_eur - total_invested_eur
+    print(f"   Final totals: VIAC={viac_total_invested}, ING DiBa invested={ing_diba_total_invested}, ING DiBa current={ing_diba_total_current_value}")
     
-    return jsonify({
+    # Calculate overall totals
+    total_invested_chf = viac_total_invested + ing_diba_total_invested * 1.08  # EUR to CHF conversion
+    total_current_value_chf = viac_total_invested + ing_diba_total_current_value * 1.08  # EUR to CHF conversion
+    
+    # Build summary structure expected by frontend
+    summary = {}
+    if viac_total_invested > 0:
+        summary['viac'] = {
+            'total_invested': round(viac_total_invested, 2),
+            'currency': 'CHF'
+        }
+    if ing_diba_total_invested > 0 or ing_diba_total_current_value > 0:
+        summary['ing_diba'] = {
+            'total_invested': round(ing_diba_total_invested, 2),
+            'total_current_value': round(ing_diba_total_current_value, 2),
+            'currency': 'EUR'
+        }
+    
+    print(f"   Summary object: {summary}")
+    
+    # Always include summary, even if empty
+    if not summary:
+        summary = {}
+    
+    response_data = {
         'transactions': transactions,
         'holdings': holdings,
-        'total_invested_chf': total_invested_chf,
-        'total_invested_eur': total_invested_eur,
-        'total_current_value_eur': total_current_value_eur,
-        'profit_loss_eur': profit_loss_eur
-    })
+        'summary': summary,
+        'total_invested_chf': round(total_invested_chf, 2),
+        'total_invested_eur': round(ing_diba_total_invested, 2),
+        'total_current_value_eur': round(ing_diba_total_current_value, 2),
+        'profit_loss_eur': round(ing_diba_total_current_value - ing_diba_total_invested, 2)
+    }
+    
+    print(f"   Response summary: {response_data.get('summary')}")
+    print(f"   Response keys: {list(response_data.keys())}")
+    
+    return jsonify(response_data)
 
 
 def get_broker_historical_valuation():
