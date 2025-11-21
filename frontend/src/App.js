@@ -85,7 +85,7 @@ const normalizeDocumentRecord = (doc) => {
   };
 };
 
-const uploadBankStatementWithProgress = (file, bankType, sessionToken, onProgress, documentId = null) => {
+const uploadBankStatementWithProgress = (file, bankType, sessionToken, onProgress, documentId = null, handleAuthFailure = null) => {
   if (!bankType) {
     return Promise.resolve(null);
   }
@@ -124,6 +124,14 @@ const uploadBankStatementWithProgress = (file, bankType, sessionToken, onProgres
             'Authorization': `Bearer ${sessionToken}`
           }
         });
+
+        if (response.status === 401) {
+          if (handleAuthFailure) {
+            handleAuthFailure();
+          }
+          stopPolling();
+          return;
+        }
 
         if (response.ok) {
           const payload = await response.json();
@@ -1319,6 +1327,13 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
       }
       
       const response = await fetch('http://localhost:5001/api/categories', { headers });
+      if (response.status === 401) {
+        // Note: handleAuthFailure is not available in CategoryEditModal scope
+        // But this will be caught by the parent component's auth check
+        localStorage.removeItem('sessionToken');
+        localStorage.removeItem('user');
+        return;
+      }
       const wrappedData = await response.json();
       const data = wrappedData.data || wrappedData;
 
@@ -1373,6 +1388,14 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, formatCurrency, isClosing
           type: modal.isIncome ? 'income' : 'expense'
         }),
       });
+
+      if (response.status === 401) {
+        // Note: handleAuthFailure is not available in CategoryEditModal scope
+        // But this will be caught by the parent component's auth check
+        localStorage.removeItem('sessionToken');
+        localStorage.removeItem('user');
+        return;
+      }
 
       if (response.ok) {
         // Add the new category to the list
@@ -1993,10 +2016,14 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
     }
   };
 
-  const uploadSingleFile = async (file, index) => {
+  const uploadSingleFile = async (file, index, documentType = null) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('bankType', bankType);
+    // If documentType is provided, use it; otherwise fall back to bankType-based inference
+    if (documentType) {
+      formData.append('documentType', documentType);
+    }
     
     // Generate unique upload ID for progress tracking
     const uploadId = `${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`;
@@ -2104,16 +2131,23 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                     clearTimeout(progressPollInterval);
                     progressPollInterval = null;
                   }
-                  // Update final progress to 100%
+                  // Update final progress to 100% and mark as success when processing is complete
                   if (data.status === 'complete') {
                     setUploadStatuses(prev => {
                       const updated = [...prev];
-                      if (updated[index] && updated[index].type === 'uploading') {
+                      if (updated[index]) {
+                        const imported = data.imported || data.processed || 0;
+                        const total = data.total || 0;
                         updated[index] = {
                           ...updated[index],
+                          type: 'success', // Now mark as success - processing is complete
                           processingProgress: 100,
-                          phase: 'processing',
-                          message: `Processing complete: ${data.processed}/${data.total} transactions`
+                          phase: 'complete',
+                          message: `Successfully imported ${imported} transactions!`,
+                          imported: imported,
+                          skipped: data.skipped || 0,
+                          uploadProgress: 100,
+                          progress: 100
                         };
                       }
                       return updated;
@@ -2202,28 +2236,42 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
           const isSuccess = (xhr.status >= 200 && xhr.status < 300) || (xhr.status === 400 && actualData?.success === true);
           
           if (isSuccess && actualData && actualData.success === true) {
-            const result = {
-              index,
-              fileName: file.name,
-              type: 'success',
-              message: `Successfully imported ${actualData.imported || 0} transactions!`,
-              imported: actualData.imported || 0,
-              skipped: actualData.skipped || 0,
-              uploadProgress: 100,
-              processingProgress: 100,
-              progress: 100,
-              importResult: actualData
-            };
-            console.log(`✅ Upload success for ${file.name}:`, result);
-            
-            // Update status immediately
+            // Don't mark as complete yet - processing might still be ongoing
+            // Keep status as 'uploading' until processing is confirmed complete via polling
+            let currentProcessingProgress = 0;
             setUploadStatuses(prev => {
               const updated = [...prev];
               if (updated[index]) {
-                updated[index] = result;
+                currentProcessingProgress = updated[index].processingProgress || 0;
+                updated[index] = {
+                  ...updated[index],
+                  uploadProgress: 100, // Upload is complete
+                  // Keep processingProgress as is (will be updated by polling)
+                  // Keep type as 'uploading' until processing is complete
+                  phase: 'processing',
+                  message: 'Processing transactions...',
+                  imported: actualData.imported || 0,
+                  skipped: actualData.skipped || 0,
+                  importResult: actualData
+                };
               }
               return updated;
             });
+            
+            // Create result object for resolve, but don't mark as success yet
+            const result = {
+              index,
+              fileName: file.name,
+              type: 'uploading', // Keep as uploading until processing completes
+              message: 'Processing transactions...',
+              imported: actualData.imported || 0,
+              skipped: actualData.skipped || 0,
+              uploadProgress: 100,
+              processingProgress: currentProcessingProgress,
+              progress: 50, // Only 50% complete (upload done, processing ongoing)
+              importResult: actualData
+            };
+            console.log(`✅ Upload complete for ${file.name}, processing ongoing...`, result);
 
             if (typeof onDocumentUpload === 'function') {
               // Use the detected bank type from the backend response
@@ -2439,59 +2487,373 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
     });
   };
 
+  // Detect document type from file content (for onboarding automatic detection)
+  const detectDocumentType = async (file) => {
+    if (!file) return null;
+    
+    try {
+      const token = localStorage.getItem('sessionToken');
+      if (!token) {
+        console.warn('No session token available for document type detection');
+        return null;
+      }
+      
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      
+      const response = await fetch('http://localhost:5001/api/documents/detect-type', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+      
+      if (response.status === 401) {
+        // Note: handleAuthFailure is not available in OnboardingComponent scope
+        // But this will be caught by the parent component's auth check
+        localStorage.removeItem('sessionToken');
+        localStorage.removeItem('user');
+        return null;
+      }
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error detecting document type:', errorData.error);
+        return null;
+      }
+      
+      const responseData = await response.json();
+      const data = responseData.data || responseData;
+      
+      if (data.success && data.documentType) {
+        return data.documentType;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error detecting document type:', error);
+      return null;
+    }
+  };
+
   const handleMultipleUploads = async (files) => {
     setUploading(true);
     setUploadStatuses([]);
+
+    // Normalize filename for duplicate detection
+    const normalizeFileName = (fileName) => {
+      if (!fileName) return '';
+      // Decode URL encoding
+      try {
+        fileName = decodeURIComponent(fileName);
+      } catch (e) {
+        // If decoding fails, use original
+      }
+      // Remove common browser-added suffixes like " 2", " (1)", " - Copy", etc.
+      fileName = fileName.replace(/\s*[-_]?\s*(\(?\d+\)?|Copy|copy)\s*(?=\.[^.]+$)/i, '');
+      // Normalize whitespace (multiple spaces to single space, trim)
+      fileName = fileName.replace(/\s+/g, ' ').trim();
+      // Convert to lowercase for case-insensitive comparison
+      return fileName.toLowerCase();
+    };
+
+    const computeDocKey = (docName, docSize) => {
+      if (!docName || docSize === undefined || docSize === null) {
+        return null;
+      }
+      const normalizedName = normalizeFileName(docName);
+      return `${normalizedName}::${Number(docSize)}`;
+    };
 
     // Initialize status array with "uploading" status for each file
     const initialStatuses = files.map((file, index) => ({
       index,
       fileName: file.name,
       type: 'uploading',
-      phase: 'upload',
-      message: 'Preparing upload...',
+      phase: 'detecting',
+      message: 'Detecting document type...',
       uploadProgress: 0,
       processingProgress: 0
     }));
     setUploadStatuses(initialStatuses);
 
     try {
-      // Upload all files in parallel
-      const uploadPromises = files.map((file, index) => uploadSingleFile(file, index));
-      const results = await Promise.all(uploadPromises);
-
-      console.log('📊 All uploads completed:', results);
-      console.log('📊 Results summary:', {
-        total: results.length,
-        success: results.filter(r => r.type === 'success').length,
-        error: results.filter(r => r.type === 'error').length,
-        uploading: results.filter(r => r.type === 'uploading').length
-      });
-      console.log('📊 Full results array:', JSON.stringify(results, null, 2));
-
-      // Statuses are already updated in the individual upload handlers
-      // Just ensure we have the final state (in case of any race conditions)
-      setUploadStatuses(results);
+      // Step 1a: Check for duplicates within the current upload batch
+      const batchSeenKeys = new Set();
+      const batchSeenFiles = new Map();
+      const batchDuplicates = [];
+      const filesAfterBatchCheck = [];
       
-      // Check if all uploads succeeded
-      const allSuccessful = results.every(result => result.type === 'success');
-      const totalImported = results.reduce((sum, result) => sum + (result.imported || 0), 0);
-      const totalSkipped = results.reduce((sum, result) => sum + (result.skipped || 0), 0);
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        const fileKey = computeDocKey(file.name, file.size);
+        
+        if (!fileKey) {
+          // File without valid key, skip duplicate check but still process
+          filesAfterBatchCheck.push({ file, index });
+          continue;
+        }
+        
+        if (batchSeenKeys.has(fileKey)) {
+          // This file is a duplicate within the current batch
+          const originalIndex = batchSeenFiles.get(fileKey);
+          batchDuplicates.push({ file, index, originalIndex });
+        } else {
+          // First occurrence of this file
+          batchSeenKeys.add(fileKey);
+          batchSeenFiles.set(fileKey, index);
+          filesAfterBatchCheck.push({ file, index });
+        }
+      }
 
-      console.log(`📊 Upload summary: allSuccessful=${allSuccessful}, totalImported=${totalImported}, totalSkipped=${totalSkipped}`);
+      // Remove duplicates from batch (keep only first occurrence)
+      if (batchDuplicates.length > 0) {
+        const duplicateIndices = new Set(batchDuplicates.map(d => d.index));
+        const filesToProcess = filesAfterBatchCheck.filter(({ index }) => !duplicateIndices.has(index));
+        
+        // Update statuses for duplicates
+        setUploadStatuses(prev => prev.map((status, idx) => {
+          if (duplicateIndices.has(idx)) {
+            return {
+              ...status,
+              type: 'error',
+              message: `Duplicate file (already in upload batch)`,
+              uploadProgress: 100,
+              processingProgress: 100
+            };
+          }
+          return status;
+        }));
+        
+        // Continue with non-duplicate files
+        if (filesToProcess.length === 0) {
+          setUploading(false);
+          return;
+        }
+        filesAfterBatchCheck.splice(0, filesAfterBatchCheck.length, ...filesToProcess);
+      }
 
-      // Set uploading to false and mark as complete
+      // Step 1b: Detect document types for all remaining files in parallel
+      const detectionResults = await Promise.all(
+        filesAfterBatchCheck.map(async ({ file, index }) => {
+          const detectedType = await detectDocumentType(file);
+          // Fallback to bankType-based detection if automatic detection fails
+          const finalType = detectedType || inferDocumentType(file.name, bankType);
+          return { file, index, detectedType: finalType };
+        })
+      );
+
+      // Update statuses to show detection complete
+      setUploadStatuses(prev => prev.map((status, idx) => {
+        // Skip if this was a duplicate
+        if (status.type === 'error' && status.message.includes('Duplicate')) {
+          return status;
+        }
+        return {
+          ...status,
+          phase: 'upload',
+          message: 'Preparing upload...'
+        };
+      }));
+
+      // Step 2: Upload all files to their detected categories (no category mismatch checks)
+      // Use the same upload mechanism as DocumentsPage with progress callbacks
+      const uploadPromises = detectionResults.map(async ({ file, index, detectedType }) => {
+        // Create progress callback for this file (similar to DocumentsPage)
+        const PROGRESS_THROTTLE_MS = 100;
+        let lastProgressUpdate = 0;
+        
+        const emitProgress = (phase, progress, message, extra = {}) => {
+          const now = Date.now();
+          const shouldUpdate = (now - lastProgressUpdate) >= PROGRESS_THROTTLE_MS || 
+                                progress === 100 || 
+                                progress === 0 ||
+                                phase === 'processing';
+          
+          if (!shouldUpdate && progress !== 100 && progress !== 0) {
+            return;
+          }
+          
+          lastProgressUpdate = now;
+          
+          setUploadStatuses(prev => {
+            const updated = [...prev];
+            if (updated[index]) {
+              const clamped = Math.max(0, Math.min(progress ?? 0, 100));
+              if (phase === 'upload') {
+                updated[index] = {
+                  ...updated[index],
+                  uploadProgress: clamped,
+                  message: message || updated[index].message,
+                  phase: 'upload',
+                  ...extra
+                };
+              } else if (phase === 'processing') {
+                updated[index] = {
+                  ...updated[index],
+                  processingProgress: clamped,
+                  message: message || updated[index].message,
+                  phase: 'processing',
+                  ...extra
+                };
+                // Mark as success only when processing reaches 100%
+                if (clamped === 100) {
+                  updated[index] = {
+                    ...updated[index],
+                    type: 'success',
+                    phase: 'complete'
+                  };
+                }
+              }
+            }
+            return updated;
+          });
+        };
+        
+        try {
+          // Track if processing completed via progress callback
+          let processingCompleted = false;
+          
+          // Wrap emitProgress to track when processing completes
+          const originalEmitProgress = emitProgress;
+          const wrappedEmitProgress = (phase, progress, message, extra = {}) => {
+            originalEmitProgress(phase, progress, message, extra);
+            // Track when processing reaches 100%
+            if (phase === 'processing' && progress === 100) {
+              processingCompleted = true;
+            }
+          };
+          
+          // Use onDocumentUpload with progress callback (same as DocumentsPage)
+          await onDocumentUpload(detectedType, file, {}, wrappedEmitProgress, { skipDataFetch: true });
+          
+          // Don't mark as success here - let the progress callback handle it
+          // The progress callback will mark as success when processingProgress reaches 100%
+          // Return uploading status - the completion check will wait for processing to complete
+          return {
+            index,
+            fileName: file.name,
+            type: 'uploading', // Keep as uploading until processing completes via progress callback
+            uploadProgress: 100,
+            processingProgress: processingCompleted ? 100 : 0
+          };
+        } catch (error) {
+          console.error(`Upload failed for ${file.name}:`, error);
+          setUploadStatuses(prev => {
+            const updated = [...prev];
+            if (updated[index]) {
+              updated[index] = {
+                ...updated[index],
+                type: 'error',
+                message: error.message || 'Upload failed',
+                uploadProgress: 100,
+                processingProgress: 100
+              };
+            }
+            return updated;
+          });
+          
+          return {
+            index,
+            fileName: file.name,
+            type: 'error',
+            message: error.message || 'Upload failed',
+            uploadProgress: 100,
+            processingProgress: 100
+          };
+        }
+      });
+      
+      // Don't wait for all uploads to complete - let them update statuses in real-time
+      // Instead, set up a periodic check to see when all are done
+      Promise.allSettled(uploadPromises).then(() => {
+        // All uploads have settled (completed or failed)
+        // Check statuses after a brief delay to ensure all state updates have propagated
+        // Set up a periodic check to see when all uploads are fully processed
+        // A file is considered complete only when it's fully processed, not just uploaded
+        const checkCompletion = () => {
+          setUploadStatuses(currentStatuses => {
+            // Only count as success if type is 'success' AND processingProgress is 100
+            // Files with processingProgress < 100 are still processing, even if type is 'success'
+            const successCount = currentStatuses.filter(s => 
+              s.type === 'success' && s.processingProgress === 100
+            ).length;
+            const errorCount = currentStatuses.filter(s => 
+              s.type === 'error' && 
+              (s.processingProgress === 100 || s.processingProgress === undefined) &&
+              !s.message?.includes('Duplicate')
+            ).length;
+            const uploadingCount = currentStatuses.filter(s => {
+              // Count as uploading if:
+              // 1. Type is explicitly 'uploading'
+              // 2. Type is 'success' but processingProgress is not 100 (shouldn't happen, but be safe)
+              return s.type === 'uploading' || 
+                     (s.type === 'success' && s.processingProgress !== 100 && s.processingProgress !== undefined);
+            }).length;
+            
+            console.log('📊 Status check:', {
+              total: currentStatuses.length,
+              success: successCount,
+              error: errorCount,
+              uploading: uploadingCount,
+              details: currentStatuses.map(s => ({
+                fileName: s.fileName,
+                type: s.type,
+                uploadProgress: s.uploadProgress,
+                processingProgress: s.processingProgress,
+                phase: s.phase
+              }))
+            });
+            
+            // Only mark as complete if ALL files are fully processed (not just uploaded)
+            // A file is fully processed when:
+            // - type is 'success' (which means processing is complete)
+            // - type is 'error' AND it's a real error (not still processing)
+            // Files with type 'uploading' are still being processed
+            const allProcessed = currentStatuses.every(s => {
+              // If still uploading, not processed
+              if (s.type === 'uploading') return false;
+              // Success means fully processed
+              if (s.type === 'success') return true;
+              // Error means failed/processed (including duplicates - they're considered processed/failed)
+              if (s.type === 'error') return true;
+              return false;
+            });
+            
+            if (allProcessed && uploadingCount === 0) {
       setUploading(false);
+              
+              const totalImported = currentStatuses.reduce((sum, s) => sum + (s.imported || 0), 0);
+              const allSuccessful = currentStatuses.every(s => 
+                s.type === 'success' && 
+                (s.processingProgress === 100 || s.processingProgress === undefined)
+              );
       
       if (allSuccessful && totalImported > 0) {
-        console.log('✅ All uploads successful, showing finish button...');
-        // Use setTimeout to ensure state updates are processed
+                console.log('✅ All uploads and processing complete, showing finish button...');
         setTimeout(() => {
           setUploadsComplete(true);
         }, 100);
       } else {
         console.log('⚠️ Some uploads failed or no transactions imported');
       }
+            } else {
+              // Still processing - check again in 1 second
+              console.log(`⏳ Still processing: ${uploadingCount} file(s) in progress`);
+              setTimeout(checkCompletion, 1000);
+            }
+            
+            return currentStatuses;
+          });
+        };
+        
+        // Start checking after a brief delay to allow initial status updates
+        setTimeout(checkCompletion, 1000);
+      }).catch(error => {
+        console.error('Error in upload promises:', error);
+        setUploading(false);
+      });
     } catch (error) {
       console.error('Batch upload error:', error);
       setUploading(false);
@@ -2500,9 +2862,10 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
 
   const handleDrop = (e) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).filter(file => 
-      file.name.endsWith('.csv') || file.name.endsWith('.CSV')
-    );
+    const files = Array.from(e.dataTransfer.files).filter(file => {
+      const name = file.name.toLowerCase();
+      return name.endsWith('.csv') || name.endsWith('.pdf');
+    });
     if (files.length > 0) {
       handleMultipleUploads(files);
     }
@@ -2527,8 +2890,24 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
       )
     : 0;
 
-  const completedCount = uploadStatuses.filter(s => s.type === 'success').length;
-  const failedCount = uploadStatuses.filter(s => s.type === 'error').length;
+  // Only count as succeeded if processing is actually 100% complete
+  const completedCount = uploadStatuses.filter(s => s.type === 'success' && s.processingProgress === 100).length;
+  // Count as failed if status is 'error' (including duplicates)
+  // Files with type 'uploading' should never be counted as failed
+  const failedCount = uploadStatuses.filter(s => {
+    // Don't count if still uploading
+    if (s.type === 'uploading') return false;
+    // Count all errors as failed, including duplicates
+    return s.type === 'error';
+  }).length;
+  // Count files that are still in progress (uploading or processing)
+  const inProgressCount = uploadStatuses.filter(s => {
+    // Count as in progress if:
+    // 1. Type is 'uploading'
+    // 2. Type is 'success' but processingProgress is not 100 (shouldn't happen, but be safe)
+    return s.type === 'uploading' || 
+           (s.type === 'success' && s.processingProgress !== 100 && s.processingProgress !== undefined);
+  }).length;
 
   return (
     <div className="onboarding-container">
@@ -2558,7 +2937,7 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.CSV"
+              accept=".csv,.CSV,.pdf,.PDF"
               multiple
               onChange={handleFileSelect}
               style={{ display: 'none' }}
@@ -2596,7 +2975,7 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                       }} />
                     </div>
                     <p style={{ marginTop: '8px', fontSize: '14px', color: '#6b7280' }}>
-                      {overallProgress}% complete ({completedCount} succeeded{failedCount > 0 ? `, ${failedCount} failed` : ''})
+                      {overallProgress}% complete ({completedCount} succeeded{inProgressCount > 0 ? `, ${inProgressCount} in progress` : ''}{failedCount > 0 ? `, ${failedCount} failed` : ''})
                     </p>
                   </div>
                 )}
@@ -2608,7 +2987,7 @@ const OnboardingComponent = ({ onUploadComplete, onDocumentUpload }) => {
                   Click to upload or drag and drop
                 </p>
                 <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '8px' }}>
-                  Supports YUH and DKB bank statement CSV files
+                  Supports bank statements, broker reports, and loan documents (CSV and PDF)
                 </p>
                 <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '8px' }}>
                   You can select multiple files at once
@@ -3256,6 +3635,16 @@ function App() {
   
   console.log('🎬 RENDER COUNT:', renderCount, 'isAuth:', isAuthenticated, 'authLoad:', authLoading);
 
+  // Centralized function to handle authentication failures
+  const handleAuthFailure = useCallback(() => {
+    console.log('🔒 Authentication failed - logging out user');
+    localStorage.removeItem('sessionToken');
+    localStorage.removeItem('user');
+    setIsAuthenticated(false);
+    setSessionToken(null);
+    setUser(null);
+  }, []);
+
   // App state
   const [summary, setSummary] = useState([]);
   const [accounts, setAccounts] = useState(null);
@@ -3477,12 +3866,7 @@ function App() {
       if (!response.ok) {
         // Handle error responses
         if (response.status === 401) {
-          // Authentication failed, clear session and show login
-          localStorage.removeItem('sessionToken');
-          localStorage.removeItem('user');
-          setIsAuthenticated(false);
-          setSessionToken(null);
-          setUser(null);
+          handleAuthFailure();
         }
         setLoading(false);
         setSummary([]);
@@ -3541,13 +3925,17 @@ function App() {
       }
 
       const response = await fetch('http://localhost:5001/api/accounts', { headers });
+      if (response.status === 401) {
+        handleAuthFailure();
+        return;
+      }
       const wrappedData = await response.json();
       const data = wrappedData.data?.data || wrappedData.data || wrappedData;
       setAccounts(data);
     } catch (error) {
       console.error('Error fetching accounts:', error);
     }
-  }, [sessionToken]);
+  }, [sessionToken, handleAuthFailure]);
 
   const fetchBroker = useCallback(async () => {
     try {
@@ -3559,13 +3947,17 @@ function App() {
       }
 
       const response = await fetch('http://localhost:5001/api/broker', { headers });
+      if (response.status === 401) {
+        handleAuthFailure();
+        return;
+      }
       const wrappedData = await response.json();
       const data = wrappedData.data?.data || wrappedData.data || wrappedData;
       setBroker(data);
     } catch (error) {
       console.error('Error fetching broker:', error);
     }
-  }, [sessionToken]);
+  }, [sessionToken, handleAuthFailure]);
 
   const fetchLoans = useCallback(async () => {
     try {
@@ -3577,13 +3969,17 @@ function App() {
       }
 
       const response = await fetch('http://localhost:5001/api/loans', { headers });
+      if (response.status === 401) {
+        handleAuthFailure();
+        return;
+      }
       const wrappedData = await response.json();
       const data = wrappedData.data?.data || wrappedData.data || wrappedData;
       setLoans(data);
     } catch (error) {
       console.error('Error fetching loans:', error);
     }
-  }, [sessionToken]);
+  }, [sessionToken, handleAuthFailure]);
 
   const fetchProjection = useCallback(async () => {
     try {
@@ -3595,6 +3991,10 @@ function App() {
       }
 
       const response = await fetch('http://localhost:5001/api/projection', { headers });
+      if (response.status === 401) {
+        handleAuthFailure();
+        return;
+      }
       const wrappedData = await response.json();
       const data = wrappedData.data?.data || wrappedData.data || wrappedData;
       // Ensure all numeric fields are actually numbers
@@ -3611,7 +4011,7 @@ function App() {
         averageSavingsRate: 0
       });
     }
-  }, [sessionToken]);
+  }, [sessionToken, handleAuthFailure]);
 
   // Fetch essential categories
   const fetchEssentialCategories = useCallback(async () => {
@@ -3625,6 +4025,11 @@ function App() {
         }
       });
       
+      if (response.status === 401) {
+        handleAuthFailure();
+        return;
+      }
+      
       if (response.ok) {
         const data = await response.json();
         if (data.categories && Array.isArray(data.categories)) {
@@ -3634,7 +4039,7 @@ function App() {
     } catch (error) {
       console.error('Error fetching essential categories:', error);
     }
-  }, [sessionToken]);
+  }, [sessionToken, handleAuthFailure]);
 
   const fetchDocuments = useCallback(async () => {
     if (!sessionToken) {
@@ -3656,11 +4061,7 @@ function App() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          localStorage.removeItem('sessionToken');
-          localStorage.removeItem('user');
-          setIsAuthenticated(false);
-          setSessionToken(null);
-          setUser(null);
+          handleAuthFailure();
         }
         setDocumentTypes([]);
         setDocuments([]);
@@ -3680,7 +4081,7 @@ function App() {
     } finally {
       setDocumentsLoading(false);
     }
-  }, [sessionToken]);
+  }, [sessionToken, handleAuthFailure]);
 
   // Save essential categories
   const saveEssentialCategories = async (categories) => {
@@ -3695,6 +4096,11 @@ function App() {
         },
         body: JSON.stringify({ categories })
       });
+      
+      if (response.status === 401) {
+        handleAuthFailure();
+        return;
+      }
       
       if (response.ok) {
         setEssentialCategories(categories);
@@ -3746,6 +4152,11 @@ function App() {
         body: formData
       });
 
+      if (response.status === 401) {
+        handleAuthFailure();
+        throw new Error('Authentication failed');
+      }
+
       const wrappedData = await response.json();
 
       if (!response.ok) {
@@ -3762,7 +4173,7 @@ function App() {
       // Step 2: Import transactions with the document ID
       if (shouldImport && documentId) {
         uploadsInFlightRef.current += 1;
-        importResult = await uploadBankStatementWithProgress(file, bankType, sessionToken, progressCallback, documentId);
+        importResult = await uploadBankStatementWithProgress(file, bankType, sessionToken, progressCallback, documentId, handleAuthFailure);
         uploadsInFlightRef.current = Math.max(0, uploadsInFlightRef.current - 1);
 
         // Update document metadata with import summary
@@ -3836,7 +4247,8 @@ function App() {
     fetchProjection,
     fetchDocuments,
     forceShowApp,
-    activeTab
+    activeTab,
+    handleAuthFailure
   ]);
 
   const handleDocumentDelete = useCallback(async (documentId, documentType) => {
@@ -3851,6 +4263,11 @@ function App() {
           'Authorization': `Bearer ${sessionToken}`
         }
       });
+
+      if (response.status === 401) {
+        handleAuthFailure();
+        throw new Error('Authentication failed');
+      }
 
       let responseData = {};
       try {
@@ -3904,6 +4321,11 @@ function App() {
         }
       });
 
+      if (response.status === 401) {
+        handleAuthFailure();
+        throw new Error('Authentication failed');
+      }
+
       const responseData = await response.json();
 
       if (!response.ok) {
@@ -3947,7 +4369,8 @@ function App() {
     fetchBroker,
     fetchLoans,
     fetchProjection,
-    fetchDocuments
+    fetchDocuments,
+    handleAuthFailure
   ]);
 
   // Extract all unique categories from summary
@@ -4246,6 +4669,11 @@ function App() {
         body: JSON.stringify({ keepCustomCategories: wipeKeepCategories })
       });
 
+      if (response.status === 401) {
+        handleAuthFailure();
+        throw new Error('Authentication failed');
+      }
+
       const wrappedData = await response.json();
 
       if (!response.ok) {
@@ -4282,6 +4710,7 @@ function App() {
   }, [
     sessionToken,
     wipeKeepCategories,
+    handleAuthFailure,
     fetchSummary,
     fetchAccounts,
     fetchBroker,
@@ -4625,7 +5054,14 @@ function App() {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                   }
-                }).then(r => r.json()).then(d => d.data?.data || d.data || d).catch(() => null);
+                }).then(r => {
+                  if (r.status === 401) {
+                    localStorage.removeItem('sessionToken');
+                    localStorage.removeItem('user');
+                    return null;
+                  }
+                  return r.json();
+                }).then(d => d?.data?.data || d?.data || d).catch(() => null);
                 
                 console.log('📊 Transactions data:', transactionsResponse);
                 console.log('📊 Transactions length:', Array.isArray(transactionsResponse) ? transactionsResponse.length : 'not an array');
@@ -4973,43 +5409,7 @@ function App() {
                   </button>
                 </div>
               </div>
-              <div className="settings-section danger-zone">
-                <h3 className="settings-section-title">Reset Your Data</h3>
-                <p className="settings-section-description">
-                  Permanently delete all imported data (accounts, transactions, broker statements, loans, documents, and predictions).
-                  This cannot be undone.
-                </p>
-                <label className="danger-toggle">
-                  <input
-                    type="checkbox"
-                    checked={wipeKeepCategories}
-                    onChange={(event) => setWipeKeepCategories(event.target.checked)}
-                    disabled={wipeLoading}
-                  />
-                  <span>Keep my custom categories</span>
-                </label>
-                {wipeError && (
-                  <div className="danger-status danger-error">
-                    {wipeError}
                   </div>
-                )}
-                {wipeSuccess && (
-                  <div className="danger-status danger-success">
-                    {wipeSuccess}
-                  </div>
-                )}
-                <button
-                  className="danger-button"
-                  onClick={handleWipeDataRequest}
-                  disabled={wipeLoading}
-                >
-                  {wipeLoading ? 'Wiping…' : 'Delete all data'}
-                </button>
-                <p className="danger-note">
-                  Tip: download any files you want to keep before wiping.
-                </p>
-              </div>
-            </div>
           </div>
         </div>
       )}

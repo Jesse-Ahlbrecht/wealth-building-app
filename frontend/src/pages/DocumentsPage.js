@@ -1,4 +1,6 @@
-import React, { useMemo, useState, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+
+const API_BASE_URL = 'http://localhost:5001';
 
 const DOCUMENT_CATEGORY_ORDER = ['bank', 'broker', 'loan', 'other'];
 const CATEGORY_LABELS = {
@@ -112,9 +114,17 @@ const DocumentsPage = ({
   });
   const [duplicateState, setDuplicateState] = useState({
     open: false,
-    file: null,
-    duplicates: []
+    files: [], // Array of { file, duplicates, entryKey }
+    resolved: {} // Map of entryKey -> boolean (user's decision)
   });
+  const duplicateStateRef = useRef(duplicateState);
+  const duplicateResolverRef = useRef(null);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    duplicateStateRef.current = duplicateState;
+  }, [duplicateState]);
+  
   const [bulkConfirmState, setBulkConfirmState] = useState({
     open: false,
     typeKey: null,
@@ -133,7 +143,130 @@ const DocumentsPage = ({
   const confirmBusy = confirmState.busy;
   const bulkConfirmType = bulkConfirmState.typeKey;
   const bulkConfirmBusy = bulkConfirmState.busy;
-  const duplicateResolverRef = useRef(null);
+  const categoryMismatchResolverRef = useRef(null);
+  const showWipeConfirm = Boolean(wipeState?.showConfirm);
+
+  // Close any open settings menus when the wipe confirmation modal is visible
+  useEffect(() => {
+    if (showWipeConfirm) {
+      setOpenGlobalSettings(false);
+      setOpenSettingsType(null);
+    }
+  }, [showWipeConfirm]);
+
+  const requestBatchDuplicateConfirmation = useCallback((filesWithDuplicates) => {
+    return new Promise((resolve) => {
+      duplicateResolverRef.current = resolve;
+      setDuplicateState({
+        open: true,
+        files: filesWithDuplicates,
+        resolved: {}
+      });
+    });
+  }, []);
+
+  const resolveBatchDuplicates = useCallback((proceedAll) => {
+    // Capture resolver BEFORE updating state
+    const resolver = duplicateResolverRef.current;
+    
+    if (resolver) {
+      // Build resolved object by reading current state from ref
+      const currentState = duplicateStateRef.current;
+      const resolved = {};
+      currentState.files.forEach(({ entryKey }) => {
+        resolved[entryKey] = proceedAll !== undefined ? proceedAll : (currentState.resolved[entryKey] || false);
+      });
+      
+      // Update state to close modal
+      setDuplicateState({
+        open: false,
+        files: [],
+        resolved: {}
+      });
+      
+      // Clear resolver ref
+      duplicateResolverRef.current = null;
+      
+      // Call resolver with the resolved object synchronously
+      if (typeof resolver === 'function') {
+        resolver(resolved);
+      }
+    } else {
+      // No resolver, just close the modal
+      setDuplicateState({
+        open: false,
+        files: [],
+        resolved: {}
+      });
+    }
+  }, []);
+
+  const updateDuplicateResolution = useCallback((entryKey, proceed) => {
+    setDuplicateState(prev => ({
+      ...prev,
+      resolved: {
+        ...prev.resolved,
+        [entryKey]: proceed
+      }
+    }));
+  }, []);
+
+  const requestBatchCategoryMismatch = useCallback((filesWithMismatches) => {
+    return new Promise((resolve) => {
+      categoryMismatchResolverRef.current = resolve;
+      setCategoryMismatchModal({
+        open: true,
+        files: filesWithMismatches,
+        resolved: {}
+      });
+    });
+  }, []);
+
+  const resolveBatchCategoryMismatch = useCallback((proceedAll) => {
+    // Capture resolver BEFORE updating state
+    const resolver = categoryMismatchResolverRef.current;
+    
+    if (resolver) {
+      // Build resolved object by reading current state from ref
+      const currentState = categoryMismatchModalRef.current;
+      const resolved = {};
+      currentState.files.forEach(({ entryKey }) => {
+        resolved[entryKey] = proceedAll !== undefined ? proceedAll : (currentState.resolved[entryKey] || false);
+      });
+      
+      // Update state to close modal
+      setCategoryMismatchModal({
+        open: false,
+        files: [],
+        resolved: {}
+      });
+      
+      // Clear resolver ref
+      categoryMismatchResolverRef.current = null;
+      
+      // Call resolver with the resolved object synchronously
+      if (typeof resolver === 'function') {
+        resolver(resolved);
+      }
+    } else {
+      // No resolver, just close the modal
+      setCategoryMismatchModal({
+        open: false,
+        files: [],
+        resolved: {}
+      });
+    }
+  }, []);
+
+  const updateCategoryMismatchResolution = useCallback((entryKey, proceed) => {
+    setCategoryMismatchModal(prev => ({
+      ...prev,
+      resolved: {
+        ...prev.resolved,
+        [entryKey]: proceed
+      }
+    }));
+  }, []);
 
   React.useEffect(() => {
     setDocumentsState(documents);
@@ -378,34 +511,7 @@ const DocumentsPage = ({
     });
   }, []);
 
-  const resolveDuplicatePrompt = useCallback((value) => {
-    if (duplicateResolverRef.current) {
-      duplicateResolverRef.current(value);
-      duplicateResolverRef.current = null;
-    }
-    setDuplicateState({
-      open: false,
-      file: null,
-      duplicates: []
-    });
-  }, []);
 
-  const requestDuplicateConfirmation = useCallback((file, duplicates) => new Promise((resolve) => {
-    duplicateResolverRef.current = resolve;
-    setDuplicateState({
-      open: true,
-      file,
-      duplicates
-    });
-  }), []);
-
-  const dismissDuplicatePrompt = useCallback(() => {
-    resolveDuplicatePrompt(false);
-  }, [resolveDuplicatePrompt]);
-
-  const acceptDuplicatePrompt = useCallback(() => {
-    resolveDuplicatePrompt(true);
-  }, [resolveDuplicatePrompt]);
 
   const handleFilesSelected = useCallback(async (typeKey, fileList) => {
     const normalizedTypeKey = normalizeTypeKey(typeKey) || 'unknown';
@@ -419,11 +525,30 @@ const DocumentsPage = ({
     const files = Array.from(fileList);
     const timestamp = Date.now();
     const seenKeys = new Set();
+    // Normalize filename for duplicate detection
+    const normalizeFileName = (fileName) => {
+      if (!fileName) return '';
+      // Decode URL encoding
+      try {
+        fileName = decodeURIComponent(fileName);
+      } catch (e) {
+        // If decoding fails, use original
+      }
+      // Remove common browser-added suffixes like " 2", " (1)", " - Copy", etc.
+      // Pattern: space or dash followed by number or "Copy" at the end before extension
+      fileName = fileName.replace(/\s*[-_]?\s*(\(?\d+\)?|Copy|copy)\s*(?=\.[^.]+$)/i, '');
+      // Normalize whitespace (multiple spaces to single space, trim)
+      fileName = fileName.replace(/\s+/g, ' ').trim();
+      // Convert to lowercase for case-insensitive comparison
+      return fileName.toLowerCase();
+    };
+
     const computeDocKey = (docName, docSize) => {
       if (!docName || docSize === undefined || docSize === null) {
         return null;
       }
-      return `${docName}::${Number(docSize)}`;
+      const normalizedName = normalizeFileName(docName);
+      return `${normalizedName}::${Number(docSize)}`;
     };
     documentsState.forEach((doc) => {
       const name = doc?.originalName || doc?.original_name || doc?.file_name;
@@ -460,13 +585,88 @@ const DocumentsPage = ({
     try {
       const completed = [];
       const cancelled = [];
-      const uploadedDocuments = []; // Batch document updates
+      const uploadedDocuments = [];
+      const movedToOtherCategories = new Set(); // Track files moved to other categories
+      const PROGRESS_THROTTLE_MS = 100;
 
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index];
-        const entryKey = newEntries[index].key;
-
+      // Step 1a: Check for duplicates within the current upload batch first
+      const filesToCheck = files.map((file, index) => {
         const fileKey = computeDocKey(file.name, file.size);
+        console.log(`[Batch Duplicate Check] File ${index}: name="${file.name}", size=${file.size}, fileKey="${fileKey}"`);
+        return {
+          file,
+          entryKey: newEntries[index].key,
+          fileKey
+        };
+      });
+
+      const batchSeenKeys = new Set();
+      const batchSeenFiles = new Map(); // Track which entryKey corresponds to which fileKey
+      const batchDuplicates = [];
+      const filesAfterBatchCheck = [];
+      
+      // First pass: detect duplicates within the batch
+      for (const { file, entryKey, fileKey } of filesToCheck) {
+        if (!fileKey) {
+          // File without valid key, skip duplicate check but still process
+          filesAfterBatchCheck.push({ file, entryKey, fileKey });
+          continue;
+        }
+        
+        if (batchSeenKeys.has(fileKey)) {
+          // This file is a duplicate within the current batch
+          const originalEntryKey = batchSeenFiles.get(fileKey);
+          batchDuplicates.push({ 
+            file, 
+            entryKey, 
+            fileKey, 
+            isBatchDuplicate: true,
+            originalEntryKey 
+          });
+          console.log(`Batch duplicate detected: ${file.name} (${file.size} bytes) matches entryKey ${originalEntryKey}`);
+        } else {
+          // First occurrence of this file
+          batchSeenKeys.add(fileKey);
+          batchSeenFiles.set(fileKey, entryKey);
+          filesAfterBatchCheck.push({ file, entryKey, fileKey });
+        }
+      }
+
+      console.log(`Batch duplicate check: ${batchDuplicates.length} duplicates found out of ${filesToCheck.length} files`);
+
+      // Show batch duplicate modal if there are duplicates within the batch
+      if (batchDuplicates.length > 0) {
+        // Create a mock duplicates array for the modal (showing it's a batch duplicate)
+        const batchDuplicatesWithMock = batchDuplicates.map(({ file, entryKey }) => ({
+          file,
+          entryKey,
+          duplicates: [{ originalName: 'Duplicate in current upload', isBatchDuplicate: true }]
+        }));
+        
+        const batchDuplicateResolutions = await requestBatchDuplicateConfirmation(batchDuplicatesWithMock);
+        
+        // Process batch duplicate resolutions
+        batchDuplicates.forEach(({ file, entryKey }) => {
+          const proceed = batchDuplicateResolutions[entryKey];
+          if (!proceed) {
+            updateActionState(normalizedTypeKey, (current) => {
+              const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+              return { ...current, uploads };
+            });
+            cancelled.push(file);
+          } else {
+            // User chose to proceed, add to files to check against existing documents
+            filesAfterBatchCheck.push({ file, entryKey, fileKey: computeDocKey(file.name, file.size) });
+          }
+        });
+      }
+
+      // Step 1b: Check for duplicates against already-uploaded documents
+      const filesWithDuplicates = [];
+      const filesAfterDuplicateCheck = [];
+      
+      for (const { file, entryKey, fileKey } of filesAfterBatchCheck) {
+        const fileNormalizedName = normalizeFileName(file.name);
         const duplicates = documentsState.filter((doc) => {
           const docName = doc?.originalName || doc?.original_name || doc?.file_name;
           const docSize =
@@ -474,46 +674,148 @@ const DocumentsPage = ({
             doc?.file_size ??
             doc?.metadata?.file_info?.original_size ??
             doc?.metadata?.file_info?.originalSize;
-          return docName === file.name && Number(docSize) === Number(file.size);
+          const docNormalizedName = normalizeFileName(docName);
+          return docNormalizedName === fileNormalizedName && Number(docSize) === Number(file.size);
         });
 
-        if ((seenKeys.has(fileKey) || duplicates.length > 0) && fileKey) {
-          const proceed = await requestDuplicateConfirmation(file, duplicates);
+        // Check for duplicates against existing documents
+        const isDuplicate = duplicates.length > 0 && fileKey;
+        if (isDuplicate) {
+          filesWithDuplicates.push({ file, entryKey, duplicates });
+        } else {
+          if (fileKey) {
+            seenKeys.add(fileKey);
+          }
+          filesAfterDuplicateCheck.push({ file, entryKey, fileKey });
+        }
+      }
+
+      // Show batch duplicate modal if there are any duplicates
+      if (filesWithDuplicates.length > 0) {
+        const duplicateResolutions = await requestBatchDuplicateConfirmation(filesWithDuplicates);
+        
+        // Process duplicate resolutions
+        filesWithDuplicates.forEach(({ file, entryKey }) => {
+          const proceed = duplicateResolutions[entryKey];
           if (!proceed) {
             updateActionState(normalizedTypeKey, (current) => {
               const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
-              return {
-                ...current,
-                uploads
-              };
+              return { ...current, uploads };
             });
             cancelled.push(file);
-            continue;
+          } else {
+            // User chose to proceed, add to files to process
+            const fileKey = computeDocKey(file.name, file.size);
+            if (fileKey) {
+              seenKeys.add(fileKey);
+            }
+            filesAfterDuplicateCheck.push({ file, entryKey, fileKey });
           }
-        }
+        });
+      }
 
-        if (fileKey) {
-          seenKeys.add(fileKey);
-        }
+      // Step 2: Detect document types for all remaining files in parallel
+      // Only proceed if there are files to process
+      if (filesAfterDuplicateCheck.length === 0) {
+        // No files to process after duplicate check - reset uploading state
+        updateActionState(normalizedTypeKey, {
+          uploading: false,
+          error: null,
+          success: null
+        });
+        return;
+      }
 
-        // Throttle progress updates to reduce re-renders (max once per 100ms)
-        let lastProgressUpdate = 0;
-        const PROGRESS_THROTTLE_MS = 100;
+      const typeDetectionResults = await Promise.all(
+        filesAfterDuplicateCheck.map(async ({ file, entryKey, fileKey }) => {
+          // Detect document type
+          const detectedType = await detectDocumentType(file);
+          return { file, entryKey, fileKey, detectedType };
+        })
+      );
+
+      // Step 3: Collect mismatches and show batch modal
+      const filesWithMismatches = [];
+      const filesToProcess = [];
+      
+      for (const result of typeDetectionResults) {
+        const { file, entryKey, detectedType } = result;
         
+        // If detected type differs from selected type, collect for batch modal
+        if (detectedType && detectedType !== normalizedTypeKey) {
+          filesWithMismatches.push({
+            file,
+            entryKey,
+            selectedType: normalizedTypeKey,
+            detectedType
+          });
+        } else {
+          // No mismatch, upload to selected category
+          filesToProcess.push({
+            file,
+            entryKey,
+            targetTypeKey: normalizedTypeKey,
+            isMoved: false
+          });
+        }
+      }
+
+      // Show batch category mismatch modal if there are any mismatches
+      if (filesWithMismatches.length > 0) {
+        const mismatchResolutions = await requestBatchCategoryMismatch(filesWithMismatches);
+        
+        // Process mismatch resolutions
+        filesWithMismatches.forEach(({ file, entryKey, detectedType }) => {
+          const proceedWithCorrectType = mismatchResolutions[entryKey];
+          if (proceedWithCorrectType) {
+            // User chose to upload to correct category
+            filesToProcess.push({
+              file,
+              entryKey,
+              targetTypeKey: detectedType,
+              isMoved: true
+            });
+          } else {
+            // User chose to skip - remove from uploads list and mark as cancelled
+            updateActionState(normalizedTypeKey, (current) => {
+              const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+              return { ...current, uploads };
+            });
+            cancelled.push(file);
+          }
+        });
+      }
+
+      // Step 4: Process all uploads in parallel
+      if (filesToProcess.length === 0) {
+        // No files to process after duplicates/mismatches - reset uploading state
+        updateActionState(normalizedTypeKey, {
+          uploading: false,
+          error: null,
+          success: null
+        });
+        return;
+      }
+
+      const uploadPromises = filesToProcess.map(async ({ file, entryKey, targetTypeKey, isMoved }) => {
+        const isCorrectCategory = targetTypeKey !== normalizedTypeKey;
+        
+        // Create progress emitter for this file
+        let lastProgressUpdate = 0;
         const emitProgress = (phase, progress, message, extra = {}) => {
           const now = Date.now();
           const shouldUpdate = (now - lastProgressUpdate) >= PROGRESS_THROTTLE_MS || 
                                 progress === 100 || 
                                 progress === 0 ||
-                                phase === 'processing'; // Always update processing phase
+                                phase === 'processing';
           
           if (!shouldUpdate && progress !== 100 && progress !== 0) {
-            return; // Skip this update
+            return;
           }
           
           lastProgressUpdate = now;
           
-          updateActionState(normalizedTypeKey, (current) => {
+          updateActionState(targetTypeKey, (current) => {
             const uploads = (current.uploads || []).map((upload) => {
               if (upload.key !== entryKey) return upload;
               const clamped = Math.max(0, Math.min(progress ?? 0, 100));
@@ -539,53 +841,123 @@ const DocumentsPage = ({
           });
         };
 
+        // If moving to different category, update UI
+        if (isMoved && isCorrectCategory) {
+          // Remove from current type's upload list
+          updateActionState(normalizedTypeKey, (current) => {
+            const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
+            const hasOtherUploads = uploads.length > 0;
+            return { 
+              ...current, 
+              uploads,
+              uploading: hasOtherUploads ? current.uploading : false
+            };
+          });
+          
+          // Add to correct type's upload list
+          const newEntry = {
+            key: entryKey,
+            fileName: file.name,
+            uploadProgress: 5,
+            uploadMessage: 'Preparing upload…',
+            processingProgress: 0,
+            processingMessage: 'Waiting to start…',
+            status: 'uploading'
+          };
+          
+          updateActionState(targetTypeKey, (current) => ({
+            ...current,
+            uploading: true,
+            uploads: [...(current.uploads || []), newEntry]
+          }));
+          
+          // Initialize progress for moved file
+          emitProgress('upload', 5, 'Preparing upload…');
+        } else {
         emitProgress('upload', 5, 'Preparing file…');
+        }
 
         try {
-          // Skip data fetches during batch uploads - will fetch once at the end
           const skipDataFetch = files.length > 1;
-          const uploaded = await onUpload(normalizedTypeKey, file, {}, emitProgress, { skipDataFetch });
+          const uploaded = await onUpload(targetTypeKey, file, {}, emitProgress, { skipDataFetch });
 
           emitProgress('processing', 100, 'Processing complete.', { processedCount: 'complete' });
 
-          updateActionState(normalizedTypeKey, (current) => {
+          updateActionState(targetTypeKey, (current) => {
             const uploads = (current.uploads || []).map((upload) => (
               upload.key === entryKey
                 ? { ...upload, status: 'success' }
                 : upload
             ));
-            return { ...current, uploads };
+            const hasOtherUploads = uploads.some(u => u.key !== entryKey && u.status === 'uploading');
+            return { 
+              ...current, 
+              uploads,
+              uploading: hasOtherUploads,
+              success: filesToProcess.length === 1 ? `${file.name} uploaded` : null
+            };
           });
 
           setTimeout(() => {
-            updateActionState(normalizedTypeKey, (current) => {
+            updateActionState(targetTypeKey, (current) => {
               const uploads = (current.uploads || []).filter((upload) => upload.key !== entryKey);
-              return { ...current, uploads };
+              const hasOtherUploads = uploads.length > 0;
+              return { 
+                ...current, 
+                uploads,
+                uploading: hasOtherUploads ? current.uploading : false
+              };
             });
           }, 400);
 
-          if (uploaded) {
-            // Batch document updates instead of updating immediately
-            uploadedDocuments.push(uploaded);
+          if (isMoved && isCorrectCategory) {
+            movedToOtherCategories.add(file.name);
           }
 
-          completed.push(file);
+          return { file, uploaded, success: true, targetTypeKey, isMoved, isCorrectCategory };
         } catch (error) {
           emitProgress('processing', 100, error?.message || 'Processing failed');
-          updateActionState(normalizedTypeKey, (current) => {
+          updateActionState(targetTypeKey, (current) => {
             const uploads = (current.uploads || []).map((upload) => (
               upload.key === entryKey
                 ? { ...upload, status: 'error' }
                 : upload
             ));
+            const hasOtherUploads = uploads.some(u => u.key !== entryKey && u.status === 'uploading');
             return {
               ...current,
               uploads,
+              uploading: hasOtherUploads,
               error: error?.message || 'Upload failed'
             };
           });
+          return { file, uploaded: null, success: false, error, targetTypeKey, isMoved, isCorrectCategory };
         }
-      }
+      });
+
+      // Wait for all uploads to complete (use allSettled to handle errors gracefully)
+      const uploadResults = await Promise.allSettled(uploadPromises);
+      
+      // Collect results and track moved categories
+      const movedCategories = new Set();
+      uploadResults.forEach((result) => {
+        if (result.status === 'fulfilled') {
+          const { file, uploaded, success, targetTypeKey, isMoved, isCorrectCategory } = result.value;
+          if (success) {
+            completed.push(file);
+            if (uploaded) {
+              uploadedDocuments.push(uploaded);
+            }
+          }
+          // Track categories that files were moved to
+          if (isMoved && isCorrectCategory && targetTypeKey !== normalizedTypeKey) {
+            movedCategories.add(targetTypeKey);
+          }
+        } else {
+          // Handle rejected promises
+          console.error('Upload promise rejected:', result.reason);
+        }
+      });
 
       // Batch update all uploaded documents at once to prevent multiple re-renders
       if (uploadedDocuments.length > 0) {
@@ -628,16 +1000,31 @@ const DocumentsPage = ({
         });
       }
 
-      const hadFailures = (completed.length + cancelled.length) < files.length;
+      // Filter out files that were moved to other categories
+      const completedInThisCategory = completed.filter(f => !movedToOtherCategories.has(f.name));
+      const hadFailures = (completedInThisCategory.length + cancelled.length) < files.length;
+      
+      // Reset uploading state for original category
       updateActionState(normalizedTypeKey, {
         uploading: false,
         error: hadFailures ? 'Some uploads failed' : null,
         success:
-          completed.length > 0
-            ? completed.length === 1
-              ? `${completed[0].name} uploaded`
-              : `${completed.length} files uploaded`
+          completedInThisCategory.length > 0
+            ? completedInThisCategory.length === 1
+              ? `${completedInThisCategory[0].name} uploaded`
+              : `${completedInThisCategory.length} files uploaded`
             : null
+      });
+      
+      // Reset uploading state for moved categories
+      movedCategories.forEach(categoryKey => {
+        updateActionState(categoryKey, (current) => {
+          const hasActiveUploads = (current.uploads || []).some(u => u.status === 'uploading');
+          return {
+            ...current,
+            uploading: hasActiveUploads
+          };
+        });
       });
     } catch (error) {
       updateActionState(normalizedTypeKey, {
@@ -645,7 +1032,7 @@ const DocumentsPage = ({
         error: error?.message || 'Upload failed'
       });
     }
-  }, [onUpload, onRefresh, updateActionState, documentsState, requestDuplicateConfirmation]);
+  }, [onUpload, onRefresh, updateActionState, documentsState, requestBatchDuplicateConfirmation, requestBatchCategoryMismatch]);
 
   const handleDelete = useCallback(async (document) => {
     if (!document?.id) {
@@ -758,6 +1145,156 @@ const DocumentsPage = ({
     }
   }, [bulkConfirmState, onDeleteAll, updateActionState, closeBulkConfirm]);
 
+  const [autoDetectUploading, setAutoDetectUploading] = useState(false);
+  const autoDetectFileInputRef = useRef(null);
+  const [unknownFilesModal, setUnknownFilesModal] = useState({
+    open: false,
+    files: []
+  });
+  const [categoryMismatchModal, setCategoryMismatchModal] = useState({
+    open: false,
+    files: [], // Array of { file, entryKey, selectedType, detectedType }
+    resolved: {} // Map of entryKey -> boolean (user's decision)
+  });
+  const categoryMismatchModalRef = useRef(categoryMismatchModal);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    categoryMismatchModalRef.current = categoryMismatchModal;
+  }, [categoryMismatchModal]);
+
+  const getDocumentTypeLabel = useCallback((typeKey) => {
+    if (!typeKey || !documentTypes) return humanizeDocumentType(typeKey);
+    const normalizedKey = normalizeTypeKey(typeKey);
+    const type = documentTypes.find(t => normalizeTypeKey(t.key) === normalizedKey);
+    return type ? type.label : humanizeDocumentType(typeKey);
+  }, [documentTypes]);
+
+  const detectDocumentType = useCallback(async (file) => {
+    if (!file) return null;
+    
+    try {
+      // Get session token from localStorage
+      const sessionToken = typeof window !== 'undefined' ? localStorage.getItem('sessionToken') : null;
+      if (!sessionToken) {
+        console.warn('No session token available for document type detection');
+        return null;
+      }
+      
+      // Create FormData with file
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      
+      // Call backend detection endpoint
+      const response = await fetch(`${API_BASE_URL}/api/documents/detect-type`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: formData
+      });
+      
+      if (response.status === 401) {
+        // Authentication failed - clear session
+        localStorage.removeItem('sessionToken');
+        localStorage.removeItem('user');
+        // Trigger page reload to show login screen
+        window.location.reload();
+        return null;
+      }
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error detecting document type:', errorData.error);
+        return null;
+      }
+      
+      const responseData = await response.json();
+      console.log('Detection response for', file.name, ':', responseData);
+      
+      // Handle wrapped response from authentication decorator
+      const data = responseData.data || responseData;
+      return data.documentType || null;
+    } catch (error) {
+      console.error('Error detecting document type for', file.name, ':', error);
+      return null;
+    }
+  }, []);
+
+  const handleAutoDetectUpload = useCallback(async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    
+    const files = Array.from(fileList);
+    setAutoDetectUploading(true);
+    
+    try {
+      // Create file copies for detection (to avoid consuming the original file objects)
+      // We'll store both the original file and create a new File from blob for detection
+      const filesWithBlobs = await Promise.all(
+        files.map(async (file) => {
+          // Create a new File object from the blob so we can reuse the original
+          const blob = file.slice ? file.slice(0, file.size, file.type) : file;
+          const fileCopy = new File([blob], file.name, { type: file.type });
+          return { original: file, copy: fileCopy };
+        })
+      );
+      
+      // Detect types for all files using copies
+      const detectionPromises = filesWithBlobs.map(async ({ original, copy }) => {
+        const detectedType = await detectDocumentType(copy);
+        return { file: original, detectedType };
+      });
+      
+      const detectionResults = await Promise.all(detectionPromises);
+      
+      console.log('All detection results:', detectionResults);
+      
+      // Group files by detected type
+      const filesByType = {};
+      const unknownFiles = [];
+      
+      detectionResults.forEach(({ file, detectedType }) => {
+        console.log('Processing result - file:', file.name, 'detectedType:', detectedType);
+        if (detectedType) {
+          if (!filesByType[detectedType]) {
+            filesByType[detectedType] = [];
+          }
+          filesByType[detectedType].push(file);
+        } else {
+          unknownFiles.push(file);
+        }
+      });
+      
+      console.log('Grouped by type:', Object.keys(filesByType));
+      console.log('Unknown files:', unknownFiles.map(f => f.name));
+      
+      // Upload files grouped by type
+      for (const [typeKey, typeFiles] of Object.entries(filesByType)) {
+        await handleFilesSelected(typeKey, typeFiles);
+      }
+      
+      // Show warning for unknown files using modal
+      if (unknownFiles.length > 0) {
+        setUnknownFilesModal({
+          open: true,
+          files: unknownFiles.map(f => f.name)
+        });
+      }
+    } catch (error) {
+      console.error('Error in auto-detect upload:', error);
+      setUnknownFilesModal({
+        open: true,
+        files: [],
+        error: error.message || 'Error uploading files'
+      });
+    } finally {
+      setAutoDetectUploading(false);
+      if (autoDetectFileInputRef.current) {
+        autoDetectFileInputRef.current.value = '';
+      }
+    }
+  }, [detectDocumentType, handleFilesSelected]);
+
   return (
     <div className="documents-page">
       <div className="documents-toolbar">
@@ -767,6 +1304,35 @@ const DocumentsPage = ({
             Upload bank statements, broker reports, or loan documents.
           </p>
         </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <label
+            className="document-card-settings-button"
+            style={{
+              cursor: autoDetectUploading ? 'not-allowed' : 'pointer',
+              opacity: autoDetectUploading ? 0.5 : 1,
+              width: 'auto',
+              padding: '8px 16px',
+              fontSize: '13px',
+              fontWeight: '500'
+            }}
+            title="Upload multiple documents from different banks. The system will automatically detect the document type and categorize them correctly."
+          >
+            <input
+              ref={autoDetectFileInputRef}
+              type="file"
+              accept=".csv,.CSV,.pdf,.PDF"
+              multiple
+              onChange={(event) => {
+                if (event.target.files && event.target.files.length > 0) {
+                  handleAutoDetectUpload(event.target.files);
+                }
+                event.target.value = '';
+              }}
+              disabled={autoDetectUploading}
+              style={{ display: 'none' }}
+            />
+            {autoDetectUploading ? 'Detecting...' : 'Automatic Upload'}
+          </label>
         <div style={{ position: 'relative' }}>
           <button
             ref={globalSettingsButtonRef}
@@ -778,7 +1344,7 @@ const DocumentsPage = ({
           >
             <i className="fa-solid fa-gear"></i>
           </button>
-          {openGlobalSettings && (
+          {openGlobalSettings && !showWipeConfirm && (
             <div
               ref={globalSettingsMenuRef}
               className="document-card-menu"
@@ -814,8 +1380,8 @@ const DocumentsPage = ({
                 <button
                   className="danger-button"
                   onClick={() => {
-                    onWipeData();
                     setOpenGlobalSettings(false);
+                    onWipeData();
                   }}
                   disabled={wipeState?.loading}
                   style={{ width: '100%', fontSize: '13px', padding: '8px 12px' }}
@@ -825,6 +1391,7 @@ const DocumentsPage = ({
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
 
@@ -1012,6 +1579,26 @@ const DocumentsPage = ({
                                       doc.document_metadata?.file_info?.document_type ||
                                       doc.metadata?.file_info?.document_type
                                     );
+                                    
+                                    // Get document metadata - use consistent source
+                                    // Also check if this document is currently being uploaded (merge progress if available)
+                                    const docMetadata = doc?.documentMetadata || doc?.metadata || {};
+                                    const docName = doc.originalName || doc.original_name || doc.file_name;
+                                    
+                                    // Check if this document is in the upload queue for this type
+                                    const currentUpload = actionState[docTypeValue]?.uploads?.find(
+                                      u => u.fileName === docName
+                                    );
+                                    
+                                    // Use upload progress if available, otherwise use document metadata
+                                    const summary = docMetadata.statementSummary;
+                                    const processingStatus = currentUpload 
+                                      ? (currentUpload.processingProgress < 100 ? 'processing' : docMetadata.processingStatus)
+                                      : docMetadata.processingStatus;
+                                    const processingProgress = currentUpload?.processingProgress ?? docMetadata.processingProgress;
+                                    const processingTotal = docMetadata.processingTotal;
+                                    const processingProcessed = docMetadata.processingProcessed;
+                                    
                                     return (
                                     <li className="document-item" key={doc.id}>
                                       <div className="document-item-info">
@@ -1023,8 +1610,28 @@ const DocumentsPage = ({
                                           {formatDateTime(doc.uploadedAt || doc.uploaded_at)}
                                         </span>
                                         {(() => {
-                                          const summary = doc?.documentMetadata?.statementSummary || doc?.metadata?.statementSummary;
-                                          if (summary && (summary.startDate || summary.endDate)) {
+                                          // Show processing status if document is still processing
+                                          // Check processing status FIRST, before checking summary
+                                          // Only show if status is explicitly 'processing' (not 'pending' unless there's actual progress)
+                                          const isActuallyProcessing = processingStatus === 'processing' || 
+                                            (processingStatus === 'pending' && (processingProgress !== undefined || processingTotal !== undefined));
+                                          
+                                          if (isActuallyProcessing) {
+                                            const progressText = processingProgress !== undefined && processingTotal !== undefined
+                                              ? `${processingProcessed || 0}/${processingTotal} (${processingProgress || 0}%)`
+                                              : processingProgress !== undefined
+                                              ? `${processingProgress}%`
+                                              : 'Processing...';
+                                            return (
+                                              <span className="document-summary" style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic' }}>
+                                                Processing... {progressText !== 'Processing...' && `(${progressText})`}
+                                              </span>
+                                            );
+                                          }
+                                          
+                                          // Show coverage if available (only if processing is complete)
+                                          const hasSummary = summary && (summary.startDate || summary.endDate);
+                                          if (hasSummary && processingStatus === 'complete') {
                                             return (
                                               <span className="document-summary">
                                                 <span style={{ color: 'var(--color-text-tertiary)' }}>Coverage:</span>
@@ -1034,6 +1641,8 @@ const DocumentsPage = ({
                                               </span>
                                             );
                                           }
+                                          
+                                          // If no summary but processing is complete, show nothing (or could show "No transactions")
                                           return null;
                                         })()}
                                       </div>
@@ -1185,10 +1794,10 @@ const DocumentsPage = ({
         </div>
       )}
 
-      {duplicateState.open && (
+      {duplicateState.open && duplicateState.files.length > 0 && (
         <div
           className="modal-overlay open"
-          onClick={dismissDuplicatePrompt}
+          onClick={() => resolveBatchDuplicates(false)}
         >
           <div
             className="modal-content open documents-duplicate-modal"
@@ -1196,18 +1805,26 @@ const DocumentsPage = ({
           >
             <div className="documents-confirm-header">
               <div>
-                <h3>Document already uploaded?</h3>
+                <h3>Duplicate documents detected</h3>
                 <p>
-                  <strong>{duplicateState.file?.name}</strong>{' '}
-                  ({formatFileSize(duplicateState.file?.size) || 'unknown size'}) appears to match a document you have already imported.
-                  Duplicate data will be filtered out. Continue?
+                  {duplicateState.files.some(f => f.duplicates?.[0]?.isBatchDuplicate) ? (
+                    <>
+                      <strong>{duplicateState.files.length}</strong> file{duplicateState.files.length === 1 ? '' : 's'} appear{duplicateState.files.length === 1 ? 's' : ''} multiple times in the current upload.
+                      Would you like to skip the duplicate{duplicateState.files.length === 1 ? '' : 's'}?
+                    </>
+                  ) : (
+                    <>
+                      <strong>{duplicateState.files.length}</strong> file{duplicateState.files.length === 1 ? '' : 's'} appear{duplicateState.files.length === 1 ? 's' : ''} to match documents you have already imported.
+                      Duplicate data will be filtered out. Continue with upload?
+                    </>
+                  )}
                 </p>
               </div>
               <button
                 className="modal-close-btn"
                 onClick={(event) => {
                   event.stopPropagation();
-                  dismissDuplicatePrompt();
+                  resolveBatchDuplicates(false);
                 }}
                 aria-label="Close duplicate warning"
               >
@@ -1216,33 +1833,76 @@ const DocumentsPage = ({
             </div>
 
             <div className="documents-duplicate-body">
-              {duplicateState.duplicates && duplicateState.duplicates.length > 0 ? (
                 <ul className="documents-duplicate-list">
-                  {duplicateState.duplicates.map((dup) => {
-                    const dupName = dup?.originalName || dup?.original_name || dup?.file_name;
-                    const dupSize =
-                      dup?.fileSize ??
-                      dup?.file_size ??
-                      dup?.metadata?.file_info?.original_size ??
-                      dup?.metadata?.file_info?.originalSize;
-                    const dupUploaded = dup?.uploadedAt || dup?.uploaded_at;
+                {duplicateState.files.map(({ file, entryKey, duplicates }) => {
+                  const fileName = file?.name || 'Unknown file';
+                  const fileSize = file?.size;
+                  const isResolved = duplicateState.resolved[entryKey] !== undefined;
+                  const proceed = duplicateState.resolved[entryKey];
+                  
                     return (
-                      <li key={`${dup?.id || dupName}`} className="documents-duplicate-item">
-                        <div className="documents-duplicate-name">{dupName || 'Unknown document'}</div>
-                        <div className="documents-duplicate-meta">
-                          <span>{formatFileSize(dupSize) || '—'}</span>
-                          <span>•</span>
-                          <span>{formatDateTime(dupUploaded) || '—'}</span>
+                    <li key={entryKey} className="documents-duplicate-item" style={{
+                      padding: '12px',
+                      marginBottom: '8px',
+                      backgroundColor: isResolved 
+                        ? (proceed ? 'var(--color-success-bg)' : 'var(--color-error-bg)')
+                        : 'var(--color-bg-tertiary)',
+                      border: `1px solid ${isResolved 
+                        ? (proceed ? 'var(--color-success)' : 'var(--color-error)')
+                        : 'var(--color-border-primary)'}`,
+                      borderRadius: '8px',
+                      transition: 'all 0.2s ease'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="documents-duplicate-name" style={{ fontWeight: '500', marginBottom: '4px', wordBreak: 'break-word' }}>
+                            {fileName}
+                          </div>
+                          <div className="documents-duplicate-meta" style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
+                            <span>{formatFileSize(fileSize) || '—'}</span>
+                            {duplicates && duplicates.length > 0 && (
+                              <>
+                                <span> • </span>
+                                {duplicates[0]?.isBatchDuplicate ? (
+                                  <span>Duplicate in current upload</span>
+                                ) : (
+                                  <span>Matches {duplicates.length} existing document{duplicates.length === 1 ? '' : 's'}</span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                          <button
+                            className="documents-cancel-button"
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              opacity: isResolved && !proceed ? 1 : 0.6,
+                              fontWeight: isResolved && !proceed ? '600' : '500'
+                            }}
+                            onClick={() => updateDuplicateResolution(entryKey, false)}
+                          >
+                            Skip
+                          </button>
+                          <button
+                            className="documents-primary-button"
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              opacity: isResolved && proceed ? 1 : 0.6,
+                              fontWeight: isResolved && proceed ? '600' : '500'
+                            }}
+                            onClick={() => updateDuplicateResolution(entryKey, true)}
+                          >
+                            Upload
+                          </button>
+                        </div>
                         </div>
                       </li>
                     );
                   })}
                 </ul>
-              ) : (
-                <div className="documents-duplicate-empty">
-                  Previously uploaded during this selection.
-                </div>
-              )}
             </div>
 
             <div className="documents-confirm-actions">
@@ -1250,19 +1910,21 @@ const DocumentsPage = ({
                 className="documents-cancel-button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  dismissDuplicatePrompt();
+                  resolveBatchDuplicates(false);
                 }}
+                aria-label="Skip all duplicate uploads"
               >
-                Cancel
+                Skip all
               </button>
               <button
-                className="documents-duplicate-continue"
+                className="documents-primary-button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  acceptDuplicatePrompt();
+                  resolveBatchDuplicates(true);
                 }}
+                aria-label="Upload all duplicates"
               >
-                Upload anyway
+                Upload all
               </button>
             </div>
           </div>
@@ -1416,6 +2078,203 @@ const DocumentsPage = ({
                 }}
               >
                 Delete all data
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {unknownFilesModal.open && (
+        <div
+          className="modal-overlay open"
+          onClick={() => setUnknownFilesModal({ open: false, files: [] })}
+        >
+          <div
+            className="modal-content open documents-confirm-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="documents-confirm-header">
+              <div>
+                <h3>{unknownFilesModal.error ? 'Upload Error' : 'Could not detect document type'}</h3>
+                <p>
+                  {unknownFilesModal.error ? (
+                    unknownFilesModal.error
+                  ) : (
+                    <>
+                      Could not automatically detect document type for{' '}
+                      <strong>{unknownFilesModal.files.length}</strong> file{unknownFilesModal.files.length === 1 ? '' : 's'}.
+                      Please upload these files manually by selecting the correct document type.
+                    </>
+                  )}
+                </p>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => setUnknownFilesModal({ open: false, files: [] })}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {unknownFilesModal.files.length > 0 && (
+              <div className="documents-confirm-body" style={{ overflowX: 'hidden' }}>
+                <ul style={{ 
+                  listStyle: 'none', 
+                  padding: 0, 
+                  margin: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  width: '100%',
+                  minWidth: 0
+                }}>
+                  {unknownFilesModal.files.map((fileName, idx) => (
+                    <li 
+                      key={idx}
+                      style={{
+                        padding: '8px 12px',
+                        backgroundColor: 'var(--color-bg-tertiary)',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        color: 'var(--color-text-primary)',
+                        fontFamily: 'monospace',
+                        wordBreak: 'break-all',
+                        overflowWrap: 'break-word',
+                        wordWrap: 'break-word',
+                        maxWidth: '100%',
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        boxSizing: 'border-box'
+                      }}
+                      title={fileName}
+                    >
+                      {fileName}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="documents-confirm-actions">
+              <button
+                className="documents-cancel-button"
+                onClick={() => setUnknownFilesModal({ open: false, files: [] })}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {categoryMismatchModal.open && categoryMismatchModal.files.length > 0 && (
+        <div
+          className="modal-overlay open"
+          onClick={() => resolveBatchCategoryMismatch(false)}
+        >
+          <div
+            className="modal-content open documents-confirm-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="documents-confirm-header">
+              <div>
+                <h3>Document type mismatch detected</h3>
+                <p>
+                  <strong>{categoryMismatchModal.files.length}</strong> file{categoryMismatchModal.files.length === 1 ? '' : 's'} appear{categoryMismatchModal.files.length === 1 ? 's' : ''} to be in a different category than selected.
+                  Would you like to upload {categoryMismatchModal.files.length === 1 ? 'it' : 'them'} to the correct categor{categoryMismatchModal.files.length === 1 ? 'y' : 'ies'} instead?
+                </p>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => resolveBatchCategoryMismatch(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="documents-confirm-body">
+              <ul style={{ 
+                listStyle: 'none', 
+                padding: 0, 
+                margin: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}>
+                {categoryMismatchModal.files.map(({ file, entryKey, selectedType, detectedType }) => {
+                  const fileName = file?.name || 'Unknown file';
+                  const isResolved = categoryMismatchModal.resolved[entryKey] !== undefined;
+                  const proceed = categoryMismatchModal.resolved[entryKey];
+                  
+                  return (
+                    <li key={entryKey} style={{
+                      padding: '12px',
+                      backgroundColor: isResolved 
+                        ? (proceed ? 'var(--color-success-bg)' : 'var(--color-error-bg)')
+                        : 'var(--color-bg-tertiary)',
+                      border: `1px solid ${isResolved 
+                        ? (proceed ? 'var(--color-success)' : 'var(--color-error)')
+                        : 'var(--color-border-primary)'}`,
+                      borderRadius: '8px',
+                      transition: 'all 0.2s ease'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: '500', marginBottom: '4px', wordBreak: 'break-word' }}>
+                            {fileName}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-tertiary)' }}>
+                            Selected: <strong>{getDocumentTypeLabel(selectedType)}</strong> • 
+                            Detected: <strong>{getDocumentTypeLabel(detectedType)}</strong>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                          <button
+                            className="documents-cancel-button"
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              opacity: isResolved && !proceed ? 1 : 0.6,
+                              fontWeight: isResolved && !proceed ? '600' : '500'
+                            }}
+                            onClick={() => updateCategoryMismatchResolution(entryKey, false)}
+                          >
+                            Skip
+                          </button>
+                          <button
+                            className="documents-primary-button"
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '12px',
+                              opacity: isResolved && proceed ? 1 : 0.6,
+                              fontWeight: isResolved && proceed ? '600' : '500'
+                            }}
+                            onClick={() => updateCategoryMismatchResolution(entryKey, true)}
+                          >
+                            Upload to correct category
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
+            <div className="documents-confirm-actions">
+              <button
+                className="documents-cancel-button"
+                onClick={() => resolveBatchCategoryMismatch(false)}
+              >
+                Skip documents
+              </button>
+              <button
+                className="documents-primary-button"
+                onClick={() => resolveBatchCategoryMismatch(true)}
+              >
+                Upload Documents to the correct Category
               </button>
             </div>
           </div>

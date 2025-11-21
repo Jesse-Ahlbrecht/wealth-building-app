@@ -7,6 +7,7 @@ Implements PostgreSQL with pgcrypto for encrypted data storage
 import os
 import uuid
 import hashlib
+import secrets
 import pg8000
 from contextlib import contextmanager
 from typing import Dict, List, Any, Optional, Generator
@@ -103,8 +104,45 @@ class WealthDatabase:
                 raise ValueError(f"Tenant '{tenant_id}' not found or inactive")
 
             tenant_db_id = result[0]
+            
+            # Ensure DEK exists for this tenant
+            self._ensure_tenant_dek(cursor, tenant_db_id)
 
             return tenant_db_id
+    
+    def _ensure_tenant_dek(self, cursor, tenant_db_id: int):
+        """
+        Ensure a DEK (Data Encryption Key) exists for the tenant.
+        Creates one if it doesn't exist.
+        
+        Args:
+            cursor: Database cursor
+            tenant_db_id: Tenant database ID
+        """
+        # Check if active DEK exists
+        cursor.execute(
+            """
+            SELECT id FROM encryption_keys 
+            WHERE tenant_id = %s AND key_type = 'dek' AND active = TRUE
+            LIMIT 1
+            """,
+            [tenant_db_id]
+        )
+        if cursor.fetchone():
+            return  # DEK already exists
+        
+        # Generate a new DEK (32 bytes = 256 bits)
+        dek_bytes = secrets.token_bytes(32)
+        
+        # Insert the DEK into encryption_keys table
+        cursor.execute(
+            """
+            INSERT INTO encryption_keys (tenant_id, key_version, key_type, encrypted_key, active)
+            VALUES (%s, 'v1', 'dek', %s, TRUE)
+            ON CONFLICT (tenant_id, key_version, key_type) DO NOTHING
+            """,
+            [tenant_db_id, dek_bytes]
+        )
 
     def get_or_create_user(self, tenant_id: str, username: str, email: str = None, name: str = None) -> Dict[str, Any]:
         """
@@ -158,28 +196,34 @@ class WealthDatabase:
         """
         Create a new transaction record with encrypted sensitive data
 
+        IMPORTANT ASSUMPTION: We do NOT check for duplicates within the same file.
+        If a transaction appears twice in the same file, it is assumed to be intentional
+        (e.g., a real double booking that should be visible to the user).
+        We only check for duplicates across different files to prevent re-importing
+        the same transaction from multiple bank statement files.
+
         Args:
             tenant_id: Tenant identifier
             account_id: Database account ID
             transaction_data: Transaction data dictionary
-            exclude_hashes: Set of transaction hashes to exclude from duplicate checking
-                          (used to allow duplicates within the same upload batch)
+            exclude_hashes: Set of transaction hashes (deprecated - kept for API compatibility but not used)
             source_document_id: ID of the document this transaction was imported from
 
         Returns:
-            Created transaction data
+            Created transaction data, or None if duplicate found across different files
         """
         tenant_db_id = self.set_tenant_context(tenant_id)
 
         # Calculate transaction hash for duplicate detection
         transaction_hash = self._calculate_transaction_hash(account_id, transaction_data)
 
-        # Check for duplicate, but skip if this hash is in the current batch
-        if exclude_hashes is None or transaction_hash not in exclude_hashes:
-            existing = self.get_transaction_by_hash(tenant_id, transaction_hash)
-            if existing:
-                print(f"Duplicate found: {transaction_data.get('recipient', 'Unknown')} on {transaction_data.get('date')} - skipping")
-                return existing
+        # Check for duplicate in database (across different files only)
+        # We do NOT check for duplicates within the same file - if a transaction appears
+        # twice in the same file, it's assumed to be intentional (real double booking)
+        existing = self.get_transaction_by_hash(tenant_id, transaction_hash)
+        if existing:
+            print(f"Duplicate found across files: {transaction_data.get('recipient', 'Unknown')} on {transaction_data.get('date')} - skipping")
+            return None  # Return None to indicate it was skipped
 
         with self.db.get_cursor() as cursor:
             cursor.execute("""
@@ -278,12 +322,13 @@ class WealthDatabase:
                 }
             return None
 
-    def get_transactions(self, tenant_id: str, limit: int = 1000, offset: int = 0) -> List[Dict[str, Any]]:
-        """Get paginated transactions for a tenant"""
+    def get_transactions(self, tenant_id: str, limit: int = 1000, offset: int = 0, source_document_id: int = None) -> List[Dict[str, Any]]:
+        """Get paginated transactions for a tenant, optionally filtered by source document ID"""
         tenant_db_id = self.set_tenant_context(tenant_id)
 
         with self.db.get_cursor() as cursor:
-            cursor.execute("""
+            # Build query with optional document filter
+            base_query = """
                 SELECT t.id, t.transaction_date, t.amount, t.currency, t.transaction_type,
                        decrypt_tenant_data(t.encrypted_description, %s) as description,
                        decrypt_tenant_data(t.encrypted_recipient, %s) as recipient,
@@ -292,9 +337,16 @@ class WealthDatabase:
                        a.account_name, a.account_type
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.id
-                ORDER BY t.transaction_date DESC, t.created_at DESC
-                LIMIT %s OFFSET %s
-            """, [tenant_db_id, tenant_db_id, tenant_db_id, limit, offset])
+            """
+            
+            if source_document_id:
+                query = base_query + " WHERE t.source_document_id = %s ORDER BY t.transaction_date DESC, t.created_at DESC LIMIT %s OFFSET %s"
+                params = [tenant_db_id, tenant_db_id, tenant_db_id, source_document_id, limit, offset]
+            else:
+                query = base_query + " ORDER BY t.transaction_date DESC, t.created_at DESC LIMIT %s OFFSET %s"
+                params = [tenant_db_id, tenant_db_id, tenant_db_id, limit, offset]
+            
+            cursor.execute(query, params)
 
             results = []
             for row in cursor.fetchall():
@@ -983,6 +1035,55 @@ class WealthDatabase:
             import traceback
             traceback.print_exc()
             # Do not raise, caching is best-effort
+
+    def update_file_attachment_metadata(self, tenant_id: str, file_id: int, 
+                                       metadata_updates: Dict[str, Any]) -> bool:
+        """Update metadata for a file attachment by merging new metadata into existing metadata."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+        
+        with self.db.get_cursor() as cursor:
+            # Get current metadata
+            cursor.execute("""
+                SELECT encryption_metadata
+                FROM file_attachments
+                WHERE tenant_id = %s AND id = %s
+            """, (tenant_db_id, file_id))
+            
+            result = cursor.fetchone()
+            if not result:
+                return False
+            
+            # Parse existing metadata
+            current_metadata = result[0]
+            if isinstance(current_metadata, str):
+                try:
+                    current_metadata = json.loads(current_metadata)
+                except json.JSONDecodeError:
+                    current_metadata = {}
+            elif current_metadata is None:
+                current_metadata = {}
+            
+            # Merge updates into existing metadata
+            # Deep merge: update nested dictionaries
+            def deep_merge(base: Dict, updates: Dict) -> Dict:
+                result = base.copy()
+                for key, value in updates.items():
+                    if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                        result[key] = deep_merge(result[key], value)
+                    else:
+                        result[key] = value
+                return result
+            
+            updated_metadata = deep_merge(current_metadata, metadata_updates)
+            
+            # Update database
+            cursor.execute("""
+                UPDATE file_attachments
+                SET encryption_metadata = %s::jsonb
+                WHERE tenant_id = %s AND id = %s
+            """, (json.dumps(updated_metadata), tenant_db_id, file_id))
+            
+            return True
 
 
 # Global instance

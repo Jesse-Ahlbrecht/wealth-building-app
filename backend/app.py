@@ -81,6 +81,195 @@ DOCUMENT_TYPES = [
 DOCUMENT_TYPE_LOOKUP = {doc['key']: doc for doc in DOCUMENT_TYPES}
 
 
+def detect_document_type_from_content(file_content: bytes, filename: str) -> Optional[str]:
+    """
+    Detect document type from file content structure (column names, text patterns).
+    Returns the document type key or None if detection fails.
+    """
+    if not file_content:
+        return None
+    
+    extension = os.path.splitext(filename)[1].lower()
+    
+    # For CSV files, detect based on column names
+    if extension == '.csv':
+        try:
+            # Try different encodings
+            encodings = ['utf-8-sig', 'utf-8', 'windows-1252', 'iso-8859-1', 'cp1252']
+            text_content = None
+            
+            for encoding in encodings:
+                try:
+                    text_content = file_content.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if text_content is None:
+                return None
+            
+            # Read first few lines to find header
+            lines = text_content.split('\n')[:50]  # Check first 50 lines (DKB files have metadata)
+            
+            # Find header row - look for actual CSV headers, not just any line with semicolons
+            header_line = None
+            header_idx = None
+            
+            for i, line in enumerate(lines):
+                line_upper = line.upper()
+                # YUH detection: Look for DATE column (YUH files start with header immediately)
+                if 'DATE' in line_upper and ('DEBIT' in line_upper or 'CREDIT' in line_upper) and 'ACTIVITY' in line_upper:
+                    header_line = line
+                    header_idx = i
+                    break
+                # DKB detection: Look for Buchungstag/Buchungsdatum (DKB has metadata before header)
+                elif ('BUCHUNGSTAG' in line_upper or 'BUCHUNGSDATUM' in line_upper or 
+                      ('BUCHUNG' in line_upper and 'BETRAG' in line_upper)):
+                    header_line = line
+                    header_idx = i
+                    break
+                # ING DiBa detection: Look for ISIN column
+                elif 'ISIN' in line_upper and ('WERTPAPIERNAME' in line_upper or 'WERTPAPIER' in line_upper):
+                    header_line = line
+                    header_idx = i
+                    break
+            
+            if not header_line:
+                # Fallback: try to find any line that looks like a CSV header
+                for i, line in enumerate(lines):
+                    if ';' in line and len(line.split(';')) >= 3:  # At least 3 columns
+                        # Check if it looks like a header (has text, not just numbers)
+                        parts = line.split(';')
+                        text_parts = [p for p in parts if any(c.isalpha() for c in p)]
+                        if len(text_parts) >= 2:
+                            header_line = line
+                            header_idx = i
+                            break
+            
+            if not header_line:
+                print(f"Could not find CSV header in file {filename}")
+                return None
+            
+            # Normalize header: remove quotes and split
+            header_normalized = header_line.replace('"', '').strip()
+            columns = [col.strip().upper() for col in header_normalized.split(';')]
+            
+            print(f"Detected columns for {filename}: {columns[:5]}...")  # Debug: print first 5 columns
+            
+            # YUH Bank Statement detection
+            # Has columns: DATE, DEBIT, CREDIT, DEBIT CURRENCY, CREDIT CURRENCY, ACTIVITY NAME, RECIPIENT
+            if 'DATE' in columns and ('DEBIT' in columns or 'CREDIT' in columns):
+                # Check for ACTIVITY NAME or ACTIVITY TYPE (YUH specific)
+                if 'ACTIVITY NAME' in columns or 'ACTIVITY TYPE' in columns or 'ACTIVITY' in columns:
+                    print(f"Detected as YUH bank statement")
+                    return 'bank_statement_yuh'
+            
+            # DKB Bank Statement detection
+            # Has columns: Buchungstag or Buchungsdatum, Betrag, Verwendungszweck
+            if ('BUCHUNGSTAG' in columns or 'BUCHUNGSDATUM' in columns or 
+                ('BUCHUNG' in columns and 'BETRAG' in columns)):
+                print(f"Detected as DKB bank statement")
+                return 'bank_statement_dkb'
+            
+            # ING DiBa Broker detection
+            # Has columns: ISIN, Wertpapiername, Stück/Nominale, Einstandswert
+            if 'ISIN' in columns and ('WERTPAPIERNAME' in columns or 'WERTPAPIER' in columns):
+                print(f"Detected as ING DiBa broker")
+                return 'broker_ing_diba_csv'
+            
+        except Exception as e:
+            print(f"Error detecting CSV document type: {e}")
+            return None
+    
+    # For PDF files, detect based on text content
+    elif extension == '.pdf':
+        try:
+            # Extract text from PDF
+            import tempfile
+            import uuid
+            
+            # Save to temp file
+            temp_dir = tempfile.gettempdir()
+            temp_filename = f"{uuid.uuid4()}_{filename}"
+            temp_path = os.path.join(temp_dir, temp_filename)
+            
+            with open(temp_path, 'wb') as f:
+                f.write(file_content)
+            
+            try:
+                reader = PdfReader(temp_path)
+                text = ""
+                # Read first 2 pages for detection (usually enough)
+                for page in reader.pages[:2]:
+                    text += page.extract_text()
+                
+                text_upper = text.upper()
+                
+                # KfW Loan detection
+                # Contains: "KfW", "Kontoauszug per", "Darlehenskonto-Nr", "Kreditprogramm"
+                if ('KFW' in text_upper or 'KFW' in text) and 'KONTOAUSZUG PER' in text_upper and 'DARLEHENSKONTO' in text_upper:
+                    return 'loan_kfw_pdf'
+                
+                # VIAC Broker detection
+                # Contains: "VIAC", "ISIN", "Valuta", "Verrechneter Betrag"
+                if 'VIAC' in text_upper and 'ISIN' in text_upper and ('VALUTA' in text_upper or 'VERRECHNETER BETRAG' in text_upper):
+                    return 'broker_viac_pdf'
+                
+            finally:
+                # Clean up temp file
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"Error detecting PDF document type: {e}")
+            return None
+    
+    return None
+
+
+def detect_document_type(filename: str) -> Optional[str]:
+    """
+    Legacy function: Detect document type from filename based on patterns.
+    Returns the document type key or None if detection fails.
+    This is kept for backward compatibility but should use detect_document_type_from_content instead.
+    """
+    if not filename:
+        return None
+    
+    filename_lower = filename.lower()
+    extension = os.path.splitext(filename)[1].lower()
+    
+    # Bank statements - CSV files
+    if extension == '.csv':
+        if 'yuh' in filename_lower or 'aktivit' in filename_lower:
+            return 'bank_statement_yuh'
+        elif 'umsatzliste' in filename_lower or 'girokonto' in filename_lower or 'tagesgeld' in filename_lower or 'dkb' in filename_lower:
+            return 'bank_statement_dkb'
+        # Default to DKB if CSV and no clear indicator
+        return 'bank_statement_dkb'
+    
+    # Broker reports
+    if extension == '.pdf':
+        if 'viac' in filename_lower:
+            return 'broker_viac_pdf'
+        elif 'ing' in filename_lower or 'diba' in filename_lower or 'depot' in filename_lower:
+            return 'broker_ing_diba_csv'
+    
+    if extension == '.csv':
+        if 'ing' in filename_lower or 'diba' in filename_lower or 'depot' in filename_lower:
+            return 'broker_ing_diba_csv'
+    
+    # Loan documents
+    if extension == '.pdf':
+        if 'kfw' in filename_lower or 'kredit' in filename_lower:
+            return 'loan_kfw_pdf'
+    
+    # If we can't detect, return None
+    return None
+
+
 def _get_authenticated_user_id() -> Optional[int]:
     """Extract the authenticated user's integer ID from session claims."""
     if not getattr(g, 'session_claims', None):
@@ -96,9 +285,10 @@ def _get_authenticated_user_id() -> Optional[int]:
         return None
 
 
-def _serialize_document_record(record: Dict[str, Any]) -> Dict[str, Any]:
+def _serialize_document_record(record: Dict[str, Any], tenant_id: str = None) -> Dict[str, Any]:
     """
     Convert a raw attachment record into the API response shape.
+    Optionally calculates statementSummary from transactions if missing.
     """
     uploaded_at = record.get('uploaded_at')
     if hasattr(uploaded_at, 'isoformat'):
@@ -119,8 +309,60 @@ def _serialize_document_record(record: Dict[str, Any]) -> Dict[str, Any]:
             or {}
         )
 
+    # If statementSummary is missing, try to calculate it from transactions
+    document_id = record.get('id')
+    if document_id and tenant_id and not document_metadata.get('statementSummary'):
+        try:
+            # Get transactions for this document
+            transactions = wealth_db.get_transactions(tenant_id, source_document_id=document_id, limit=10000)
+            if transactions:
+                dates = []
+                for txn in transactions:
+                    # Transactions are decrypted, so date should be accessible
+                    txn_date = txn.get('date') or txn.get('transaction_date')
+                    if txn_date:
+                        try:
+                            from datetime import datetime, date
+                            if isinstance(txn_date, date):
+                                dates.append(txn_date)
+                            elif isinstance(txn_date, datetime):
+                                dates.append(txn_date.date())
+                            elif isinstance(txn_date, str):
+                                # Parse ISO format date string
+                                try:
+                                    date_obj = datetime.fromisoformat(txn_date.replace('Z', '+00:00'))
+                                    dates.append(date_obj.date())
+                                except ValueError:
+                                    # Try other formats
+                                    try:
+                                        date_obj = datetime.strptime(txn_date, '%Y-%m-%d')
+                                        dates.append(date_obj.date())
+                                    except ValueError:
+                                        pass
+                        except Exception as parse_error:
+                            pass
+                
+                if dates:
+                    min_date = min(dates)
+                    max_date = max(dates)
+                    # Preserve existing processingStatus if document is still processing
+                    # Only set statementSummary, don't overwrite processingStatus
+                    document_metadata['statementSummary'] = {
+                        'startDate': min_date.isoformat(),
+                        'endDate': max_date.isoformat(),
+                        'imported': len(transactions),
+                        'skipped': 0
+                    }
+                    # Don't overwrite processingStatus - it should be set by the upload-csv endpoint
+                    # If processingStatus is not set, it means processing is complete
+                    if 'processingStatus' not in document_metadata:
+                        document_metadata['processingStatus'] = 'complete'
+        except Exception as e:
+            # Silently fail - don't break document listing if coverage calculation fails
+            print(f"Warning: Could not calculate coverage for document {document_id}: {e}")
+
     return {
-        'id': record.get('id'),
+        'id': document_id,
         'documentType': record.get('file_type'),
         'originalName': record.get('original_name'),
         'fileSize': record.get('file_size'),
@@ -2491,7 +2733,12 @@ def upload_statement():
                 'uploaded_at': datetime.now(timezone.utc).isoformat(),
                 'document_type': document_type
             },
-            'document_metadata': document_metadata
+            'document_metadata': {
+                **(document_metadata or {}),
+                # Only set pending for CSV files that will be processed
+                # PDFs and other files don't need processing, so mark as complete immediately
+                'processingStatus': 'complete' if document_type and not any(ext in document_type for ext in ['csv', 'CSV']) else 'pending'
+            }
         }
 
         # Encrypt with server-side encryption
@@ -2532,7 +2779,7 @@ def get_documents():
     try:
         tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
         attachments = wealth_db.list_file_attachments(tenant_id)
-        documents = [_serialize_document_record(record) for record in attachments]
+        documents = [_serialize_document_record(record, tenant_id=tenant_id) for record in attachments]
 
         return jsonify({
             'documentTypes': DOCUMENT_TYPES,
@@ -2543,6 +2790,41 @@ def get_documents():
         import traceback
         traceback.print_exc()
         return jsonify({'error': 'Failed to load documents'}), 500
+
+
+@app.route('/api/documents/detect-type', methods=['POST'])
+@authenticate_request
+@require_auth
+def detect_document_type_endpoint():
+    """Detect document type from file content structure."""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Read file content
+        file_content = file.read()
+        print(f"🔍 Detecting document type for file: {file.filename}, size: {len(file_content)} bytes")
+        detected_type = detect_document_type_from_content(file_content, file.filename)
+        
+        if detected_type:
+            print(f"✅ Detected type: {detected_type} for {file.filename}")
+        else:
+            print(f"❌ Could not detect type for {file.filename}")
+        
+        return jsonify({
+            'success': True,
+            'documentType': detected_type,
+            'filename': file.filename
+        })
+    except Exception as e:
+        print(f"Error detecting document type: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Failed to detect document type: {str(e)}'}), 500
 
 
 @app.route('/api/documents/upload', methods=['POST'])
@@ -2817,6 +3099,24 @@ def upload_csv():
                 'status': 'parsing'
             }
         
+        # Mark document as processing if document_id is provided
+        if document_id:
+            try:
+                wealth_db.update_file_attachment_metadata(
+                    tenant_id=tenant_id,
+                    file_id=document_id,
+                    metadata_updates={
+                        'document_metadata': {
+                            'processingStatus': 'processing',
+                            'processingProgress': 0,
+                            'processingTotal': 0,
+                            'processingProcessed': 0
+                        }
+                    }
+                )
+            except Exception as e:
+                print(f"Warning: Could not update processing status: {e}")
+        
         # Save file temporarily
         import tempfile
         import uuid
@@ -2873,6 +3173,16 @@ def upload_csv():
             if len(transactions) == 0:
                 if upload_id:
                     upload_progress.pop(upload_id, None)
+                # Mark document as complete even if no transactions
+                if document_id:
+                    try:
+                        wealth_db.update_file_attachment_metadata(
+                            tenant_id=tenant_id,
+                            file_id=document_id,
+                            metadata_updates={'document_metadata': {'processingStatus': 'complete'}}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Could not update processing status: {e}")
                 return jsonify({
                     'success': False,
                     'error': 'No transactions found in CSV file. Please check the file format.',
@@ -2890,15 +3200,33 @@ def upload_csv():
                     'status': 'processing'
                 }
             
+            # Update document metadata with total count when we know it
+            if document_id:
+                try:
+                    wealth_db.update_file_attachment_metadata(
+                        tenant_id=tenant_id,
+                        file_id=document_id,
+                        metadata_updates={
+                            'document_metadata': {
+                                'processingStatus': 'processing',
+                                'processingProgress': 0,
+                                'processingTotal': len(transactions),
+                                'processingProcessed': 0
+                            }
+                        }
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not update processing progress: {e}")
+            
             print(f"Starting to import {len(transactions)} transactions into database...")
             # Create accounts and transactions in database
             created_accounts = {}
             imported_count = 0
             skipped_count = 0
             
-            # Pre-calculate hashes for all transactions in this batch
-            # This allows us to skip duplicate checking within the same file
-            current_batch_hashes = set()
+            # IMPORTANT: We do NOT track hashes within the same file.
+            # If a transaction appears twice in the same file, it's assumed to be intentional
+            # (e.g., a real double booking). We only check for duplicates across different files.
             
             for idx, trans in enumerate(transactions):
                 if (idx + 1) % 100 == 0:
@@ -2908,6 +3236,25 @@ def upload_csv():
                         upload_progress[upload_id]['processed'] = idx + 1
                         upload_progress[upload_id]['imported'] = imported_count
                         upload_progress[upload_id]['skipped'] = skipped_count
+                    
+                    # Update document metadata with progress percentage
+                    if document_id:
+                        try:
+                            progress_percent = int((idx + 1) / len(transactions) * 100) if len(transactions) > 0 else 0
+                            wealth_db.update_file_attachment_metadata(
+                                tenant_id=tenant_id,
+                                file_id=document_id,
+                                metadata_updates={
+                                    'document_metadata': {
+                                        'processingStatus': 'processing',
+                                        'processingProgress': progress_percent,
+                                        'processingTotal': len(transactions),
+                                        'processingProcessed': idx + 1
+                                    }
+                                }
+                            )
+                        except Exception as e:
+                            print(f"Warning: Could not update processing progress: {e}")
                 
                 account_name = trans.get('account', 'Unknown')
                 
@@ -2962,12 +3309,11 @@ def upload_csv():
                         'category': trans.get('category', 'Uncategorized')
                     }
 
-                    result = wealth_db.create_transaction(tenant_id, account_id, transaction_data, current_batch_hashes, document_id)
+                    # Pass None for exclude_hashes since we don't check duplicates within the same file
+                    # If a transaction appears twice in the same file, it's assumed to be intentional
+                    result = wealth_db.create_transaction(tenant_id, account_id, transaction_data, None, document_id)
                     if result:
                         imported_count += 1
-                        # Add the hash of successfully imported transaction to the batch set
-                        if 'transaction_hash' in result:
-                            current_batch_hashes.add(result['transaction_hash'])
                     else:
                         skipped_count += 1
 
@@ -2989,6 +3335,60 @@ def upload_csv():
             print(f"Finished importing transactions. Imported: {imported_count}, Skipped: {skipped_count}")
             print(f"Tenant ID used for import: {tenant_id}")
             
+            # Update document metadata with statementSummary if document_id is provided
+            # Always set statementSummary, even if there are no transactions
+            start_date_iso = min_transaction_date.date().isoformat() if min_transaction_date else None
+            end_date_iso = max_transaction_date.date().isoformat() if max_transaction_date else None
+            
+            if document_id:
+                try:
+                    statement_summary = {
+                        'startDate': start_date_iso,
+                        'endDate': end_date_iso,
+                        'imported': imported_count,
+                        'skipped': skipped_count
+                    }
+                    # Update document metadata - merge statementSummary and mark processing as complete
+                    wealth_db.update_file_attachment_metadata(
+                        tenant_id=tenant_id,
+                        file_id=document_id,
+                        metadata_updates={
+                            'document_metadata': {
+                                'statementSummary': statement_summary,
+                                'processingStatus': 'complete'
+                            }
+                        }
+                    )
+                    if start_date_iso or end_date_iso:
+                        print(f"✅ Updated document {document_id} metadata with statementSummary: {start_date_iso} → {end_date_iso}")
+                    else:
+                        print(f"✅ Updated document {document_id} metadata with statementSummary (no transactions imported)")
+                except Exception as e:
+                    print(f"⚠️ Warning: Failed to update document metadata with statementSummary: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Don't fail the whole import if metadata update fails
+                    # But still try to mark as complete
+                    try:
+                        wealth_db.update_file_attachment_metadata(
+                            tenant_id=tenant_id,
+                            file_id=document_id,
+                            metadata_updates={'document_metadata': {'processingStatus': 'complete'}}
+                        )
+                    except:
+                        pass
+            
+            # Mark as complete if document_id exists but no statementSummary was set
+            if document_id and not (start_date_iso or end_date_iso):
+                try:
+                    wealth_db.update_file_attachment_metadata(
+                        tenant_id=tenant_id,
+                        file_id=document_id,
+                        metadata_updates={'document_metadata': {'processingStatus': 'complete'}}
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not update processing status: {e}")
+            
             # Update final progress
             if upload_id:
                 upload_progress[upload_id] = {
@@ -3003,8 +3403,6 @@ def upload_csv():
             os.remove(temp_path)
 
             print(f"Returning success response with {imported_count} imported transactions")
-            start_date_iso = min_transaction_date.date().isoformat() if min_transaction_date else None
-            end_date_iso = max_transaction_date.date().isoformat() if max_transaction_date else None
 
             return jsonify({
                 'success': True,

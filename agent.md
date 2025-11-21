@@ -1,5 +1,8 @@
 # Agent Coding Philosophy
 
+# Approach
+We are building v 1.0 so backward compatibility of changes doesn't matter! Whatever solution is fastest and simplest should be implemented. Keep the application as modular as possible.
+
 ## Mission & Scope
 
 We are building a personal wealth management tool that ingests sensitive banking statements, normalizes them, and delivers a responsive, frontend-first experience. Every design decision prioritizes confidentiality, integrity, and speed while keeping the deployment lightweight enough to run on a hardened single-VM footprint.
@@ -44,5 +47,139 @@ We are building a personal wealth management tool that ingests sensitive banking
 - **Observability**: Emit metrics for ingestion success, encryption/decryption failures, and frontend hydration timing. Alert on anomalous decrypt counts or large payload downloads.
 - **Incident response**: Maintain runbooks for data corruption, key compromise, and unexpected client desync. First steps always rotate keys, snapshot the database, and isolate the VM.
 
-This document is the authoritative guide for contributors and automation agents. Keep it updated whenever architecture, security posture, or coding standards evolve.
+## UI/UX Styling Guidelines
+
+The application uses a consistent design system built on CSS custom properties (CSS variables) for theming and maintainability. All styling follows these principles:
+
+### Design System Architecture
+
+- **CSS Variables**: All colors, spacing, shadows, and transitions are defined as CSS custom properties in `frontend/src/App.css`, enabling easy theme switching (light/dark mode).
+- **Component Classes**: Reusable CSS classes follow a naming convention: `{component}-{element}-{modifier}` (e.g., `documents-confirm-modal`, `documents-primary-button`).
+- **Consistent Spacing**: Use standardized padding/margin values (8px, 12px, 16px, 20px, 24px, 28px) for visual rhythm.
+- **Transitions**: All interactive elements include smooth transitions (typically 0.2s-0.3s ease) for color, background, border, and transform changes.
+
+### Color System
+
+**Light Theme:**
+- Primary accent: `--color-accent-secondary` (#6366f1 - indigo)
+- Backgrounds: `--color-bg-card`, `--color-bg-tertiary`, `--color-bg-hover`
+- Text: `--color-text-primary` (#1a1a1a), `--color-text-tertiary` (#64748b), `--color-text-muted` (#666)
+- Borders: `--color-border-primary` (#e5e7eb), `--color-border-secondary`, `--color-border-hover`
+
+**Dark Theme:**
+- Primary accent: `--color-accent-secondary` (#818cf8 - lighter indigo)
+- Backgrounds: Darker variants of light theme backgrounds
+- Text: Inverted text colors for contrast
+- Borders: Darker, more subtle borders
+
+### Modal Patterns
+
+Modals follow a consistent structure:
+- **Overlay**: `.modal-overlay` with backdrop blur/opacity
+- **Content**: `.modal-content` with rounded corners (12px), shadow, and max-width constraints
+- **Header**: `.documents-confirm-header` with title and close button
+- **Actions**: `.documents-confirm-actions` flex container with button spacing
+
+**Modal Button Styles:**
+- **Cancel/Secondary**: `.documents-cancel-button` - outlined style with border, transparent background
+- **Primary/Action**: `.documents-primary-button` - solid background using `--color-accent-secondary`, white text, hover effects
+
+### Button Patterns
+
+- **Primary Actions**: Use `.documents-primary-button` for main actions (upload, confirm, save)
+  - Background: `var(--color-accent-secondary)`
+  - Text: White
+  - Hover: Slight opacity reduction (0.9) and translateY(-1px) for elevation
+  - Active: Reset translateY, slight opacity increase
+  
+- **Secondary Actions**: Use `.documents-cancel-button` for cancel/dismiss actions
+  - Background: `var(--color-bg-card)`
+  - Border: `var(--color-border-primary)`
+  - Hover: `var(--color-bg-hover)` background
+
+- **Menu Items**: Use `.document-card-menu-item` for dropdown menu items
+  - Transparent background, hover state with `var(--color-bg-hover)`
+  - Danger variant: `.document-card-menu-item.danger` with error colors
+
+### Typography
+
+- **Headings**: Font-weight 600, appropriate sizing (h2: 28px, h3: 21px)
+- **Body Text**: Font-size 14px-16px, line-height 1.5
+- **Labels/Meta**: Font-size 13px, color `var(--color-text-tertiary)`
+- **Monospace**: Used for filenames and technical data
+
+### Spacing & Layout
+
+- **Card Padding**: 20px-28px for main content areas
+- **Section Gaps**: 20px-32px between major sections
+- **Element Gaps**: 8px-12px for related elements
+- **Border Radius**: 8px for cards/buttons, 12px for modals
+
+### Interactive States
+
+All interactive elements must include:
+- **Hover**: Background color change, border color change, slight elevation (translateY)
+- **Active**: Reset elevation, slight opacity change
+- **Disabled**: Reduced opacity (0.5), `cursor: not-allowed`, no hover effects
+- **Focus**: Browser default focus rings (consider custom focus styles for accessibility)
+
+### Best Practices
+
+1. **Avoid Inline Styles**: Use CSS classes and CSS variables instead of inline styles for maintainability
+2. **Consistent Transitions**: Always include transitions for color, background, border, and transform changes
+3. **Dark Mode Support**: Ensure all new styles work in both light and dark themes using CSS variables
+4. **Accessibility**: Maintain sufficient color contrast ratios (WCAG AA minimum)
+5. **Responsive**: Use relative units (rem, em, %) and flexbox/grid for responsive layouts
+6. **Component Isolation**: Style components within their own class namespace to avoid conflicts
+
+### Example: Styling a New Modal
+
+```css
+/* Modal container */
+.my-feature-modal {
+  padding: 28px;
+  box-sizing: border-box;
+}
+
+.my-feature-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.my-feature-header h3 {
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 8px 0;
+  transition: color 0.3s ease;
+}
+
+.my-feature-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.my-feature-primary-btn {
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: none;
+  background: var(--color-accent-secondary);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+}
+
+.my-feature-primary-btn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+```
+
+This document is the authoritative guide for contributors and automation agents. Keep it updated whenever architecture, security posture, coding standards, or styling patterns evolve.
 

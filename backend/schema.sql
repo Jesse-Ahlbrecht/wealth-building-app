@@ -89,7 +89,9 @@ CREATE TABLE transactions (
     key_version VARCHAR(50) NOT NULL,
     -- For duplicate detection and reconciliation
     transaction_hash VARCHAR(64) UNIQUE, -- SHA-256 hash of key transaction fields
-    reconciled BOOLEAN DEFAULT FALSE
+    reconciled BOOLEAN DEFAULT FALSE,
+    -- Link to source document (file_attachments) if transaction was imported from a file
+    source_document_id INTEGER REFERENCES file_attachments(id) ON DELETE CASCADE
 );
 
 -- Categories table (customizable expense/income categories)
@@ -228,6 +230,7 @@ CREATE INDEX idx_transactions_tenant_date ON transactions(tenant_id, transaction
 CREATE INDEX idx_transactions_account ON transactions(account_id);
 CREATE INDEX idx_transactions_category ON transactions(category);
 CREATE INDEX idx_transactions_hash ON transactions(transaction_hash);
+CREATE INDEX idx_transactions_source_document ON transactions(source_document_id);
 CREATE INDEX idx_accounts_tenant ON accounts(tenant_id);
 CREATE INDEX idx_categories_tenant_type ON categories(tenant_id, category_type);
 CREATE INDEX idx_files_tenant_type ON file_attachments(tenant_id, file_type);
