@@ -345,7 +345,7 @@ const MonthSummaryCard = ({
           {Object.keys(essentialExpenses).length > 0 && (
             <div className="categories-section">
               <div 
-                className="category-item" 
+                className="category-item category-section-header" 
                 onClick={() => {
                   const sectionKey = `${month.month}-essential-section`;
                   setExpandedSections(prev => ({
@@ -391,7 +391,7 @@ const MonthSummaryCard = ({
                         return (
                           <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
                             <div 
-                              className="category-item" 
+                              className="category-item category-subitem" 
                               onClick={() => toggleCategory(categoryKey)}
                               style={{ cursor: 'pointer' }}
                             >
@@ -465,7 +465,7 @@ const MonthSummaryCard = ({
                   
                   {/* Total at the bottom when expanded */}
                   <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)' }}>
-                    <div className="category-item" style={{ fontWeight: '600' }}>
+                    <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
                       <span className="category-name">
                         Total Essential
                         {isCurrentMonth && predictedEssentialAverage > 0 && (
@@ -489,7 +489,7 @@ const MonthSummaryCard = ({
           {Object.keys(nonEssentialExpenses).length > 0 && (
             <div className="categories-section">
               <div 
-                className="category-item" 
+                className="category-item category-section-header" 
                 onClick={() => {
                   const sectionKey = `${month.month}-nonessential-section`;
                   setExpandedSections(prev => ({
@@ -535,7 +535,7 @@ const MonthSummaryCard = ({
                         return (
                           <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
                             <div 
-                              className="category-item" 
+                              className="category-item category-subitem" 
                               onClick={() => toggleCategory(categoryKey)}
                               style={{ cursor: 'pointer' }}
                             >
@@ -609,7 +609,7 @@ const MonthSummaryCard = ({
                   
                   {/* Total at the bottom when expanded */}
                   <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)' }}>
-                    <div className="category-item" style={{ fontWeight: '600' }}>
+                    <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
                       <span className="category-name">Total Non-Essential</span>
                       <span className="stat-value" style={{ fontWeight: '700' }}>
                         {formatCurrency(nonEssentialTotal, defaultCurrency)}
@@ -635,7 +635,7 @@ const MonthSummaryCard = ({
           return (
             <div className="categories-section">
               <div 
-                className="category-item" 
+                className="category-item category-section-header" 
                 onClick={() => {
                   const sectionKey = `${month.month}-expense-section`;
                   setExpandedSections(prev => ({
@@ -675,7 +675,7 @@ const MonthSummaryCard = ({
                       return (
                         <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
                           <div 
-                            className="category-item" 
+                            className="category-item category-subitem" 
                             onClick={() => toggleCategory(categoryKey)}
                             style={{ cursor: 'pointer' }}
                           >
@@ -747,7 +747,7 @@ const MonthSummaryCard = ({
                   
                   {/* Total at the bottom when expanded */}
                   <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)' }}>
-                    <div className="category-item" style={{ fontWeight: '600' }}>
+                    <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
                       <span className="category-name">Total Expenses</span>
                       <span className="stat-value" style={{ fontWeight: '700' }}>
                         {formatCurrency(expenseTotal, defaultCurrency)}
@@ -767,7 +767,7 @@ const MonthSummaryCard = ({
         return (
           <div className="categories-section">
             <div 
-              className="category-item" 
+              className="category-item category-section-header" 
               onClick={() => {
                 const sectionKey = `${month.month}-income-section`;
                 setExpandedSections(prev => ({
@@ -813,7 +813,7 @@ const MonthSummaryCard = ({
                       return (
                         <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
                           <div 
-                            className="category-item" 
+                            className="category-item category-subitem" 
                             onClick={() => toggleCategory(categoryKey)}
                             style={{ cursor: 'pointer' }}
                           >
@@ -864,7 +864,7 @@ const MonthSummaryCard = ({
                   
                   {/* Total at the bottom when expanded */}
                   <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)' }}>
-                    <div className="category-item" style={{ fontWeight: '600' }}>
+                    <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
                       <span className="category-name">Total Income</span>
                       <span className="stat-value" style={{ fontWeight: '700' }}>
                         {formatCurrency(incomeTotal, defaultCurrency)}

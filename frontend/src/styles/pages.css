@@ -717,8 +717,8 @@
   margin-top: 32px;
   border: 1px solid var(--color-border-primary);
   border-radius: 8px;
-  padding: 16px;
   transition: border-color 0.3s ease;
+  background: var(--color-bg-tertiary);
 }
 
 .transaction-sort-row {
@@ -775,6 +775,7 @@
 .category-list {
   display: grid;
   gap: 12px;
+  padding: 12px 16px 16px;
 }
 
 .category-item {
@@ -788,8 +789,32 @@
   transition: background 0.2s, background-color 0.3s ease, border-color 0.3s ease;
 }
 
+.category-subitem {
+  background: var(--color-bg-card);
+  border-color: var(--color-border-primary);
+}
+
+.category-section-header {
+  margin: 0;
+  border-radius: 8px;
+}
+
+.category-section-header + .category-list {
+  padding-top: 12px;
+}
+
 .dark-theme .category-item {
   background: #273447;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark-theme .categories-section {
+  background: #1f2a3b;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.dark-theme .category-subitem {
+  background: #0f172a;
   border-color: rgba(255, 255, 255, 0.08);
 }
 
