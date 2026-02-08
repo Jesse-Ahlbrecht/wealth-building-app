@@ -19,6 +19,7 @@ const MonthlyOverviewPage = () => {
   // Initialize state from preferences or defaults
   const [showEssentialSplit, setShowEssentialSplit] = useState(false);
   const [includeLoanPayments, setIncludeLoanPayments] = useState(false);
+  const [expenseSort, setExpenseSort] = useState('amount_desc');
 
   useEffect(() => {
     if (preferences) {
@@ -27,6 +28,9 @@ const MonthlyOverviewPage = () => {
       }
       if (preferences.monthlyOverview_includeLoanPayments !== undefined) {
         setIncludeLoanPayments(preferences.monthlyOverview_includeLoanPayments);
+      }
+      if (preferences.monthlyOverview_expenseSort) {
+        setExpenseSort(preferences.monthlyOverview_expenseSort);
       }
     }
   }, [preferences]);
@@ -39,6 +43,11 @@ const MonthlyOverviewPage = () => {
   const handleIncludeLoanPaymentsChange = (value) => {
     setIncludeLoanPayments(value);
     updatePreferences({ monthlyOverview_includeLoanPayments: value });
+  };
+
+  const handleExpenseSortChange = (value) => {
+    setExpenseSort(value);
+    updatePreferences({ monthlyOverview_expenseSort: value });
   };
 
   const [essentialCategories, setEssentialCategories] = useState([]);
@@ -257,6 +266,8 @@ const MonthlyOverviewPage = () => {
           setExpandedSections={setExpandedSections}
           allMonthsData={summary}
           includeLoanPayments={includeLoanPayments}
+          expenseSort={expenseSort}
+          onExpenseSortChange={handleExpenseSortChange}
           predictions={predictions[latestMonth.month] || []}
           averageEssentialSpending={averageEssentialSpending[latestMonth.month] || 0}
           onDismissPrediction={handleDismissPrediction}
@@ -283,6 +294,8 @@ const MonthlyOverviewPage = () => {
                 setExpandedSections={setExpandedSections}
                 allMonthsData={summary}
                 includeLoanPayments={includeLoanPayments}
+                expenseSort={expenseSort}
+                onExpenseSortChange={handleExpenseSortChange}
                 predictions={predictions[month.month] || []}
                 averageEssentialSpending={averageEssentialSpending[month.month] || 0}
                 onDismissPrediction={handleDismissPrediction}

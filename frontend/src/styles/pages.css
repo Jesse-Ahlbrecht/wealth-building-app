@@ -721,6 +721,49 @@
   transition: border-color 0.3s ease;
 }
 
+.transaction-sort-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 100px;
+  gap: 12px;
+  align-items: center;
+  margin: 4px 0 12px 16px;
+  padding-left: 28px;
+  padding-right: 12px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.transaction-sort-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 0;
+  justify-content: flex-start;
+}
+
+.transaction-sort-btn-amount {
+  justify-content: flex-end;
+  justify-self: end;
+}
+
+.transaction-sort-btn.active {
+  color: var(--color-text-primary);
+}
+
+.transaction-sort-arrow {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .categories-title {
   font-size: 20px;
   font-weight: 600;

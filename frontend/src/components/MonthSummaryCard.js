@@ -49,6 +49,8 @@ const MonthSummaryCard = ({
   setExpandedSections = () => {},
   allMonthsData = [],
   includeLoanPayments = false,
+  expenseSort = 'amount_desc',
+  onExpenseSortChange = () => {},
   predictions = [],
   averageEssentialSpending = 0,
   onDismissPrediction = () => {}
@@ -139,6 +141,58 @@ const MonthSummaryCard = ({
   };
 
   // Helper to get transactions for a category
+  const [sortFieldRaw, sortDirectionRaw] = expenseSort.split('_');
+  const sortField = ['amount', 'date', 'recipient'].includes(sortFieldRaw) ? sortFieldRaw : 'amount';
+  const sortDirection = sortDirectionRaw === 'asc' ? 'asc' : 'desc';
+
+  const getSortDirection = (field) => {
+    if (sortField !== field) return 'desc';
+    return sortDirection === 'asc' ? 'asc' : 'desc';
+  };
+
+  const getSortArrow = (field) => {
+    if (sortField !== field) return '▲▼';
+    return getSortDirection(field) === 'asc' ? '▲' : '▼';
+  };
+
+  const handleSortToggle = (field) => {
+    const currentDirection = getSortDirection(field);
+    const nextDirection = sortField === field && currentDirection === 'desc' ? 'asc' : 'desc';
+    onExpenseSortChange(`${field}_${nextDirection}`);
+  };
+
+  const sortTransactions = (transactions, type) => {
+    const sorted = [...transactions];
+    const getAmount = (txn) => Math.abs(txn.amount || 0);
+    const getDate = (txn) => {
+      const value = txn?.date ? new Date(txn.date).getTime() : 0;
+      return Number.isNaN(value) ? 0 : value;
+    };
+    const getRecipient = (txn) => (txn?.recipient || '').toString().toLowerCase();
+
+    if (type === 'expense') {
+      const directionMultiplier = sortDirection === 'asc' ? 1 : -1;
+      if (sortField === 'amount') {
+        return sorted.sort((a, b) => {
+          const amountDelta = (getAmount(a) - getAmount(b)) * directionMultiplier;
+          return amountDelta !== 0 ? amountDelta : getDate(b) - getDate(a);
+        });
+      }
+      if (sortField === 'recipient') {
+        return sorted.sort((a, b) => {
+          const recipientDelta = getRecipient(a).localeCompare(getRecipient(b)) * directionMultiplier;
+          return recipientDelta !== 0 ? recipientDelta : getDate(b) - getDate(a);
+        });
+      }
+      return sorted.sort((a, b) => {
+        const dateDelta = (getDate(a) - getDate(b)) * directionMultiplier;
+        return dateDelta !== 0 ? dateDelta : getAmount(b) - getAmount(a);
+      });
+    }
+
+    return sorted.sort((a, b) => getDate(b) - getDate(a));
+  };
+
   const getCategoryTransactions = (category, type) => {
     const transactionsKey = type === 'income' ? 'incomeTransactions' : 'expenseTransactions';
     const actualTransactions = month[transactionsKey]?.[category] || [];
@@ -152,14 +206,38 @@ const MonthSummaryCard = ({
       
       // Merge predicted transactions with actual ones, sorted by date
       const allTransactions = [...actualTransactions, ...predictedForCategory];
-      return allTransactions.sort((a, b) => {
-        const dateA = new Date(a.date);
-        const dateB = new Date(b.date);
-        return dateB - dateA; // Most recent first
-      });
+      return sortTransactions(allTransactions, type);
     }
     
-    return actualTransactions;
+    return sortTransactions(actualTransactions, type);
+  };
+
+  const renderExpenseSortControls = () => {
+    return (
+      <div className="transaction-sort-row" role="group" aria-label="Sort expense transactions">
+        <button
+          className={`transaction-sort-btn ${sortField === 'date' ? 'active' : ''}`}
+          onClick={() => handleSortToggle('date')}
+        >
+          Date
+          <span className="transaction-sort-arrow">{getSortArrow('date')}</span>
+        </button>
+        <button
+          className={`transaction-sort-btn ${sortField === 'recipient' ? 'active' : ''}`}
+          onClick={() => handleSortToggle('recipient')}
+        >
+          Recipient
+          <span className="transaction-sort-arrow">{getSortArrow('recipient')}</span>
+        </button>
+        <button
+          className={`transaction-sort-btn transaction-sort-btn-amount ${sortField === 'amount' ? 'active' : ''}`}
+          onClick={() => handleSortToggle('amount')}
+        >
+          Amount
+          <span className="transaction-sort-arrow">{getSortArrow('amount')}</span>
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -340,6 +418,7 @@ const MonthSummaryCard = ({
                             </div>
                           {isExpanded && transactions.length > 0 && (
                             <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
+                              {renderExpenseSortControls()}
                               <div className="transaction-list">
                                 {transactions.map((txn, idx) => {
                                   const isPredicted = txn.is_predicted || txn.isPredicted;
@@ -483,6 +562,7 @@ const MonthSummaryCard = ({
                             </div>
                           {isExpanded && transactions.length > 0 && (
                             <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
+                              {renderExpenseSortControls()}
                               <div className="transaction-list">
                                 {transactions.map((txn, idx) => {
                                   const isPredicted = txn.is_predicted || txn.isPredicted;
@@ -620,6 +700,7 @@ const MonthSummaryCard = ({
                           </div>
                           {isExpanded && transactions.length > 0 && (
                             <div className="transaction-list-wrapper">
+                              {renderExpenseSortControls()}
                               <div className="transaction-list">
                                 {transactions.map((txn, idx) => {
                                   const isPredicted = txn.is_predicted || txn.isPredicted;
@@ -801,6 +882,3 @@ const MonthSummaryCard = ({
 };
 
 export default MonthSummaryCard;
-
-
-
