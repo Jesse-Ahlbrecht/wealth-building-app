@@ -32,7 +32,8 @@ from routes import (
     broker_bp,
     loans_bp,
     categories_bp,
-    predictions_bp
+    predictions_bp,
+    settings_bp
 )
 
 # Import error handlers
@@ -40,7 +41,7 @@ from middleware.error_handlers import register_error_handlers
 
 # Create Flask app
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
 
 # Register error handlers
 register_error_handlers(app)
@@ -54,6 +55,7 @@ app.register_blueprint(broker_bp)
 app.register_blueprint(loans_bp)
 app.register_blueprint(categories_bp)
 app.register_blueprint(predictions_bp)
+app.register_blueprint(settings_bp)
 
 
 # Health check endpoint

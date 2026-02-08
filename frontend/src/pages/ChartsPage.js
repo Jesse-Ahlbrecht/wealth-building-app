@@ -37,7 +37,7 @@ import { useAppContext } from '../context/AppContext';
 
 const ChartsPage = () => {
   // Context
-  const { defaultCurrency } = useAppContext();
+  const { defaultCurrency, preferences, updatePreferences } = useAppContext();
 
   // Data state
   const [summary, setSummary] = useState([]);
@@ -51,13 +51,34 @@ const ChartsPage = () => {
   const [includeLoanPayments, setIncludeLoanPayments] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [showEssentialSplit, setShowEssentialSplit] = useState(false);
-  
+
+  useEffect(() => {
+    if (preferences) {
+      if (preferences.charts_chartView) {
+        setChartView(preferences.charts_chartView);
+      }
+      if (preferences.charts_includeLoanPayments !== undefined) {
+        setIncludeLoanPayments(preferences.charts_includeLoanPayments);
+      }
+    }
+  }, [preferences]);
+
+  const handleChartViewChange = (view) => {
+    setChartView(view);
+    updatePreferences({ charts_chartView: view });
+  };
+
+  const handleIncludeLoanPaymentsChange = (value) => {
+    setIncludeLoanPayments(value);
+    updatePreferences({ charts_includeLoanPayments: value });
+  };
+
   // Category management state
   const [expandedCategories, setExpandedCategories] = useState({});
   const [expandedSections, setExpandedSections] = useState({});
   const [predictions, setPredictions] = useState({});
   const [averageEssentialSpending, setAverageEssentialSpending] = useState({});
-  
+
   // Drag selection state
   const chartContainerRef = useRef(null);
   const customButtonRef = useRef(null);
@@ -81,7 +102,7 @@ const ChartsPage = () => {
       setLoading(true);
       setError(null);
       const response = await transactionsAPI.getSummary();
-      
+
       let summaryData = [];
       if (Array.isArray(response)) {
         summaryData = response;
@@ -90,7 +111,7 @@ const ChartsPage = () => {
       } else if (response && response.summary && Array.isArray(response.summary)) {
         summaryData = response.summary;
       }
-      
+
       setSummary(summaryData);
     } catch (err) {
       console.error('Error loading summary:', err);
@@ -117,7 +138,7 @@ const ChartsPage = () => {
       // Calculate average essential spending from previous 3 months
       const sortedMonths = [...summary]
         .sort((a, b) => new Date(b.month + '-01') - new Date(a.month + '-01'));
-      
+
       const currentMonthIndex = sortedMonths.findIndex(m => m.month === month);
       const startIndex = currentMonthIndex >= 0 ? currentMonthIndex + 1 : 0;
       const previousMonths = sortedMonths.slice(startIndex, startIndex + 3);
@@ -184,7 +205,7 @@ const ChartsPage = () => {
       let monthlyLoanPayment = 0;
       if (month.expenseCategories || month.expense_categories) {
         const expenseCategories = month.expenseCategories || month.expense_categories || {};
-        const loanCategory = Object.keys(expenseCategories).find(cat => 
+        const loanCategory = Object.keys(expenseCategories).find(cat =>
           cat.toLowerCase().includes('loan payment') || cat.toLowerCase().includes('loan')
         );
         if (loanCategory) {
@@ -196,7 +217,7 @@ const ChartsPage = () => {
       // Calculate adjusted savings based on includeLoanPayments toggle
       const baseSavings = month.savings || 0;
       const adjustedSavings = includeLoanPayments ? baseSavings + monthlyLoanPayment : baseSavings;
-      
+
       // Calculate adjusted savings rate
       const income = month.income || 0;
       const adjustedSavingsRate = income > 0 ? ((adjustedSavings / income) * 100) : 0;
@@ -265,27 +286,27 @@ const ChartsPage = () => {
   // Calculate which data point corresponds to an x coordinate
   const getDataIndexFromX = useCallback((clientX, clientY) => {
     if (!chartContainerRef.current || filteredData.length === 0) return null;
-    
+
     const chartWrapper = chartContainerRef.current.querySelector('.recharts-wrapper');
     if (!chartWrapper) return null;
-    
+
     const wrapperRect = chartWrapper.getBoundingClientRect();
-    
+
     const xAxis = chartWrapper.querySelector('.recharts-cartesian-axis-x');
     const yAxis = chartWrapper.querySelector('.recharts-cartesian-axis-y');
-    
+
     let plotAreaLeft, plotAreaRight, plotAreaTop, plotAreaBottom, plotAreaWidth;
-    
+
     if (xAxis && yAxis) {
       const yAxisRect = yAxis.getBoundingClientRect();
       const xAxisRect = xAxis.getBoundingClientRect();
-      
+
       plotAreaLeft = yAxisRect.right;
       plotAreaRight = xAxisRect.right;
       plotAreaBottom = xAxisRect.top;
       plotAreaTop = yAxisRect.top;
       plotAreaWidth = plotAreaRight - plotAreaLeft;
-      
+
       if (clientX < plotAreaLeft || clientX > plotAreaRight) return null;
       if (clientY < plotAreaTop || clientY > plotAreaBottom) return null;
     } else {
@@ -298,15 +319,15 @@ const ChartsPage = () => {
       plotAreaTop = wrapperRect.top + marginTop;
       plotAreaBottom = wrapperRect.bottom - marginBottom;
       plotAreaWidth = plotAreaRight - plotAreaLeft;
-      
+
       if (clientX < wrapperRect.left || clientX > wrapperRect.right) return null;
       if (clientY < wrapperRect.top || clientY > wrapperRect.bottom) return null;
     }
-    
+
     const barWidth = plotAreaWidth / filteredData.length;
     const relativeX = clientX - plotAreaLeft;
     const index = Math.floor(relativeX / barWidth);
-    
+
     return Math.max(0, Math.min(filteredData.length - 1, index));
   }, [filteredData]);
 
@@ -314,23 +335,23 @@ const ChartsPage = () => {
   const handleMouseDown = useCallback((e) => {
     const chartElement = e.target.closest('.recharts-wrapper');
     if (!chartElement) return;
-    
+
     if (e.target.tagName === 'text' && (
-        e.target.closest('.recharts-xAxis') || 
-        e.target.closest('.recharts-yAxis') ||
-        e.target.closest('.recharts-cartesian-axis-tick')
+      e.target.closest('.recharts-xAxis') ||
+      e.target.closest('.recharts-yAxis') ||
+      e.target.closest('.recharts-cartesian-axis-tick')
     )) return;
 
-    const isAxisClick = e.target.closest('.recharts-cartesian-axis') || 
-                       e.target.closest('.recharts-xAxis') || 
-                       e.target.closest('.recharts-yAxis') ||
-                       e.target.closest('.recharts-cartesian-axis-tick') ||
-                       e.target.closest('.recharts-label');
+    const isAxisClick = e.target.closest('.recharts-cartesian-axis') ||
+      e.target.closest('.recharts-xAxis') ||
+      e.target.closest('.recharts-yAxis') ||
+      e.target.closest('.recharts-cartesian-axis-tick') ||
+      e.target.closest('.recharts-label');
     if (isAxisClick) return;
-    
+
     const index = getDataIndexFromX(e.clientX, e.clientY);
     if (index === null) return;
-    
+
     isDraggingRef.current = true;
     setIsSelecting(true);
     setSelectionStart(index);
@@ -346,10 +367,10 @@ const ChartsPage = () => {
       setHoveredIndex(index);
       return;
     }
-    
+
     const index = getDataIndexFromX(e.clientX, e.clientY);
     if (index === null) return;
-    
+
     setSelectionEnd(index);
     if (index !== selectionStart) {
       setHasMoved(true);
@@ -359,14 +380,14 @@ const ChartsPage = () => {
   // Handle mouse up - finalize selection
   const handleMouseUp = useCallback(() => {
     if (!isDraggingRef.current) return;
-    
+
     isDraggingRef.current = false;
     setIsSelecting(false);
-    
+
     if (hasMoved && selectionStart !== null && selectionEnd !== null) {
       const start = Math.min(selectionStart, selectionEnd);
       const end = Math.max(selectionStart, selectionEnd);
-      
+
       if (start !== end) {
         setSelectedRange({ startIndex: start, endIndex: end });
         setTimeRange('custom');
@@ -377,7 +398,7 @@ const ChartsPage = () => {
           if (fullMonthData) {
             setSelectedMonth(fullMonthData);
             setTimeout(() => {
-              document.getElementById('drilldown-details')?.scrollIntoView({ 
+              document.getElementById('drilldown-details')?.scrollIntoView({
                 behavior: 'smooth',
                 block: 'start'
               });
@@ -392,7 +413,7 @@ const ChartsPage = () => {
         if (fullMonthData) {
           setSelectedMonth(fullMonthData);
           setTimeout(() => {
-            document.getElementById('drilldown-details')?.scrollIntoView({ 
+            document.getElementById('drilldown-details')?.scrollIntoView({
               behavior: 'smooth',
               block: 'start'
             });
@@ -400,7 +421,7 @@ const ChartsPage = () => {
         }
       }
     }
-    
+
     setSelectionStart(null);
     setSelectionEnd(null);
     setHasMoved(false);
@@ -426,10 +447,6 @@ const ChartsPage = () => {
     }
   };
 
-  // Toggle include loan payments
-  const handleToggleIncludeLoanPayments = () => {
-    setIncludeLoanPayments(prev => !prev);
-  };
 
   // Calculate averages and totals
   const totalSavings = filteredData.reduce((sum, month) => sum + month.savings, 0);
@@ -536,47 +553,47 @@ const ChartsPage = () => {
           </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <div className="time-range-selector">
-            <button
-                className={`time-range-btn ${timeRange === '3m' ? 'active' : ''}`}
-              onClick={() => handleTimeRangeChange('3m')}
-            >
-              3M
-            </button>
-            <button
-                className={`time-range-btn ${timeRange === '6m' ? 'active' : ''}`}
-              onClick={() => handleTimeRangeChange('6m')}
-            >
-              6M
-            </button>
-            <button
-                className={`time-range-btn ${timeRange === '1y' ? 'active' : ''}`}
-              onClick={() => handleTimeRangeChange('1y')}
-            >
-              1Y
-            </button>
-            <button
-                className={`time-range-btn ${timeRange === 'all' ? 'active' : ''}`}
-              onClick={() => handleTimeRangeChange('all')}
-            >
-              All
-            </button>
-            <div style={{ position: 'relative' }}>
               <button
-                ref={customButtonRef}
+                className={`time-range-btn ${timeRange === '3m' ? 'active' : ''}`}
+                onClick={() => handleTimeRangeChange('3m')}
+              >
+                3M
+              </button>
+              <button
+                className={`time-range-btn ${timeRange === '6m' ? 'active' : ''}`}
+                onClick={() => handleTimeRangeChange('6m')}
+              >
+                6M
+              </button>
+              <button
+                className={`time-range-btn ${timeRange === '1y' ? 'active' : ''}`}
+                onClick={() => handleTimeRangeChange('1y')}
+              >
+                1Y
+              </button>
+              <button
+                className={`time-range-btn ${timeRange === 'all' ? 'active' : ''}`}
+                onClick={() => handleTimeRangeChange('all')}
+              >
+                All
+              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  ref={customButtonRef}
                   className={`time-range-btn ${timeRange === 'custom' || selectedRange !== null ? 'active' : ''}`}
-                onClick={() => {
+                  onClick={() => {
                     if (selectedRange === null) {
                       setShowCustomHelp(true);
                       handleTimeRangeChange('custom');
                       setTimeout(() => setShowCustomHelp(false), 5000);
                     } else {
-                  handleTimeRangeChange('custom');
+                      handleTimeRangeChange('custom');
                     }
-                }}
+                  }}
                   title={selectedRange ? 'Custom range selected' : 'Click to learn how to select a custom range'}
-              >
-                Custom
-              </button>
+                >
+                  Custom
+                </button>
                 {showCustomHelp && customButtonRef.current && (
                   <div
                     style={{
@@ -633,41 +650,41 @@ const ChartsPage = () => {
                         borderBottom: '6px solid var(--color-border-primary)'
                       }}
                     />
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
             <div className="chart-toggle">
-            <button
+              <button
                 className={`chart-toggle-btn ${chartView === 'absolute' ? 'active' : ''}`}
-              onClick={() => setChartView('absolute')}
-            >
+                onClick={() => handleChartViewChange('absolute')}
+              >
                 Absolute
-            </button>
-            <button
+              </button>
+              <button
                 className={`chart-toggle-btn ${chartView === 'relative' ? 'active' : ''}`}
-              onClick={() => setChartView('relative')}
-            >
+                onClick={() => handleChartViewChange('relative')}
+              >
                 Rate
               </button>
             </div>
             <div className="loan-payment-toggle">
               <button
                 className={`chart-toggle-btn ${includeLoanPayments ? 'active' : ''}`}
-                onClick={handleToggleIncludeLoanPayments}
+                onClick={() => handleIncludeLoanPaymentsChange(!includeLoanPayments)}
                 title="Include monthly loan payments in savings calculation"
               >
                 Include Loans
-            </button>
+              </button>
+            </div>
           </div>
         </div>
-        </div>
-        <div 
-          className="chart-wrapper" 
+        <div
+          className="chart-wrapper"
           ref={chartContainerRef}
           onMouseDown={handleMouseDown}
-          style={{ 
-            position: 'relative', 
+          style={{
+            position: 'relative',
             cursor: isSelecting ? 'crosshair' : 'default',
             userSelect: isSelecting ? 'none' : 'auto'
           }}
@@ -687,7 +704,7 @@ const ChartsPage = () => {
               onClick={(data) => {
                 // Don't trigger month selection if we're dragging or just finished dragging
                 if (isSelecting || isDraggingRef.current || hasMoved) return;
-                
+
                 if (data && data.activePayload && data.activePayload[0]) {
                   const clickedData = data.activePayload[0].payload;
                   // Find the full month data from summary
@@ -713,10 +730,10 @@ const ChartsPage = () => {
                 height={60}
                 style={{ fontSize: '12px' }}
               />
-              <YAxis 
-                stroke="var(--color-text-tertiary)" 
+              <YAxis
+                stroke="var(--color-text-tertiary)"
                 style={{ fontSize: '12px' }}
-                tickFormatter={(value) => chartView === 'absolute' 
+                tickFormatter={(value) => chartView === 'absolute'
                   ? `${(value / 1000).toFixed(0)}k`
                   : `${value}%`
                 }
@@ -760,15 +777,15 @@ const ChartsPage = () => {
                   {filteredData.map((entry, index) => {
                     const percentage = (entry.savings / SAVINGS_GOAL_CHF) * 100;
                     const baseColor = getColorForPercentage(percentage);
-                    
-                    const isSelected = isSelecting && selectionStart !== null && selectionEnd !== null && 
-                                      index >= Math.min(selectionStart, selectionEnd) && 
-                                      index <= Math.max(selectionStart, selectionEnd);
-                    
+
+                    const isSelected = isSelecting && selectionStart !== null && selectionEnd !== null &&
+                      index >= Math.min(selectionStart, selectionEnd) &&
+                      index <= Math.max(selectionStart, selectionEnd);
+
                     const isHovered = index === hoveredIndex;
-                    
+
                     const fillColor = (isSelected || isHovered) ? lightenColor(baseColor, 0.3) : baseColor;
-                    
+
                     return <Cell key={`cell-${index}`} fill={fillColor} />;
                   })}
                 </Bar>
@@ -777,15 +794,15 @@ const ChartsPage = () => {
                   {filteredData.map((entry, index) => {
                     const percentage = (entry.savingRate / SAVINGS_RATE_GOAL) * 100;
                     const baseColor = getColorForPercentage(percentage);
-                    
-                    const isSelected = isSelecting && selectionStart !== null && selectionEnd !== null && 
-                                      index >= Math.min(selectionStart, selectionEnd) && 
-                                      index <= Math.max(selectionStart, selectionEnd);
-                    
+
+                    const isSelected = isSelecting && selectionStart !== null && selectionEnd !== null &&
+                      index >= Math.min(selectionStart, selectionEnd) &&
+                      index <= Math.max(selectionStart, selectionEnd);
+
                     const isHovered = index === hoveredIndex;
-                    
+
                     const fillColor = (isSelected || isHovered) ? lightenColor(baseColor, 0.3) : baseColor;
-                    
+
                     return <Cell key={`cell-${index}`} fill={fillColor} />;
                   })}
                 </Bar>
@@ -830,17 +847,17 @@ const ChartsPage = () => {
           </button>
           <div className="current-month-container">
             <MonthSummaryCard
-            month={selectedMonth}
+              month={selectedMonth}
               isCurrentMonth={false}
               defaultCurrency={defaultCurrency}
-            showEssentialSplit={showEssentialSplit}
-            essentialCategories={essentialCategories}
+              showEssentialSplit={showEssentialSplit}
+              essentialCategories={essentialCategories}
               expandedCategories={expandedCategories}
               setExpandedCategories={setExpandedCategories}
               expandedSections={expandedSections}
               setExpandedSections={setExpandedSections}
               allMonthsData={summary}
-            includeLoanPayments={includeLoanPayments}
+              includeLoanPayments={includeLoanPayments}
               predictions={predictions[selectedMonth.month] || []}
               averageEssentialSpending={averageEssentialSpending[selectedMonth.month] || 0}
               onDismissPrediction={handleDismissPrediction}

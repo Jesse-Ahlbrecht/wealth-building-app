@@ -101,7 +101,7 @@ function Login({ onLogin }) {
         } else {
           setError(result.error || 'Registration failed');
         }
-        } else {
+      } else {
         const result = await login(email, password);
         if (result.success) {
           onLogin();
@@ -157,14 +157,14 @@ function Login({ onLogin }) {
 
           <div className="form-group">
             <label>Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={loading}
-              />
-            </div>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              disabled={loading}
+            />
+          </div>
 
           <button type="submit" className="btn-primary" disabled={loading}>
             {loading ? 'Please wait...' : (isRegistering ? 'Sign Up' : 'Sign In')}
@@ -172,7 +172,7 @@ function Login({ onLogin }) {
         </form>
 
         <div className="login-footer">
-                <button
+          <button
             onClick={() => {
               setIsRegistering(!isRegistering);
               setError('');
@@ -182,7 +182,7 @@ function Login({ onLogin }) {
             disabled={loading}
           >
             {isRegistering ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
-                </button>
+          </button>
         </div>
       </div>
     </div>
@@ -195,14 +195,18 @@ function Login({ onLogin }) {
  */
 function AppContent() {
   const { isAuthenticated, isLoading, logout } = useAuthContext();
-  const { defaultCurrency, setDefaultCurrency, documentsProcessing, documentsProcessingCount } = useAppContext();
+  const {
+    defaultCurrency,
+    setDefaultCurrency,
+    theme,
+    setTheme,
+    documentsProcessing,
+    documentsProcessingCount
+  } = useAppContext();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [theme, setTheme] = useState(() => {
-    return localStorage.getItem('theme') || 'light';
-  });
 
   // Derive activeTab from current URL pathname
   const getActiveTabFromPath = (pathname) => {
@@ -238,7 +242,7 @@ function AppContent() {
     } else {
       document.body.classList.remove('dark-theme');
     }
-    
+
     // Update favicon based on theme
     const favicon = document.getElementById('favicon');
     if (favicon) {
@@ -271,7 +275,6 @@ function AppContent() {
 
   const handleThemeChange = (newTheme) => {
     setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
   };
 
   useEffect(() => {
@@ -290,12 +293,12 @@ function AppContent() {
   };
 
   if (isLoading) {
-  return (
+    return (
       <div className="loading-container">
         <div className="spinner"></div>
         <p>Loading...</p>
-    </div>
-  );
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
@@ -318,7 +321,7 @@ function AppContent() {
         <h1 className="top-header-title">Wealth Management</h1>
         {/* Processing Alert - Show when documents are processing and user is not on documents tab */}
         {documentsProcessing && activeTab !== 'data' && (
-          <div 
+          <div
             className="processing-alert"
             onClick={() => handleTabChange('data')}
             style={{

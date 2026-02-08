@@ -590,6 +590,139 @@ class UserManager:
         finally:
             cursor.close()
 
+    def get_user_settings(self, user_id: int) -> Dict[str, Any]:
+        """
+        Get user settings
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            Dictionary of user settings
+        """
+        cursor = self.db.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT theme, currency, preferences
+                FROM user_settings
+                WHERE user_id = %s
+                """,
+                (user_id,)
+            )
+            row = cursor.fetchone()
+            
+            if row:
+                preferences = row[2]
+                if isinstance(preferences, str):
+                    import json
+                    try:
+                        preferences = json.loads(preferences)
+                    except Exception:
+                        preferences = {}
+                elif preferences is None:
+                    preferences = {}
+
+                return {
+                    'theme': row[0],
+                    'currency': row[1],
+                    'preferences': preferences
+                }
+            else:
+                # Return defaults if no settings found
+                return {
+                    'theme': 'system',
+                    'currency': 'EUR',
+                    'preferences': {}
+                }
+        except Exception as e:
+            print(f"Error getting user settings: {e}")
+            # Return defaults on error
+            return {
+                'theme': 'system',
+                'currency': 'EUR',
+                'preferences': {}
+            }
+        finally:
+            cursor.close()
+
+    def update_user_settings(self, user_id: int, settings: Dict[str, Any]) -> bool:
+        """
+        Update user settings
+        
+        Args:
+            user_id: User ID
+            settings: Dictionary of settings to update
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        cursor = self.db.cursor()
+        try:
+            # Check if settings exist
+            cursor.execute("SELECT 1 FROM user_settings WHERE user_id = %s", (user_id,))
+            exists = cursor.fetchone()
+            
+            theme = settings.get('theme')
+            currency = settings.get('currency')
+            preferences = settings.get('preferences')
+            
+            if exists:
+                # Build update query dynamically based on provided fields
+                updates = []
+                params = []
+                
+                if theme is not None:
+                    updates.append("theme = %s")
+                    params.append(theme)
+                
+                if currency is not None:
+                    updates.append("currency = %s")
+                    params.append(currency)
+                
+                if preferences is not None:
+                    # Merge with existing preferences if doing a partial update
+                    # But for simplicity, we'll assume the frontend sends the full preferences object
+                    # or we can use jsonb_merge if we want to be fancy.
+                    # Let's just replace for now as it's safer/simpler
+                    updates.append("preferences = %s")
+                    import json
+                    params.append(json.dumps(preferences) if isinstance(preferences, dict) else preferences)
+                
+                if not updates:
+                    return True # Nothing to update
+                
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                params.append(user_id)
+                
+                query = f"UPDATE user_settings SET {', '.join(updates)} WHERE user_id = %s"
+                cursor.execute(query, tuple(params))
+            else:
+                # Insert defaults if fields are missing
+                import json
+                cursor.execute(
+                    """
+                    INSERT INTO user_settings (user_id, theme, currency, preferences)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        user_id, 
+                        theme or 'system', 
+                        currency or 'EUR', 
+                        json.dumps(preferences or {})
+                    )
+                )
+            
+            self.db.commit()
+            return True
+            
+        except Exception as e:
+            self.db.rollback()
+            print(f"Error updating user settings: {e}")
+            return False
+        finally:
+            cursor.close()
+
 # Global instance
 _user_manager = None
 _user_manager_connection_context = None

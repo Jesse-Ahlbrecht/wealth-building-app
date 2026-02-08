@@ -9,10 +9,44 @@ import {
   Tooltip
 } from 'recharts';
 
+import { useAppContext } from '../context/AppContext';
+
 const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
+  const { preferences, updatePreferences } = useAppContext();
+
+  // Initialize state from preferences or defaults
   const [timeframe, setTimeframe] = useState(10); // years
   const [interestRate, setInterestRate] = useState(5.0); // annual interest rate %
   const [customMonthlySavings, setCustomMonthlySavings] = useState(null); // null = use actual savings
+
+  React.useEffect(() => {
+    if (preferences) {
+      if (preferences.projection_timeframe !== undefined) {
+        setTimeframe(preferences.projection_timeframe);
+      }
+      if (preferences.projection_interestRate !== undefined) {
+        setInterestRate(preferences.projection_interestRate);
+      }
+      if (preferences.projection_customMonthlySavings !== undefined) {
+        setCustomMonthlySavings(preferences.projection_customMonthlySavings);
+      }
+    }
+  }, [preferences]);
+
+  const handleTimeframeChange = (value) => {
+    setTimeframe(value);
+    updatePreferences({ projection_timeframe: value });
+  };
+
+  const handleInterestRateChange = (value) => {
+    setInterestRate(value);
+    updatePreferences({ projection_interestRate: value });
+  };
+
+  const handleCustomMonthlySavingsChange = (value) => {
+    setCustomMonthlySavings(value);
+    updatePreferences({ projection_customMonthlySavings: value });
+  };
 
   // Calculate projections
   const calculateProjections = () => {
@@ -77,7 +111,7 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
           <label style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)' }}>Timeframe</label>
           <select
             value={timeframe}
-            onChange={(e) => setTimeframe(parseInt(e.target.value, 10))}
+            onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))}
             style={{ padding: '8px 12px', border: '1px solid var(--color-border-primary)', borderRadius: '6px', fontSize: '14px', background: 'var(--color-bg-input)', color: 'var(--color-text-primary)' }}
           >
             <option value={5}>5 years</option>
@@ -95,7 +129,7 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
           <input
             type="number"
             value={interestRate}
-            onChange={(e) => setInterestRate(parseFloat(e.target.value))}
+            onChange={(e) => handleInterestRateChange(parseFloat(e.target.value))}
             min="0"
             max="20"
             step="0.1"
@@ -118,7 +152,7 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
           <input
             type="number"
             value={customMonthlySavings ?? projectionData.averageMonthlySavings}
-            onChange={(e) => setCustomMonthlySavings(parseFloat(e.target.value))}
+            onChange={(e) => handleCustomMonthlySavingsChange(parseFloat(e.target.value))}
             min="0"
             step="100"
             style={{
@@ -132,7 +166,7 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
             }}
           />
           <button
-            onClick={() => setCustomMonthlySavings(null)}
+            onClick={() => handleCustomMonthlySavingsChange(null)}
             className="projection-reset-button"
             style={{
               padding: '4px 8px',

@@ -50,6 +50,15 @@ CREATE TABLE users (
     UNIQUE(tenant_id, username)
 );
 
+-- User settings and preferences
+CREATE TABLE user_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    theme VARCHAR(20) DEFAULT 'system',
+    currency VARCHAR(3) DEFAULT 'EUR',
+    preferences JSONB DEFAULT '{}', -- For toggle buttons and other dynamic settings
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Accounts table (bank accounts, investment accounts, etc.)
 CREATE TABLE accounts (
     id SERIAL PRIMARY KEY,

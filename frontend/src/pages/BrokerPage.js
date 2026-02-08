@@ -13,8 +13,10 @@ import {
 } from 'recharts';
 import { brokerAPI } from '../api';
 import { formatCurrency, formatDate, EUR_TO_CHF_RATE } from '../utils';
+import { useAppContext } from '../context/AppContext';
 
 const BrokerPage = () => {
+  const { preferences, updatePreferences } = useAppContext();
   const [broker, setBroker] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -47,48 +49,53 @@ const BrokerPage = () => {
     }
   };
 
-  // Load purchase date from localStorage on mount
+  // Load purchase date from preferences on mount/update
   useEffect(() => {
-    const storedDate = localStorage.getItem('ingDibaPurchaseDate');
-    if (storedDate) {
-      setIngDibaPurchaseDate(new Date(storedDate));
+    if (preferences && preferences.broker_ingDibaPurchaseDate) {
+      setIngDibaPurchaseDate(new Date(preferences.broker_ingDibaPurchaseDate));
+    } else {
+      // Fallback to localStorage for migration (optional, but good for UX)
+      const storedDate = localStorage.getItem('ingDibaPurchaseDate');
+      if (storedDate) {
+        setIngDibaPurchaseDate(new Date(storedDate));
+        // Migrate to backend
+        updatePreferences({ broker_ingDibaPurchaseDate: storedDate });
+      }
     }
-  }, []);
+  }, [preferences, updatePreferences]);
 
   // Check if purchase date is needed when broker data loads
   useEffect(() => {
     if (!broker) return;
-    
+
     const holdings = broker.holdings || [];
     const ingDibaHoldings = holdings.filter((h) => h.account === 'ING DiBa');
-    
+
     // Check if we have ING DiBa holdings but no purchase date
     if (ingDibaHoldings.length > 0) {
-      const storedDate = localStorage.getItem('ingDibaPurchaseDate');
       const holdingDate = ingDibaHoldings[0].purchase_date;
-      
+
       // If we already have a purchase date set, don't do anything
       if (ingDibaPurchaseDate) return;
-      
+
       // If no date in holdings and no stored date, show modal
-      if (!holdingDate && !storedDate) {
+      if (!holdingDate && !preferences?.broker_ingDibaPurchaseDate) {
         setShowPurchaseDateModal(true);
       } else if (holdingDate) {
         // Use date from holdings if available
         setIngDibaPurchaseDate(new Date(holdingDate));
-      } else if (storedDate) {
-        // Use stored date
-        setIngDibaPurchaseDate(new Date(storedDate));
       }
     }
-  }, [broker, ingDibaPurchaseDate]);
+  }, [broker, ingDibaPurchaseDate, preferences]);
 
   const handlePurchaseDateSubmit = () => {
     if (purchaseDateInput) {
       const date = new Date(purchaseDateInput);
       if (!isNaN(date.getTime())) {
         setIngDibaPurchaseDate(date);
-        localStorage.setItem('ingDibaPurchaseDate', date.toISOString());
+        const isoDate = date.toISOString();
+        updatePreferences({ broker_ingDibaPurchaseDate: isoDate });
+        localStorage.setItem('ingDibaPurchaseDate', isoDate); // Keep local copy just in case
         setShowPurchaseDateModal(false);
         setPurchaseDateInput('');
       }
@@ -99,7 +106,7 @@ const BrokerPage = () => {
   useEffect(() => {
     const fetchHistoricalValuation = async () => {
       if (!broker) return;
-      
+
       setLoadingHistorical(true);
       try {
         const data = await brokerAPI.getHistoricalValuation();
@@ -111,7 +118,7 @@ const BrokerPage = () => {
         setLoadingHistorical(false);
       }
     };
-    
+
     fetchHistoricalValuation();
   }, [broker]);
 
@@ -120,144 +127,144 @@ const BrokerPage = () => {
   const monthlyHistoricalSeries =
     historicalValuation && Array.isArray(historicalValuation.time_series)
       ? (() => {
-          const series = historicalValuation.time_series
-            .filter((p) => p && p.date)
-            .slice()
-            .sort((a, b) => new Date(a.date) - new Date(b.date));
+        const series = historicalValuation.time_series
+          .filter((p) => p && p.date)
+          .slice()
+          .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-          if (series.length === 0) return [];
+        if (series.length === 0) return [];
 
-          const firstDate = new Date(series[0].date);
-          const lastDate = new Date(series[series.length - 1].date);
+        const firstDate = new Date(series[0].date);
+        const lastDate = new Date(series[series.length - 1].date);
 
-          // Normalize to first day of month
-          firstDate.setDate(1);
-          lastDate.setDate(1);
+        // Normalize to first day of month
+        firstDate.setDate(1);
+        lastDate.setDate(1);
 
-          const result = [];
-          let currentMonth = new Date(firstDate.getTime());
-          let seriesIndex = 0;
-          let lastPoint = null;
+        const result = [];
+        let currentMonth = new Date(firstDate.getTime());
+        let seriesIndex = 0;
+        let lastPoint = null;
 
-          while (currentMonth <= lastDate) {
-            const monthKey = `${currentMonth.getFullYear()}-${String(
-              currentMonth.getMonth() + 1
-            ).padStart(2, '0')}`;
+        while (currentMonth <= lastDate) {
+          const monthKey = `${currentMonth.getFullYear()}-${String(
+            currentMonth.getMonth() + 1
+          ).padStart(2, '0')}`;
 
-            // Advance through series up to and including this month
-            while (seriesIndex < series.length) {
-              const point = series[seriesIndex];
-              const pointMonthKey = point.date.slice(0, 7);
-              if (pointMonthKey <= monthKey) {
-                lastPoint = point;
-                seriesIndex += 1;
-              } else {
+          // Advance through series up to and including this month
+          while (seriesIndex < series.length) {
+            const point = series[seriesIndex];
+            const pointMonthKey = point.date.slice(0, 7);
+            if (pointMonthKey <= monthKey) {
+              lastPoint = point;
+              seriesIndex += 1;
+            } else {
+              break;
+            }
+          }
+
+          if (lastPoint) {
+            result.push({
+              ...lastPoint,
+              month: monthKey,
+              // Add a numeric timestamp for proper sorting and as a fallback dataKey
+              monthTimestamp: currentMonth.getTime(),
+              // Add month index for X-axis ordering
+              monthIndex: result.length
+            });
+          }
+
+          // Move to next month
+          currentMonth.setMonth(currentMonth.getMonth() + 1);
+        }
+
+        // Ensure result is sorted by monthTimestamp (should already be, but be explicit)
+        result.sort((a, b) => (a.monthTimestamp || 0) - (b.monthTimestamp || 0));
+
+        // Reassign monthIndex after sorting to ensure sequential 0, 1, 2, 3...
+        result.forEach((item, index) => {
+          item.monthIndex = index;
+        });
+
+        // Interpolate/extrapolate portfolio value proportionally to invested amount
+        if (result.length > 0) {
+          // Check if we have any values from backend
+          const hasBackendValues = result.some(item => item.value !== null && item.value !== undefined && item.value > 0);
+
+          if (!hasBackendValues) {
+            // No backend values - use simple interpolation from initial to final invested
+            const initialInvested = result[0].invested || 0;
+            const finalInvested = result[result.length - 1].invested || 0;
+
+            if (result.length > 1 && finalInvested > initialInvested) {
+              const totalMonths = result.length - 1;
+              result.forEach((item, index) => {
+                const currentInvested = item.invested || 0;
+                if (totalMonths > 0) {
+                  const t = index / totalMonths;
+                  const smoothT = t * t * (3 - 2 * t);
+                  item.value = initialInvested + (finalInvested - initialInvested) * smoothT;
+                } else {
+                  item.value = currentInvested;
+                }
+              });
+            } else {
+              // Set value to invested if no interpolation needed
+              result.forEach((item) => {
+                item.value = item.invested || 0;
+              });
+            }
+          } else {
+            // We have backend values - interpolate proportionally to invested amount
+            const finalInvested = result[result.length - 1].invested || 0;
+
+            // Find final portfolio value (from backend)
+            let finalValue = null;
+            for (let i = result.length - 1; i >= 0; i--) {
+              if (result[i].value !== null && result[i].value !== undefined && result[i].value > 0) {
+                finalValue = result[i].value;
                 break;
               }
             }
 
-            if (lastPoint) {
-              result.push({
-                ...lastPoint,
-                month: monthKey,
-                // Add a numeric timestamp for proper sorting and as a fallback dataKey
-                monthTimestamp: currentMonth.getTime(),
-                // Add month index for X-axis ordering
-                monthIndex: result.length
+            // Interpolate from initial investment to final value proportionally
+            if (finalValue !== null && finalValue !== undefined && result.length > 1 && finalInvested > 0) {
+              const returnRatio = finalValue / finalInvested;
+              const totalMonths = result.length - 1;
+
+              result.forEach((item, index) => {
+                const currentInvested = item.invested || 0;
+
+                if (totalMonths > 0 && currentInvested > 0) {
+                  // Calculate time progress (0 to 1)
+                  const t = index / totalMonths;
+
+                  // Polynomial interpolation using smoothstep (cubic S-curve)
+                  const smoothT = t * t * (3 - 2 * t);
+
+                  // Interpolate the return ratio from 1.0 (no return) to final return ratio
+                  const interpolatedRatio = 1.0 + (returnRatio - 1.0) * smoothT;
+
+                  // Apply the interpolated ratio to the current invested amount
+                  item.value = currentInvested * interpolatedRatio;
+                } else if (currentInvested > 0) {
+                  // Fallback: use invested amount if we can't interpolate
+                  item.value = currentInvested;
+                }
+              });
+            } else {
+              // Ensure all items have a value
+              result.forEach((item) => {
+                if (item.value === null || item.value === undefined) {
+                  item.value = item.invested || 0;
+                }
               });
             }
-
-            // Move to next month
-            currentMonth.setMonth(currentMonth.getMonth() + 1);
           }
+        }
 
-          // Ensure result is sorted by monthTimestamp (should already be, but be explicit)
-          result.sort((a, b) => (a.monthTimestamp || 0) - (b.monthTimestamp || 0));
-
-          // Reassign monthIndex after sorting to ensure sequential 0, 1, 2, 3...
-          result.forEach((item, index) => {
-            item.monthIndex = index;
-          });
-
-          // Interpolate/extrapolate portfolio value proportionally to invested amount
-          if (result.length > 0) {
-            // Check if we have any values from backend
-            const hasBackendValues = result.some(item => item.value !== null && item.value !== undefined && item.value > 0);
-            
-            if (!hasBackendValues) {
-              // No backend values - use simple interpolation from initial to final invested
-              const initialInvested = result[0].invested || 0;
-              const finalInvested = result[result.length - 1].invested || 0;
-              
-              if (result.length > 1 && finalInvested > initialInvested) {
-                const totalMonths = result.length - 1;
-                result.forEach((item, index) => {
-                  const currentInvested = item.invested || 0;
-                  if (totalMonths > 0) {
-                    const t = index / totalMonths;
-                    const smoothT = t * t * (3 - 2 * t);
-                    item.value = initialInvested + (finalInvested - initialInvested) * smoothT;
-                  } else {
-                    item.value = currentInvested;
-                  }
-                });
-              } else {
-                // Set value to invested if no interpolation needed
-                result.forEach((item) => {
-                  item.value = item.invested || 0;
-                });
-              }
-            } else {
-              // We have backend values - interpolate proportionally to invested amount
-              const finalInvested = result[result.length - 1].invested || 0;
-              
-              // Find final portfolio value (from backend)
-              let finalValue = null;
-              for (let i = result.length - 1; i >= 0; i--) {
-                if (result[i].value !== null && result[i].value !== undefined && result[i].value > 0) {
-                  finalValue = result[i].value;
-                  break;
-                }
-              }
-              
-              // Interpolate from initial investment to final value proportionally
-              if (finalValue !== null && finalValue !== undefined && result.length > 1 && finalInvested > 0) {
-                const returnRatio = finalValue / finalInvested;
-                const totalMonths = result.length - 1;
-                
-                result.forEach((item, index) => {
-                  const currentInvested = item.invested || 0;
-                  
-                  if (totalMonths > 0 && currentInvested > 0) {
-                    // Calculate time progress (0 to 1)
-                    const t = index / totalMonths;
-                    
-                    // Polynomial interpolation using smoothstep (cubic S-curve)
-                    const smoothT = t * t * (3 - 2 * t);
-                    
-                    // Interpolate the return ratio from 1.0 (no return) to final return ratio
-                    const interpolatedRatio = 1.0 + (returnRatio - 1.0) * smoothT;
-                    
-                    // Apply the interpolated ratio to the current invested amount
-                    item.value = currentInvested * interpolatedRatio;
-                  } else if (currentInvested > 0) {
-                    // Fallback: use invested amount if we can't interpolate
-                    item.value = currentInvested;
-                  }
-                });
-              } else {
-                // Ensure all items have a value
-                result.forEach((item) => {
-                  if (item.value === null || item.value === undefined) {
-                    item.value = item.invested || 0;
-                  }
-                });
-              }
-            }
-          }
-
-          return result;
-        })()
+        return result;
+      })()
       : [];
 
   if (loading) {
@@ -299,7 +306,7 @@ const BrokerPage = () => {
 
   // Get ING DiBa purchase date - prefer stored date over holdings date
   const ingDibaHoldings = holdings.filter((h) => h.account === 'ING DiBa');
-  const finalPurchaseDate = ingDibaPurchaseDate || 
+  const finalPurchaseDate = ingDibaPurchaseDate ||
     (ingDibaHoldings.length > 0 && ingDibaHoldings[0].purchase_date
       ? new Date(ingDibaHoldings[0].purchase_date)
       : null);
@@ -370,7 +377,7 @@ const BrokerPage = () => {
   if (sortedTransactions.length === 0 && (ingDibaTotalCost > 0 || viacTotal > 0)) {
     const totalInvestedCHF = viacTotal + ingDibaTotalCost * EUR_TO_CHF_RATE;
     const totalCurrentValueInCHF = viacTotal + (ingDibaCurrentValue || ingDibaTotalCost) * EUR_TO_CHF_RATE;
-    
+
     portfolioChartData.push({
       date: formatDate(new Date()),
       totalInvested: totalInvestedCHF,
@@ -487,8 +494,8 @@ const BrokerPage = () => {
               <div className="total-amount positive">
                 {formatCurrency(
                   (summary.viac ? summary.viac.total_invested : 0) +
-                  ((summary.ing_diba && summary.ing_diba.total_current_value) ? summary.ing_diba.total_current_value * EUR_TO_CHF_RATE : 
-                   (summary.ing_diba && summary.ing_diba.total_invested) ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0),
+                  ((summary.ing_diba && summary.ing_diba.total_current_value) ? summary.ing_diba.total_current_value * EUR_TO_CHF_RATE :
+                    (summary.ing_diba && summary.ing_diba.total_invested) ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0),
                   'CHF'
                 )}
               </div>
@@ -549,18 +556,18 @@ const BrokerPage = () => {
           ) : (monthlyHistoricalSeries && monthlyHistoricalSeries.length > 0) ? (
             <div className="chart-wrapper">
               <ResponsiveContainer width="100%" height={600}>
-                <AreaChart 
-                  data={monthlyHistoricalSeries} 
+                <AreaChart
+                  data={monthlyHistoricalSeries}
                   margin={{ top: 50, right: 30, left: 60, bottom: 60 }}
                 >
                   <defs>
                     <linearGradient id="colorInvested" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.05}/>
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.05} />
                     </linearGradient>
                     <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4}/>
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.1}/>
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.1} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
@@ -598,11 +605,11 @@ const BrokerPage = () => {
                       const monthKey = payload.value;
                       if (typeof monthKey !== 'string') return null;
                       const [year] = monthKey.split('-');
-                      
+
                       // Check if this is the first month of this year
-                      const isFirstMonthOfYear = index === 0 || 
+                      const isFirstMonthOfYear = index === 0 ||
                         (index > 0 && monthlyHistoricalSeries[index - 1]?.month)?.split('-')[0] !== year;
-                      
+
                       // Show bracket for first month of each year
                       if (isFirstMonthOfYear) {
                         // Find the last month of this year (December or last available month)
@@ -623,7 +630,7 @@ const BrokerPage = () => {
                             }
                           }
                         }
-                        
+
                         // Calculate the x position of the last month (centered on the tick)
                         const chartWidth = width || 800;
                         const totalMonths = monthlyHistoricalSeries.length;
@@ -636,7 +643,7 @@ const BrokerPage = () => {
                         const bracketHeight = 8;
                         // Move bracket closer to months (reduce gap)
                         const horizontalLineY = y - 5; // Closer to the month labels above
-                        
+
                         return (
                           <g>
                             {/* Left bracket (vertical line going up from horizontal line, centered on first month) */}
@@ -804,85 +811,85 @@ const BrokerPage = () => {
               </ResponsiveContainer>
             </div>
           ) : portfolioChartData && portfolioChartData.length > 0 ? (
-          <div className="chart-wrapper">
-            <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={portfolioChartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: '#666', fontSize: 12 }}
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                />
-                <YAxis
-                  tick={{ fill: '#666', fontSize: 12 }}
-                  tickFormatter={(value) => formatCurrency(value, 'CHF').replace(/\s/g, '')}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'white',
-                    border: '1px solid #e5e5e5',
-                    borderRadius: '8px',
-                    padding: '12px'
-                  }}
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const data = payload[0].payload;
-                      return (
-                        <div
-                          style={{
-                            backgroundColor: 'white',
-                            border: '1px solid #e5e5e5',
-                            borderRadius: '8px',
-                            padding: '12px'
-                          }}
-                        >
-                          <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600 }}>{data.date}</p>
-                          {data.totalInvested !== undefined && (
-                            <p style={{ margin: 0, color: '#6366f1' }}>
-                              Invested: {formatCurrency(data.totalInvested, 'CHF')}
-                            </p>
-                          )}
-                          {data.currentValue !== undefined && (
-                            <>
-                              <p style={{ margin: 0, marginTop: '4px', color: '#22c55e' }}>
-                                Current: {formatCurrency(data.currentValue, 'CHF')}
+            <div className="chart-wrapper">
+              <ResponsiveContainer width="100%" height={400}>
+                <LineChart data={portfolioChartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: '#666', fontSize: 12 }}
+                    angle={-45}
+                    textAnchor="end"
+                    height={80}
+                  />
+                  <YAxis
+                    tick={{ fill: '#666', fontSize: 12 }}
+                    tickFormatter={(value) => formatCurrency(value, 'CHF').replace(/\s/g, '')}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'white',
+                      border: '1px solid #e5e5e5',
+                      borderRadius: '8px',
+                      padding: '12px'
+                    }}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div
+                            style={{
+                              backgroundColor: 'white',
+                              border: '1px solid #e5e5e5',
+                              borderRadius: '8px',
+                              padding: '12px'
+                            }}
+                          >
+                            <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600 }}>{data.date}</p>
+                            {data.totalInvested !== undefined && (
+                              <p style={{ margin: 0, color: '#6366f1' }}>
+                                Invested: {formatCurrency(data.totalInvested, 'CHF')}
                               </p>
-                              <p style={{ margin: 0, marginTop: '4px', color: '#f59e0b', fontSize: '12px' }}>
-                                Gain: {formatCurrency(data.currentValue - data.totalInvested, 'CHF')} (
-                                {(((data.currentValue - data.totalInvested) / data.totalInvested) * 100).toFixed(2)}%)
-                              </p>
-                            </>
-                          )}
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Legend verticalAlign="top" height={36} />
-                <Line
-                  type="monotone"
-                  dataKey="totalInvested"
-                  stroke="#6366f1"
-                  strokeWidth={3}
-                  name="Total Invested (CHF)"
-                  dot={{ fill: '#6366f1', r: 4 }}
-                  activeDot={{ r: 6 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="currentValue"
-                  stroke="#22c55e"
-                  strokeWidth={3}
-                  name="Current Value (CHF)"
-                  dot={{ fill: '#22c55e', r: 5 }}
-                  activeDot={{ r: 7 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+                            )}
+                            {data.currentValue !== undefined && (
+                              <>
+                                <p style={{ margin: 0, marginTop: '4px', color: '#22c55e' }}>
+                                  Current: {formatCurrency(data.currentValue, 'CHF')}
+                                </p>
+                                <p style={{ margin: 0, marginTop: '4px', color: '#f59e0b', fontSize: '12px' }}>
+                                  Gain: {formatCurrency(data.currentValue - data.totalInvested, 'CHF')} (
+                                  {(((data.currentValue - data.totalInvested) / data.totalInvested) * 100).toFixed(2)}%)
+                                </p>
+                              </>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Legend verticalAlign="top" height={36} />
+                  <Line
+                    type="monotone"
+                    dataKey="totalInvested"
+                    stroke="#6366f1"
+                    strokeWidth={3}
+                    name="Total Invested (CHF)"
+                    dot={{ fill: '#6366f1', r: 4 }}
+                    activeDot={{ r: 6 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="currentValue"
+                    stroke="#22c55e"
+                    strokeWidth={3}
+                    name="Current Value (CHF)"
+                    dot={{ fill: '#22c55e', r: 5 }}
+                    activeDot={{ r: 7 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
               No chart data available. Upload broker statements to see portfolio value over time.

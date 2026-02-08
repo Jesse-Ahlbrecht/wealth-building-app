@@ -126,3 +126,5 @@ export const calculateEssentialSplit = (expenseCategories, essentialCategorySet,
   return { essentialTotal, essentialTransactionCount, nonEssentialTotal, nonEssentialTransactionCount };
 };
 
+
+

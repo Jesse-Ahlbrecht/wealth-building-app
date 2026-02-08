@@ -1,7 +1,7 @@
 # Agent Coding Philosophy
 
 # Approach
-We are building v 1.0 so backward compatibility of changes doesn't matter! Whatever solution is fastest and simplest should be implemented. Keep the application as modular as possible.
+We are building v 1.0 so backward compatibility of changes doesn't matter! I REPEAT NEVER CARE ABOUT BACKWARD COMPATIBILITY! ‚Whatever solution is fastest and simplest should be implemented. Keep the application as modular as possible.
 
 ## Mission & Scope
 

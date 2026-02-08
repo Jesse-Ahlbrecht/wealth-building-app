@@ -194,3 +194,5 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, isClosing }) => {
 
 export default CategoryEditModal;
 
+
+
