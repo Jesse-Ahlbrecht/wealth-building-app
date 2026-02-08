@@ -153,8 +153,7 @@ const ChartsPage = () => {
         return Object.entries(m.expenseCategories)
           .filter(([cat]) => {
             const isLoanPayment = cat.toLowerCase().includes('loan payment');
-            if (includeLoanPayments && isLoanPayment) return false;
-            if (!includeLoanPayments && isLoanPayment) return true;
+            if (isLoanPayment) return includeLoanPayments;
             return essentialCategories.some(
               essentialCat => essentialCat.toLowerCase() === cat.toLowerCase()
             );
@@ -487,21 +486,12 @@ const ChartsPage = () => {
   }
 
   return (
-    <div className="charts-container" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+    <div className="charts-container charts-layout">
       <div className="chart-section">
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginBottom: '24px',
-            flexWrap: 'wrap',
-            gap: '16px'
-          }}
-        >
+        <div className="chart-header-row">
           <div>
-            <h3 className="chart-title" style={{ marginBottom: '4px' }}>Savings Over Time</h3>
-            <div style={{ fontSize: '14px', color: 'var(--color-text-tertiary)', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            <h3 className="chart-title chart-title-compact">Savings Over Time</h3>
+            <div className="chart-meta">
               {chartView === 'absolute' ? (
                 <>
                   <div>
@@ -514,7 +504,7 @@ const ChartsPage = () => {
                     >
                       {formatCurrency(avgSavings, 'CHF')}
                     </span>
-                    <span style={{ marginLeft: '8px', color: 'var(--color-text-light)' }}>
+                    <span className="chart-meta-subtle">
                       ({((avgSavings / SAVINGS_GOAL_CHF) * 100).toFixed(0)}% of goal)
                     </span>
                   </div>
@@ -537,7 +527,7 @@ const ChartsPage = () => {
                     >
                       {avgSavingRate.toFixed(1)}%
                     </span>
-                    <span style={{ marginLeft: '8px', color: 'var(--color-text-light)' }}>
+                    <span className="chart-meta-subtle">
                       ({((avgSavingRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of goal)
                     </span>
                   </div>
@@ -551,7 +541,7 @@ const ChartsPage = () => {
               )}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="chart-controls">
             <div className="time-range-selector">
               <button
                 className={`time-range-btn ${timeRange === '3m' ? 'active' : ''}`}
@@ -577,7 +567,7 @@ const ChartsPage = () => {
               >
                 All
               </button>
-              <div style={{ position: 'relative' }}>
+              <div className="custom-range-wrapper">
                 <button
                   ref={customButtonRef}
                   className={`time-range-btn ${timeRange === 'custom' || selectedRange !== null ? 'active' : ''}`}
@@ -596,60 +586,20 @@ const ChartsPage = () => {
                 </button>
                 {showCustomHelp && customButtonRef.current && (
                   <div
-                    style={{
-                      position: 'absolute',
-                      top: '100%',
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      marginTop: '8px',
-                      backgroundColor: 'var(--color-bg-card)',
-                      border: '1px solid var(--color-border-primary)',
-                      borderRadius: '8px',
-                      padding: '12px 16px',
-                      width: '320px',
-                      boxShadow: '0 4px 12px var(--color-shadow-md)',
-                      zIndex: 1000,
-                      fontSize: '13px',
-                      color: 'var(--color-text-secondary)',
-                      lineHeight: '1.5'
-                    }}
+                    className="custom-range-help"
                   >
-                    <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '6px', fontSize: '14px' }}>
+                    <div className="custom-range-help-title">
                       Custom Range Selection
                     </div>
-                    <div style={{ marginBottom: '4px' }}>
+                    <div className="custom-range-help-text">
                       Click and drag across bars to select a date range
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', fontStyle: 'italic', marginTop: '6px' }}>
+                    <div className="custom-range-help-tip">
                       Tip: Start from any bar or empty space
                     </div>
                     {/* Arrow pointing up */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '-6px',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        width: 0,
-                        height: 0,
-                        borderLeft: '6px solid transparent',
-                        borderRight: '6px solid transparent',
-                        borderBottom: '6px solid var(--color-bg-card)'
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '-7px',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        width: 0,
-                        height: 0,
-                        borderLeft: '6px solid transparent',
-                        borderRight: '6px solid transparent',
-                        borderBottom: '6px solid var(--color-border-primary)'
-                      }}
-                    />
+                    <div className="custom-range-help-arrow" />
+                    <div className="custom-range-help-arrow-border" />
                   </div>
                 )}
               </div>
@@ -680,14 +630,9 @@ const ChartsPage = () => {
           </div>
         </div>
         <div
-          className="chart-wrapper"
+          className={`chart-wrapper ${isSelecting ? 'chart-wrapper-selecting' : ''}`}
           ref={chartContainerRef}
           onMouseDown={handleMouseDown}
-          style={{
-            position: 'relative',
-            cursor: isSelecting ? 'crosshair' : 'default',
-            userSelect: isSelecting ? 'none' : 'auto'
-          }}
         >
           <ResponsiveContainer width="100%" height={400}>
             <BarChart
@@ -708,7 +653,7 @@ const ChartsPage = () => {
                 if (data && data.activePayload && data.activePayload[0]) {
                   const clickedData = data.activePayload[0].payload;
                   // Find the full month data from summary
-                  const monthData = summary.find((m) => formatMonth(m.month) === clickedData.monthKey);
+                  const monthData = summary.find((m) => m.month === clickedData.monthKey);
                   if (monthData) {
                     setSelectedMonth(monthData);
                     setTimeout(() => {
@@ -810,14 +755,14 @@ const ChartsPage = () => {
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="chart-hint" style={{ textAlign: 'center', marginTop: '8px', color: 'var(--color-text-tertiary)', fontSize: '12px' }}>
+        <div className="chart-hint">
           💡 Click on a bar to see details, or drag to select a custom range
         </div>
       </div>
 
       {/* Category View Toggle - Only show when month is selected */}
       {selectedMonth && (
-        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '24px', marginBottom: '16px' }}>
+        <div className="chart-toggle-row">
           <div className="chart-toggle">
             <button
               className={`chart-toggle-btn ${showEssentialSplit ? '' : 'active'}`}
@@ -837,7 +782,7 @@ const ChartsPage = () => {
 
       {/* Drilldown Details */}
       {selectedMonth && (
-        <div id="drilldown-details" style={{ position: 'relative', scrollMarginTop: '100px' }}>
+        <div id="drilldown-details" className="drilldown-details">
           <button
             className="drilldown-close"
             onClick={() => setSelectedMonth(null)}
@@ -870,4 +815,3 @@ const ChartsPage = () => {
 };
 
 export default ChartsPage;
-

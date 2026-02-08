@@ -324,27 +324,6 @@ function AppContent() {
           <div
             className="processing-alert"
             onClick={() => handleTabChange('data')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '6px 12px',
-              backgroundColor: 'rgba(37, 99, 235, 0.1)',
-              border: '1px solid rgba(37, 99, 235, 0.3)',
-              borderRadius: '6px',
-              color: '#2563eb',
-              fontSize: '13px',
-              fontWeight: '500',
-              cursor: 'pointer',
-              marginLeft: '16px',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(37, 99, 235, 0.15)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(37, 99, 235, 0.1)';
-            }}
           >
             <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '12px' }}></i>
             <span>

@@ -1187,6 +1187,12 @@
   max-width: 100%;
 }
 
+.charts-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
 .chart-section {
   background: var(--color-bg-card);
   border-radius: 12px;
@@ -1194,6 +1200,103 @@
   box-shadow: 0 1px 3px var(--color-shadow-sm);
   margin-bottom: 32px;
   transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.chart-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.chart-title.chart-title-compact {
+  margin-bottom: 4px;
+}
+
+.chart-meta {
+  font-size: 14px;
+  color: var(--color-text-tertiary);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.chart-meta-subtle {
+  margin-left: 8px;
+  color: var(--color-text-light);
+}
+
+.chart-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.custom-range-wrapper {
+  position: relative;
+}
+
+.custom-range-help {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 8px;
+  background-color: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 8px;
+  padding: 12px 16px;
+  width: 320px;
+  box-shadow: 0 4px 12px var(--color-shadow-md);
+  z-index: 1000;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.custom-range-help-title {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.custom-range-help-text {
+  margin-bottom: 4px;
+}
+
+.custom-range-help-tip {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  margin-top: 6px;
+}
+
+.custom-range-help-arrow {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 6px solid var(--color-bg-card);
+}
+
+.custom-range-help-arrow-border {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 6px solid var(--color-border-primary);
 }
 
 @media (max-width: 900px) {
@@ -1272,6 +1375,13 @@
 .chart-wrapper {
   width: 100%;
   overflow: visible;
+  position: relative;
+  cursor: default;
+}
+
+.chart-wrapper-selecting {
+  cursor: crosshair;
+  user-select: none;
 }
 
 .chart-wrapper .recharts-bar-rectangle {
@@ -1342,6 +1452,25 @@
   background: var(--color-bg-button);
   color: var(--color-text-button);
   box-shadow: 0 1px 3px var(--color-shadow-sm);
+}
+
+.chart-hint {
+  text-align: center;
+  margin-top: 8px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.chart-toggle-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+  margin-bottom: 16px;
+}
+
+.drilldown-details {
+  position: relative;
+  scroll-margin-top: 100px;
 }
 
 .time-range-selector {

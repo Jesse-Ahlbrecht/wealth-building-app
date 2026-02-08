@@ -49,6 +49,9 @@
   --color-error-bg: #fef2f2;
   --color-warning: #f97316;
   --color-info: #2563eb;
+  --color-info-soft: rgba(37, 99, 235, 0.12);
+  --color-info-soft-hover: rgba(37, 99, 235, 0.18);
+  --color-info-border: rgba(37, 99, 235, 0.35);
   
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
@@ -98,4 +101,7 @@
   --color-error-bg: #7f1d1d;
   --color-warning: #f97316;
   --color-info: #3b82f6;
+  --color-info-soft: rgba(59, 130, 246, 0.18);
+  --color-info-soft-hover: rgba(59, 130, 246, 0.26);
+  --color-info-border: rgba(59, 130, 246, 0.4);
 }
