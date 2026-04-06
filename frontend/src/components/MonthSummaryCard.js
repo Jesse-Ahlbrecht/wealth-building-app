@@ -212,6 +212,91 @@ const MonthSummaryCard = ({
     return sortTransactions(actualTransactions, type);
   };
 
+  const getAccountBadgeConfig = (accountNameRaw) => {
+    const accountName = (accountNameRaw || '').trim();
+    if (!accountName) return null;
+
+    const normalized = accountName.toLowerCase();
+    const baseClass = normalized.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+    if (normalized.includes('dkb')) {
+      if (normalized.includes('giro')) {
+        return { label: 'DKB Giro', className: 'account-badge account-badge-dkb account-badge-dkb-girokonto' };
+      }
+      if (normalized.includes('tagesgeld')) {
+        return { label: 'DKB Tagesgeld', className: 'account-badge account-badge-dkb account-badge-dkb-tagesgeld' };
+      }
+      return { label: accountName, className: 'account-badge account-badge-dkb' };
+    }
+
+    if (normalized.includes('yuh')) {
+      return { label: accountName, className: 'account-badge account-badge-yuh' };
+    }
+
+    if (normalized.includes('swisscard')) {
+      return { label: accountName, className: 'account-badge account-badge-swisscard' };
+    }
+
+    if (normalized.includes('kfw')) {
+      return { label: accountName, className: 'account-badge account-badge-kfw' };
+    }
+
+    return { label: accountName, className: `account-badge account-badge-default account-badge-${baseClass}` };
+  };
+
+  const renderTransactionDetails = (txn, isPredicted = false) => {
+    const badge = getAccountBadgeConfig(txn.account);
+
+    return (
+      <div className="transaction-details">
+        <div className="transaction-recipient-row">
+          <div className="transaction-recipient">{txn.recipient || 'N/A'}</div>
+          {badge && (
+            <span className={badge.className} title={txn.account}>
+              {badge.label}
+            </span>
+          )}
+        </div>
+        {txn.description && (
+          <div className="transaction-description" style={isPredicted ? { color: '#6366f1', fontSize: '12px' } : {}}>
+            {txn.description}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderTransactionItem = (txn, idx, { dismissible = false } = {}) => {
+    const isPredicted = txn.is_predicted || txn.isPredicted;
+
+    return (
+      <div
+        key={idx}
+        className={`transaction-item ${isPredicted ? 'transaction-item-predicted' : ''}`}
+        style={isPredicted ? {
+          borderColor: '#6366f1',
+          backgroundColor: 'var(--color-bg-tertiary)',
+          cursor: dismissible ? 'pointer' : 'default'
+        } : {}}
+        onClick={isPredicted && dismissible ? () => onDismissPrediction(txn) : undefined}
+        title={isPredicted && dismissible ? 'Click to dismiss prediction' : ''}
+      >
+        <div className="transaction-date">
+          {formatDate(txn.date)}
+          {isPredicted && (
+            <span className="account-badge account-badge-predicted" style={{ marginLeft: '8px', fontSize: '11px', padding: '2px 6px' }}>
+              Predicted
+            </span>
+          )}
+        </div>
+        {renderTransactionDetails(txn, isPredicted)}
+        <div className="transaction-amount">
+          {formatCurrency(Math.abs(txn.amount), txn.currency || defaultCurrency)}
+        </div>
+      </div>
+    );
+  };
+
   const renderExpenseSortControls = () => {
     return (
       <div className="transaction-sort-row" role="group" aria-label="Sort expense transactions">
@@ -420,42 +505,7 @@ const MonthSummaryCard = ({
                             <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
                               {renderExpenseSortControls()}
                               <div className="transaction-list">
-                                {transactions.map((txn, idx) => {
-                                  const isPredicted = txn.is_predicted || txn.isPredicted;
-                                  return (
-                                    <div 
-                                      key={idx} 
-                                      className={`transaction-item ${isPredicted ? 'transaction-item-predicted' : ''}`}
-                                      style={isPredicted ? { 
-                                        borderColor: '#6366f1',
-                                        backgroundColor: 'var(--color-bg-tertiary)',
-                                        cursor: 'pointer'
-                                      } : {}}
-                                      onClick={isPredicted ? () => onDismissPrediction(txn) : undefined}
-                                      title={isPredicted ? 'Click to dismiss prediction' : ''}
-                                    >
-                                      <div className="transaction-date">
-                                        {formatDate(txn.date)}
-                                        {isPredicted && (
-                                          <span className="account-badge account-badge-predicted" style={{ marginLeft: '8px', fontSize: '11px', padding: '2px 6px' }}>
-                                            Predicted
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="transaction-details">
-                                        <div className="transaction-recipient">{txn.recipient || 'N/A'}</div>
-                                        {txn.description && (
-                                          <div className="transaction-description" style={isPredicted ? { color: '#6366f1', fontSize: '12px' } : {}}>
-                                            {txn.description}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="transaction-amount">
-                                        {formatCurrency(Math.abs(txn.amount), txn.currency || defaultCurrency)}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                                {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
                               </div>
                             </div>
                           )}
@@ -564,42 +614,7 @@ const MonthSummaryCard = ({
                             <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
                               {renderExpenseSortControls()}
                               <div className="transaction-list">
-                                {transactions.map((txn, idx) => {
-                                  const isPredicted = txn.is_predicted || txn.isPredicted;
-                                  return (
-                                    <div 
-                                      key={idx} 
-                                      className={`transaction-item ${isPredicted ? 'transaction-item-predicted' : ''}`}
-                                      style={isPredicted ? { 
-                                        borderColor: '#6366f1',
-                                        backgroundColor: 'var(--color-bg-tertiary)',
-                                        cursor: 'pointer'
-                                      } : {}}
-                                      onClick={isPredicted ? () => onDismissPrediction(txn) : undefined}
-                                      title={isPredicted ? 'Click to dismiss prediction' : ''}
-                                    >
-                                      <div className="transaction-date">
-                                        {formatDate(txn.date)}
-                                        {isPredicted && (
-                                          <span className="account-badge account-badge-predicted" style={{ marginLeft: '8px', fontSize: '11px', padding: '2px 6px' }}>
-                                            Predicted
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="transaction-details">
-                                        <div className="transaction-recipient">{txn.recipient || 'N/A'}</div>
-                                        {txn.description && (
-                                          <div className="transaction-description" style={isPredicted ? { color: '#6366f1', fontSize: '12px' } : {}}>
-                                            {txn.description}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="transaction-amount">
-                                        {formatCurrency(Math.abs(txn.amount), txn.currency || defaultCurrency)}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                                {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
                               </div>
                             </div>
                             )}
@@ -702,42 +717,7 @@ const MonthSummaryCard = ({
                             <div className="transaction-list-wrapper">
                               {renderExpenseSortControls()}
                               <div className="transaction-list">
-                                {transactions.map((txn, idx) => {
-                                  const isPredicted = txn.is_predicted || txn.isPredicted;
-                                  return (
-                                    <div 
-                                      key={idx} 
-                                      className={`transaction-item ${isPredicted ? 'transaction-item-predicted' : ''}`}
-                                      style={isPredicted ? { 
-                                        borderColor: '#6366f1',
-                                        backgroundColor: 'var(--color-bg-tertiary)',
-                                        cursor: 'pointer'
-                                      } : {}}
-                                      onClick={isPredicted ? () => onDismissPrediction(txn) : undefined}
-                                      title={isPredicted ? 'Click to dismiss prediction' : ''}
-                                    >
-                                      <div className="transaction-date">
-                                        {formatDate(txn.date)}
-                                        {isPredicted && (
-                                          <span className="account-badge account-badge-predicted" style={{ marginLeft: '8px', fontSize: '11px', padding: '2px 6px' }}>
-                                            Predicted
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="transaction-details">
-                                        <div className="transaction-recipient">{txn.recipient || 'N/A'}</div>
-                                        {txn.description && (
-                                          <div className="transaction-description" style={isPredicted ? { color: '#6366f1', fontSize: '12px' } : {}}>
-                                            {txn.description}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="transaction-amount">
-                                        {formatCurrency(Math.abs(txn.amount), txn.currency || defaultCurrency)}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                                {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
                               </div>
                             </div>
                           )}
@@ -841,20 +821,7 @@ const MonthSummaryCard = ({
                         {isExpanded && transactions.length > 0 && (
                           <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
                             <div className="transaction-list">
-                              {transactions.map((txn, idx) => (
-                                <div key={idx} className="transaction-item">
-                                  <div className="transaction-date">{formatDate(txn.date)}</div>
-                                  <div className="transaction-details">
-                                    <div className="transaction-recipient">{txn.recipient || 'N/A'}</div>
-                                    {txn.description && (
-                                      <div className="transaction-description">{txn.description}</div>
-                                    )}
-                                  </div>
-                                  <div className="transaction-amount">
-                                    {formatCurrency(Math.abs(txn.amount), txn.currency || defaultCurrency)}
-                                  </div>
-                                </div>
-                              ))}
+                              {transactions.map((txn, idx) => renderTransactionItem(txn, idx))}
                             </div>
                           </div>
                         )}

@@ -1060,6 +1060,8 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .account-badge-dkb {
@@ -1087,6 +1089,16 @@
 .account-badge-kfw {
   background: #fef2f2;
   color: #dc2626;
+}
+
+.account-badge-swisscard {
+  background: #ecfccb;
+  color: #3f6212;
+}
+
+.account-badge-default {
+  background: var(--color-bg-button-secondary);
+  color: var(--color-text-secondary);
 }
 
 .loan-payment-toggle {
@@ -1145,13 +1157,20 @@
   font-size: 14px;
   font-weight: 500;
   color: var(--color-text-primary);
-  margin-bottom: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  width: 100%;
-  display: block;
+  min-width: 0;
+  flex: 1;
   transition: color 0.3s ease;
+}
+
+.transaction-recipient-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 2px;
 }
 
 .transaction-description {
