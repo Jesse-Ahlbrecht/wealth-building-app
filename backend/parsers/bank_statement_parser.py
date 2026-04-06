@@ -11,7 +11,7 @@ For new code, prefer importing the specific parsers directly:
 """
 
 from parsers.base_parser import BaseParser
-from parsers.bank_parser import DKBParser, YUHParser
+from parsers.bank_parser import DKBParser, YUHParser, SwisscardParser
 from parsers.broker_parser import VIACParser, INGDiBaParser
 from parsers.loan_parser import KfWParser
 
@@ -36,6 +36,13 @@ class BankStatementParser(BaseParser):
         parser = YUHParser()
         transactions = parser.parse(filepath)
         # Copy account balances to this instance
+        self.account_balances.update(parser.account_balances)
+        return transactions
+
+    def parse_swisscard(self, filepath):
+        """Parse Swisscard credit card CSV exports"""
+        parser = SwisscardParser()
+        transactions = parser.parse(filepath)
         self.account_balances.update(parser.account_balances)
         return transactions
     

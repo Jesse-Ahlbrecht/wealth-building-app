@@ -2,7 +2,7 @@
 Bank Statement Parsers
 
 Parsers for bank statements from various institutions.
-Supports: DKB (German), YUH (Swiss)
+Supports: DKB (German), YUH (Swiss), Swisscard credit cards
 """
 
 import csv
@@ -235,5 +235,82 @@ class YUHParser(BaseParser):
                 'balance': goal_balance,
                 'currency': 'CHF'
             }
-        
+
+        return transactions
+
+
+class SwisscardParser(BaseParser):
+    """Parser for Swisscard credit card CSV exports"""
+
+    BOOKED_STATUS = 'Gebucht'
+
+    def _build_account_name(self, masked_card_number):
+        """Create a stable account name from the masked Swisscard number."""
+        card_number = (masked_card_number or '').strip()
+        trailing_digits = ''.join(ch for ch in card_number if ch.isdigit())[-4:]
+        if trailing_digits:
+            return f'Swisscard {trailing_digits}'
+        return 'Swisscard'
+
+    def parse(self, filepath):
+        """Parse Swisscard CSV exports."""
+        transactions = []
+
+        with open(filepath, 'r', encoding='utf-8-sig', newline='') as f:
+            reader = csv.DictReader(f, delimiter=',')
+
+            for row_num, row in enumerate(reader, start=1):
+                try:
+                    date_str = (row.get('Transaktionsdatum') or '').strip().strip('"')
+                    if not date_str:
+                        continue
+
+                    status = (row.get('Status') or '').strip().strip('"')
+                    if status and status != self.BOOKED_STATUS:
+                        continue
+
+                    amount_str = (row.get('Betrag') or '').strip().strip('"')
+                    if not amount_str:
+                        continue
+
+                    amount = float(amount_str.replace("'", '').replace(',', '.'))
+                    debit_credit = (row.get('Debit/Kredit') or '').strip().strip('"').lower()
+                    if debit_credit == 'belastung':
+                        transaction_type = 'expense'
+                    elif debit_credit:
+                        transaction_type = 'income'
+                    else:
+                        transaction_type = 'income' if amount > 0 else 'expense'
+                    amount = abs(amount)
+
+                    date = datetime.strptime(date_str, '%d.%m.%Y')
+
+                    description = (row.get('Beschreibung') or '').strip().strip('"')
+                    merchant = (row.get('Händler') or '').strip().strip('"')
+                    currency = (row.get('Währung') or 'CHF').strip().strip('"') or 'CHF'
+                    account_name = self._build_account_name(row.get('Kartennummer'))
+
+                    category = self.categorize_transaction(
+                        merchant or description,
+                        description,
+                        date.strftime('%Y-%m-%d'),
+                        account_name
+                    )
+
+                    transactions.append({
+                        'date': date.isoformat(),
+                        'amount': amount,
+                        'currency': currency,
+                        'recipient': merchant or description,
+                        'description': description,
+                        'category': category,
+                        'type': transaction_type,
+                        'account': account_name
+                    })
+                except (ValueError, KeyError) as e:
+                    if row_num <= 3:
+                        print(f"Error parsing Swisscard row {row_num}: {e}")
+                    continue
+
+        print(f"Parsed {len(transactions)} booked transactions from Swisscard file {filepath}")
         return transactions

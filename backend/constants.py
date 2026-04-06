@@ -24,6 +24,15 @@ DOCUMENT_TYPES = [
         'sample_data_path': 'data/bank_statements/yuh'
     },
     {
+        'key': 'bank_statement_swisscard',
+        'label': 'Swisscard Credit Card Export',
+        'category': 'bank',
+        'description': 'CSV exports from Swisscard credit cards.',
+        'extensions': ['.csv'],
+        'parser': 'parse_swisscard',
+        'sample_data_path': 'data/bank_statements/swisscard'
+    },
+    {
         'key': 'broker_viac_pdf',
         'label': 'VIAC Trade Confirmation',
         'category': 'broker',
@@ -53,4 +62,3 @@ DOCUMENT_TYPES = [
 ]
 
 DOCUMENT_TYPE_LOOKUP = {doc['key']: doc for doc in DOCUMENT_TYPES}
-

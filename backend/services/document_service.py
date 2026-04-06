@@ -459,6 +459,8 @@ def _process_document_async(document_id, document_type, file_data, tenant_id):
                     transactions = parser.parse_dkb(tmp_path)
                 elif document_type == 'bank_statement_yuh':
                     transactions = parser.parse_yuh(tmp_path)
+                elif document_type == 'bank_statement_swisscard':
+                    transactions = parser.parse_swisscard(tmp_path)
                 elif document_type == 'loan_kfw_pdf':
                     loans = parser.parse_kfw(tmp_path)
                     # Loans are handled separately, not as transactions
