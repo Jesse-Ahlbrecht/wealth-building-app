@@ -40,10 +40,18 @@
     "apple services",
     "fraenk"
   ],
+  "Utilities": [
+  ],
   "Loan Payment": [
     "kreditanstalt",
     "studienkredit",
     "kredit"
+  ],
+  "Investment Account Payment": [
+    "interactive brokers",
+    "ibkr",
+    "viac",
+    "finpension"
   ],
   "Rent": [
     "ubs fund mgt",

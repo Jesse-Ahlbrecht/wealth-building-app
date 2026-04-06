@@ -41,6 +41,7 @@ const ChartsPage = () => {
 
   // Data state
   const [summary, setSummary] = useState([]);
+  const [availableCategories, setAvailableCategories] = useState({ income: [], expense: [] });
   const [essentialCategories, setEssentialCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -92,12 +93,7 @@ const ChartsPage = () => {
   const [showCustomHelp, setShowCustomHelp] = useState(false);
 
   // Load data on mount
-  useEffect(() => {
-    loadSummary();
-    loadEssentialCategories();
-  }, []);
-
-  const loadSummary = async () => {
+  const loadSummary = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -113,13 +109,25 @@ const ChartsPage = () => {
       }
 
       setSummary(summaryData);
+      setSelectedMonth((currentSelectedMonth) => {
+        if (!currentSelectedMonth?.month) {
+          return currentSelectedMonth;
+        }
+        return summaryData.find((item) => item.month === currentSelectedMonth.month) || currentSelectedMonth;
+      });
     } catch (err) {
       console.error('Error loading summary:', err);
       setError(err.message || 'Failed to load chart data');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadSummary();
+    loadEssentialCategories();
+    loadAvailableCategories();
+  }, [loadSummary]);
 
   const loadEssentialCategories = async () => {
     try {
@@ -130,6 +138,23 @@ const ChartsPage = () => {
       console.error('Error loading essential categories:', err);
       // Use defaults if loading fails
       setEssentialCategories(['Rent', 'Insurance', 'Groceries', 'Utilities']);
+    }
+  };
+
+  const loadAvailableCategories = async () => {
+    try {
+      const response = await categoriesAPI.getCategories();
+      const categories = response?.data || response || {};
+      setAvailableCategories({
+        income: Array.isArray(categories.income) ? categories.income : [],
+        expense: Array.isArray(categories.expense) ? categories.expense : []
+      });
+    } catch (err) {
+      console.error('Error loading available categories:', err);
+      setAvailableCategories({
+        income: ['Salary', 'Income', 'Other'],
+        expense: ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Utilities', 'Loan Payment', 'Investment Account Payment', 'Rent', 'Insurance', 'Transfer', 'Other']
+      });
     }
   };
 
@@ -806,6 +831,8 @@ const ChartsPage = () => {
               predictions={predictions[selectedMonth.month] || []}
               averageEssentialSpending={averageEssentialSpending[selectedMonth.month] || 0}
               onDismissPrediction={handleDismissPrediction}
+              availableCategories={availableCategories}
+              onTransactionCategoryUpdated={loadSummary}
             />
           </div>
         </div>

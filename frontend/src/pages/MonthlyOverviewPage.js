@@ -13,6 +13,7 @@ import MonthSummaryCard from '../components/MonthSummaryCard';
 const MonthlyOverviewPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
   const [summary, setSummary] = useState([]);
+  const [availableCategories, setAvailableCategories] = useState({ income: [], expense: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -59,6 +60,7 @@ const MonthlyOverviewPage = () => {
   useEffect(() => {
     loadSummary();
     loadEssentialCategories();
+    loadAvailableCategories();
   }, []);
 
   useEffect(() => {
@@ -110,6 +112,23 @@ const MonthlyOverviewPage = () => {
       console.error('Error loading essential categories:', err);
       // Use default essential categories on error
       setEssentialCategories(['Rent', 'Insurance', 'Groceries', 'Utilities']);
+    }
+  };
+
+  const loadAvailableCategories = async () => {
+    try {
+      const response = await categoriesAPI.getCategories();
+      const categories = response?.data || response || {};
+      setAvailableCategories({
+        income: Array.isArray(categories.income) ? categories.income : [],
+        expense: Array.isArray(categories.expense) ? categories.expense : []
+      });
+    } catch (err) {
+      console.error('Error loading available categories:', err);
+      setAvailableCategories({
+        income: ['Salary', 'Income', 'Other'],
+        expense: ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Utilities', 'Loan Payment', 'Investment Account Payment', 'Rent', 'Insurance', 'Transfer', 'Other']
+      });
     }
   };
 
@@ -271,6 +290,8 @@ const MonthlyOverviewPage = () => {
           predictions={predictions[latestMonth.month] || []}
           averageEssentialSpending={averageEssentialSpending[latestMonth.month] || 0}
           onDismissPrediction={handleDismissPrediction}
+          availableCategories={availableCategories}
+          onTransactionCategoryUpdated={loadSummary}
         />
       </div>
 
@@ -299,6 +320,8 @@ const MonthlyOverviewPage = () => {
                 predictions={predictions[month.month] || []}
                 averageEssentialSpending={averageEssentialSpending[month.month] || 0}
                 onDismissPrediction={handleDismissPrediction}
+                availableCategories={availableCategories}
+                onTransactionCategoryUpdated={loadSummary}
               />
             </div>
           ))}

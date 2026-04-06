@@ -7,6 +7,9 @@
 
 import React from 'react';
 import { formatCurrency, formatMonth, formatDate } from '../utils';
+import CategoryEditModal from './CategoryEditModal';
+
+const SAVINGS_CATEGORY_NAMES = new Set(['Transfer', 'Internal Transfer', 'Loan Payment', 'Investment Account Payment']);
 
 /**
  * Metric Bar Component
@@ -53,8 +56,11 @@ const MonthSummaryCard = ({
   onExpenseSortChange = () => {},
   predictions = [],
   averageEssentialSpending = 0,
-  onDismissPrediction = () => {}
+  onDismissPrediction = () => {},
+  availableCategories = { income: [], expense: [] },
+  onTransactionCategoryUpdated = () => {}
 }) => {
+  const [categoryModal, setCategoryModal] = React.useState(null);
   const income = month.income || 0;
   const baseExpenses = month.expenses || 0;
   
@@ -81,15 +87,21 @@ const MonthSummaryCard = ({
   // Group expense categories into essential and non-essential
   const groupExpensesByEssential = (expenseCategories) => {
     if (!expenseCategories || Object.keys(expenseCategories).length === 0) {
-      return { essential: {}, nonEssential: {} };
+      return { essential: {}, nonEssential: {}, savingsCategories: {} };
     }
 
     const essential = {};
     const nonEssential = {};
+    const savingsCategories = {};
 
     Object.entries(expenseCategories).forEach(([category, amount]) => {
       // Check if this is a loan payment category (case-insensitive)
       const isLoanPayment = category.toLowerCase().includes('loan payment') || category.toLowerCase().includes('loan');
+
+      if (SAVINGS_CATEGORY_NAMES.has(category) && !(isLoanPayment && !includeLoanPayments)) {
+        savingsCategories[category] = amount;
+        return;
+      }
       
       // If loan payments are counted as savings, exclude them from spending entirely
       if (includeLoanPayments && isLoanPayment) {
@@ -114,14 +126,22 @@ const MonthSummaryCard = ({
       }
     });
 
-    return { essential, nonEssential };
+    return { essential, nonEssential, savingsCategories };
   };
 
-  const { essential: essentialExpenses, nonEssential: nonEssentialExpenses } = 
-    showEssentialSplit ? groupExpensesByEssential(month.expenseCategories) : { essential: {}, nonEssential: {} };
+  const {
+    essential: essentialExpenses,
+    nonEssential: nonEssentialExpenses,
+    savingsCategories
+  } =
+    showEssentialSplit ? groupExpensesByEssential(month.expenseCategories) : { essential: {}, nonEssential: {}, savingsCategories: {} };
   
   const essentialTotal = Object.values(essentialExpenses).reduce((sum, val) => sum + val, 0);
   const nonEssentialTotal = Object.values(nonEssentialExpenses).reduce((sum, val) => sum + val, 0);
+  const savingsCategoryTotal = Object.values(savingsCategories).reduce((sum, val) => sum + val, 0);
+  const splitExpensesTotal = essentialTotal + nonEssentialTotal;
+  const expensesForDisplay = showEssentialSplit ? splitExpensesTotal : expenses;
+  const savingsForDisplay = showEssentialSplit ? income - splitExpensesTotal : savings;
   
   // Calculate predicted essential spending (use average if higher than current)
   const predictedEssentialAverage = isCurrentMonth ? (averageEssentialSpending || 0) : 0;
@@ -131,6 +151,8 @@ const MonthSummaryCard = ({
   // Calculate predicted savings, adding loan payments if they're counted as savings
   const basePredictedSavings = income - totalPredictedExpenses;
   const predictedSavings = includeLoanPayments ? basePredictedSavings + monthlyLoanPayment : basePredictedSavings;
+  const savingsMetricValue = isCurrentMonth && predictedSavings !== savingsForDisplay ? predictedSavings : savingsForDisplay;
+  const metricMaxValue = Math.max(income, expensesForDisplay, Math.abs(savingsMetricValue));
 
   // Helper to toggle category expansion
   const toggleCategory = (categoryKey) => {
@@ -268,6 +290,9 @@ const MonthSummaryCard = ({
 
   const renderTransactionItem = (txn, idx, { dismissible = false } = {}) => {
     const isPredicted = txn.is_predicted || txn.isPredicted;
+    const typeKey = txn?.type === 'income' ? 'income' : 'expense';
+    const categoryOptions = Array.isArray(availableCategories?.[typeKey]) ? availableCategories[typeKey] : [];
+    const canEditCategory = !isPredicted && txn?.transaction_hash && categoryOptions.length > 0;
 
     return (
       <div
@@ -290,6 +315,25 @@ const MonthSummaryCard = ({
           )}
         </div>
         {renderTransactionDetails(txn, isPredicted)}
+        <div className="transaction-actions">
+          {canEditCategory && (
+            <button
+              type="button"
+              className="transaction-category-pill"
+              onClick={(event) => {
+                event.stopPropagation();
+                setCategoryModal({
+                  transaction: txn,
+                  currentCategory: txn.category || '',
+                  monthKey: month.month
+                });
+              }}
+              title="Change transaction category"
+            >
+              {txn.category || 'Set category'}
+            </button>
+          )}
+        </div>
         <div className="transaction-amount">
           {formatCurrency(Math.abs(txn.amount), txn.currency || defaultCurrency)}
         </div>
@@ -327,6 +371,13 @@ const MonthSummaryCard = ({
 
   return (
     <>
+      <CategoryEditModal
+        modal={categoryModal}
+        onClose={() => setCategoryModal(null)}
+        onUpdated={onTransactionCategoryUpdated}
+        availableCategories={availableCategories}
+        essentialCategories={essentialCategories}
+      />
       {/* Header */}
       <div className="current-month-header">
         <div>
@@ -340,11 +391,11 @@ const MonthSummaryCard = ({
         <MetricBar
           label="Income"
           value={income}
-          maxValue={Math.max(income, expenses, Math.abs(savings))}
+          maxValue={metricMaxValue}
           currency={defaultCurrency}
           type="positive"
         />
-        {showEssentialSplit && (essentialTotal > 0 || nonEssentialTotal > 0) ? (
+        {showEssentialSplit && (essentialTotal > 0 || nonEssentialTotal > 0 || savingsCategoryTotal > 0) ? (
           <>
             <div className="metric-bar-item">
               <div className="metric-bar-header">
@@ -363,14 +414,14 @@ const MonthSummaryCard = ({
                   <div
                     className="metric-bar-fill negative"
                     style={{ 
-                      width: `${Math.max(income, expenses, Math.abs(savings)) > 0 ? (essentialTotal / Math.max(income, expenses, Math.abs(savings))) * 100 : 0}%`,
+                      width: `${metricMaxValue > 0 ? (essentialTotal / metricMaxValue) * 100 : 0}%`,
                       borderRadius: (isCurrentMonth && predictedEssentialDifference > 0) ? '8px 0 0 8px' : '8px'
                     }}
                   />
                   {isCurrentMonth && predictedEssentialDifference > 0 && (
                     <div
                       style={{ 
-                        width: `${Math.max(income, expenses, Math.abs(savings)) > 0 ? (predictedEssentialDifference / Math.max(income, expenses, Math.abs(savings))) * 100 : 0}%`,
+                        width: `${metricMaxValue > 0 ? (predictedEssentialDifference / metricMaxValue) * 100 : 0}%`,
                         background: 'linear-gradient(90deg, rgba(220, 38, 38, 0.25), rgba(220, 38, 38, 0.15))',
                         borderRadius: '0 8px 8px 0',
                         minWidth: predictedEssentialDifference > 0 ? '2px' : '0'
@@ -384,7 +435,7 @@ const MonthSummaryCard = ({
             <MetricBar
               label="Non-Essential Expenses"
               value={nonEssentialTotal}
-              maxValue={Math.max(income, expenses, Math.abs(savings))}
+              maxValue={metricMaxValue}
               currency={defaultCurrency}
               type="negative"
             />
@@ -392,8 +443,8 @@ const MonthSummaryCard = ({
         ) : (
           <MetricBar
             label="Expenses"
-            value={expenses}
-            maxValue={Math.max(income, expenses, Math.abs(savings))}
+            value={expensesForDisplay}
+            maxValue={metricMaxValue}
             currency={defaultCurrency}
             type="negative"
           />
@@ -403,21 +454,20 @@ const MonthSummaryCard = ({
             <span className="metric-bar-label">
               {includeLoanPayments && monthlyLoanPayment > 0 ? "Savings (incl. loans)" : "Savings"}
             </span>
-            <div className={`metric-bar-value ${(isCurrentMonth && predictedSavings !== savings ? predictedSavings : savings) >= 0 ? 'positive' : 'negative'}`}>
-              {(isCurrentMonth && predictedSavings !== savings ? predictedSavings : savings) >= 0 ? '+' : ''}{formatCurrency(isCurrentMonth && predictedSavings !== savings ? predictedSavings : savings, defaultCurrency)}
+            <div className={`metric-bar-value ${savingsMetricValue >= 0 ? 'positive' : 'negative'}`}>
+              {savingsMetricValue >= 0 ? '+' : ''}{formatCurrency(savingsMetricValue, defaultCurrency)}
             </div>
           </div>
           <div className="metric-bar-container">
             <div
-              className={`metric-bar-fill ${(isCurrentMonth && predictedSavings !== savings ? predictedSavings : savings) >= 0 ? 'positive' : 'negative'}`}
-              style={{ width: `${Math.max(income, expenses, Math.abs(savings)) > 0 ? (Math.abs(isCurrentMonth && predictedSavings !== savings ? predictedSavings : savings) / Math.max(income, expenses, Math.abs(savings))) * 100 : 0}%` }}
+              className={`metric-bar-fill ${savingsMetricValue >= 0 ? 'positive' : 'negative'}`}
+              style={{ width: `${metricMaxValue > 0 ? (Math.abs(savingsMetricValue) / metricMaxValue) * 100 : 0}%` }}
             />
           </div>
           <div className="metric-bar-footer" style={{ fontSize: '12px', marginTop: '8px' }}>
             {(() => {
               const savingsGoal = defaultCurrency === 'CHF' ? 2000 : defaultCurrency === 'EUR' ? 2000 : 2200;
-              const currentSavings = isCurrentMonth && predictedSavings !== savings ? predictedSavings : savings;
-              return `${((currentSavings / savingsGoal) * 100).toFixed(0)}% of goal`;
+              return `${((savingsMetricValue / savingsGoal) * 100).toFixed(0)}% of goal`;
             })()}
           </div>
         </div>
@@ -632,6 +682,105 @@ const MonthSummaryCard = ({
                     </div>
                   </div>
                 </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {Object.keys(savingsCategories).length > 0 && (
+            <div className="categories-section">
+              <div
+                className="category-item category-section-header"
+                onClick={() => {
+                  const sectionKey = `${month.month}-savings-section`;
+                  setExpandedSections(prev => ({
+                    ...prev,
+                    [sectionKey]: !prev[sectionKey]
+                  }));
+                }}
+                style={{
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  marginBottom: expandedSections[`${month.month}-savings-section`] ? '8px' : '0'
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <span className="category-name">
+                    <span className="expand-arrow" style={{ marginRight: '8px' }}>
+                      {expandedSections[`${month.month}-savings-section`] ? '▼' : '▶'}
+                    </span>
+                    Savings Movements
+                  </span>
+                </div>
+                <span className="stat-value" style={{ fontWeight: '700' }}>
+                  {formatCurrency(savingsCategoryTotal, defaultCurrency)}
+                </span>
+              </div>
+
+              {expandedSections[`${month.month}-savings-section`] && (() => {
+                const savingsEntries = Object.entries(savingsCategories);
+                const maxSavingsAmount = savingsEntries.length > 0
+                  ? Math.max(...savingsEntries.map(([, amount]) => amount))
+                  : 0;
+
+                return (
+                  <div className="category-list">
+                    {savingsEntries
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([category, amount]) => {
+                        const categoryKey = `${month.month}-savings-${category}`;
+                        const isExpanded = expandedCategories[categoryKey];
+                        const transactions = getCategoryTransactions(category, 'expense');
+
+                        return (
+                          <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
+                            <div
+                              className="category-item category-subitem"
+                              onClick={() => toggleCategory(categoryKey)}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              <div style={{ flex: 1 }}>
+                                <div className="category-name">
+                                  <span className="expand-arrow" style={{ marginRight: '8px' }}>
+                                    {isExpanded ? '▼' : '▶'}
+                                  </span>
+                                  {category}
+                                  {transactions.length > 0 && (
+                                    <span className="transaction-count">({transactions.length})</span>
+                                  )}
+                                </div>
+                                <div className="category-bar">
+                                  <div
+                                    className="category-bar-fill category-bar-income"
+                                    style={{ width: `${maxSavingsAmount > 0 ? (amount / maxSavingsAmount) * 100 : 0}%` }}
+                                  />
+                                </div>
+                              </div>
+                              <div className="category-amount">
+                                {formatCurrency(amount, defaultCurrency)}
+                              </div>
+                            </div>
+                            {isExpanded && transactions.length > 0 && (
+                              <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
+                                {renderExpenseSortControls()}
+                                <div className="transaction-list">
+                                  {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)' }}>
+                      <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
+                        <span className="category-name">Total Savings Movements</span>
+                        <span className="stat-value" style={{ fontWeight: '700' }}>
+                          {formatCurrency(savingsCategoryTotal, defaultCurrency)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 );
               })()}
             </div>

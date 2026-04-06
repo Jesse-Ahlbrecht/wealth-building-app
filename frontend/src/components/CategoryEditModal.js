@@ -1,189 +1,179 @@
-/**
- * Category Edit Modal Component
- * 
- * Modal for editing transaction categories.
- * Allows users to reassign transactions to different categories
- * or create custom categories.
- */
+import React, { useMemo, useState } from 'react';
+import { transactionsAPI } from '../api';
+import { formatCurrency, formatDate } from '../utils';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { categoriesAPI, transactionsAPI } from '../api';
-import { formatCurrency } from '../utils';
+const SAVINGS_CATEGORY_NAMES = new Set(['Transfer', 'Internal Transfer', 'Loan Payment', 'Investment Account Payment']);
 
-const CategoryEditModal = ({ modal, onClose, onUpdate, isClosing }) => {
-  const [availableCategories, setAvailableCategories] = useState([]);
-  const [customCategoryName, setCustomCategoryName] = useState('');
-  const [showCustomInput, setShowCustomInput] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const fetchCategories = useCallback(async () => {
-    try {
-      const data = await categoriesAPI.getCategories();
-
-      if (modal) {
-        const categories = modal.isIncome ? data.income : data.expense;
-        if (Array.isArray(categories) && categories.length > 0) {
-          setAvailableCategories(categories);
-        } else {
-          const defaultCategories = modal.isIncome
-            ? ['Salary', 'Income', 'Other']
-            : ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Loan Payment', 'Rent', 'Insurance', 'Transfer', 'Other'];
-          setAvailableCategories(defaultCategories);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-      const defaultCategories = modal?.isIncome
-        ? ['Salary', 'Income', 'Other']
-        : ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Loan Payment', 'Rent', 'Insurance', 'Transfer', 'Other'];
-      setAvailableCategories(defaultCategories);
-    }
-  }, [modal]);
-
-  useEffect(() => {
-    if (modal) {
-      setShowCustomInput(false);
-      setCustomCategoryName('');
-      fetchCategories();
-    }
-  }, [modal, fetchCategories]);
-
-  const handleCreateCustomCategory = async () => {
-    if (!customCategoryName.trim()) return;
-    
-    setLoading(true);
-    try {
-      await categoriesAPI.createCategory(
-        customCategoryName.trim(),
-        modal.isIncome ? 'income' : 'expense'
-      );
-
-      setAvailableCategories(prev => [...prev, customCategoryName.trim()]);
-      setCustomCategoryName('');
-      setShowCustomInput(false);
-    } catch (error) {
-      console.error('Error creating custom category:', error);
-      alert('Failed to create custom category: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
+const groupExpenseCategories = (categories, essentialCategories) => {
+  const essentialSet = new Set((essentialCategories || []).map((category) => category.toLowerCase()));
+  const groups = {
+    essential: [],
+    nonEssential: [],
+    savings: []
   };
 
+  (categories || []).forEach((category) => {
+    if (SAVINGS_CATEGORY_NAMES.has(category)) {
+      groups.savings.push(category);
+      return;
+    }
+
+    if (essentialSet.has(category.toLowerCase())) {
+      groups.essential.push(category);
+      return;
+    }
+
+    groups.nonEssential.push(category);
+  });
+
+  return groups;
+};
+
+const CategorySection = ({
+  title,
+  description,
+  categories,
+  currentCategory,
+  loading,
+  onSelect
+}) => {
+  if (!categories || categories.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="category-modal-section">
+      <div className="category-modal-section-header">
+        <h4>{title}</h4>
+        {description && <p>{description}</p>}
+      </div>
+      <div className="category-grid">
+        {categories.map((category) => (
+          <button
+            key={category}
+            type="button"
+            className={`category-option ${category === currentCategory ? 'current' : ''}`}
+            onClick={() => onSelect(category)}
+            disabled={loading || category === currentCategory}
+          >
+            {category}
+            {category === currentCategory && <span className="current-badge">Current</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const CategoryEditModal = ({
+  modal,
+  onClose,
+  onUpdated,
+  availableCategories = { income: [], expense: [] },
+  essentialCategories = []
+}) => {
+  const [loading, setLoading] = useState(false);
+
+  const transaction = modal?.transaction;
+  const currentCategory = modal?.currentCategory || transaction?.category || '';
+  const isIncome = transaction?.type === 'income';
+
+  const groupedCategories = useMemo(() => {
+    if (isIncome) {
+      return {
+        income: Array.isArray(availableCategories?.income) ? availableCategories.income : []
+      };
+    }
+
+    return groupExpenseCategories(
+      Array.isArray(availableCategories?.expense) ? availableCategories.expense : [],
+      essentialCategories
+    );
+  }, [availableCategories, essentialCategories, isIncome]);
+
   const handleCategorySelect = async (newCategory) => {
-    if (!modal || !modal.transaction) return;
+    if (!transaction || !newCategory || newCategory === currentCategory) {
+      return;
+    }
 
     setLoading(true);
     try {
-      await transactionsAPI.updateCategory(
-        modal.transaction.id,
-        newCategory
-      );
-
-      onUpdate(modal.transaction, modal.currentCategory, newCategory, modal.monthKey);
+      await transactionsAPI.updateCategory(transaction, newCategory);
+      await onUpdated();
       onClose();
     } catch (error) {
       console.error('Category update failed:', error);
-      alert('Failed to update category: ' + error.message);
+      alert(`Failed to update category: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!modal) return null;
+  if (!modal || !transaction) {
+    return null;
+  }
 
   return (
-    <div 
-      className={`modal-overlay ${isClosing ? 'closing' : ''}`}
-      onClick={onClose}
-    >
-      <div 
-        className={`modal-content category-modal ${isClosing ? 'closing' : ''}`}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="modal-overlay open" onClick={onClose}>
+      <div className="modal-content category-modal open" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <h3>Change Category</h3>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button type="button" className="modal-close" onClick={onClose}>✕</button>
         </div>
 
         <div className="modal-body">
-          <div className="transaction-info">
-            <div className="info-row">
-              <span className="info-label">Recipient:</span>
-              <span className="info-value">{modal.transaction?.recipient || 'Unknown'}</span>
+          <div className="transaction-preview">
+            <div className="transaction-preview-item"><strong>Date:</strong> {formatDate(transaction.date)}</div>
+            <div className="transaction-preview-item"><strong>Recipient:</strong> {transaction.recipient || 'Unknown'}</div>
+            {transaction.description && (
+              <div className="transaction-preview-item"><strong>Description:</strong> {transaction.description}</div>
+            )}
+            <div className="transaction-preview-item"><strong>Account:</strong> {transaction.account || 'Unknown'}</div>
+            <div className="transaction-preview-item">
+              <strong>Amount:</strong> {formatCurrency(Math.abs(transaction.amount || 0), transaction.currency)}
             </div>
-            <div className="info-row">
-              <span className="info-label">Description:</span>
-              <span className="info-value">{modal.transaction?.description}</span>
-            </div>
-            <div className="info-row">
-              <span className="info-label">Amount:</span>
-              <span className="info-value">
-                {formatCurrency(modal.transaction?.amount, modal.transaction?.currency)}
-              </span>
-            </div>
-            <div className="info-row">
-              <span className="info-label">Current Category:</span>
-              <span className="info-value category-badge">{modal.currentCategory}</span>
+            <div className="transaction-preview-item">
+              <strong>Current Category:</strong> <span className="category-badge">{currentCategory || 'Uncategorized'}</span>
             </div>
           </div>
 
           <div className="category-selection">
-            <h4>Select New Category:</h4>
-            <div className="category-grid">
-              {availableCategories.map((category) => (
-                <button
-                  key={category}
-                  className={`category-option ${category === modal.currentCategory ? 'current' : ''}`}
-                  onClick={() => handleCategorySelect(category)}
-                  disabled={loading || category === modal.currentCategory}
-                >
-                  {category}
-                  {category === modal.currentCategory && <span className="current-badge">Current</span>}
-                </button>
-              ))}
-            </div>
-
-            {!showCustomInput ? (
-              <button
-                className="btn-link"
-                onClick={() => setShowCustomInput(true)}
-                disabled={loading}
-              >
-                + Create Custom Category
-              </button>
+            {isIncome ? (
+              <CategorySection
+                title="Income Categories"
+                description="Pick the category that best describes this incoming transaction."
+                categories={groupedCategories.income}
+                currentCategory={currentCategory}
+                loading={loading}
+                onSelect={handleCategorySelect}
+              />
             ) : (
-              <div className="custom-category-input">
-                <input
-                  type="text"
-                  value={customCategoryName}
-                  onChange={(e) => setCustomCategoryName(e.target.value)}
-                  placeholder="Enter custom category name"
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      handleCreateCustomCategory();
-                    }
-                  }}
-                  autoFocus
-                  disabled={loading}
+              <>
+                <CategorySection
+                  title="Essential"
+                  description="Recurring or necessary spending that belongs in your essentials split."
+                  categories={groupedCategories.essential}
+                  currentCategory={currentCategory}
+                  loading={loading}
+                  onSelect={handleCategorySelect}
                 />
-                <button
-                  className="btn-primary"
-                  onClick={handleCreateCustomCategory}
-                  disabled={loading || !customCategoryName.trim()}
-                >
-                  {loading ? 'Creating...' : 'Create'}
-                </button>
-                <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    setShowCustomInput(false);
-                    setCustomCategoryName('');
-                  }}
-                  disabled={loading}
-                >
-                  Cancel
-                </button>
-              </div>
+                <CategorySection
+                  title="Non-Essential"
+                  description="Discretionary spending such as dining, shopping, travel, and entertainment."
+                  categories={groupedCategories.nonEssential}
+                  currentCategory={currentCategory}
+                  loading={loading}
+                  onSelect={handleCategorySelect}
+                />
+                <CategorySection
+                  title="Savings"
+                  description="Money moved into savings, investments, loan principal, or internal transfers."
+                  categories={groupedCategories.savings}
+                  currentCategory={currentCategory}
+                  loading={loading}
+                  onSelect={handleCategorySelect}
+                />
+              </>
             )}
           </div>
         </div>
@@ -193,6 +183,3 @@ const CategoryEditModal = ({ modal, onClose, onUpdate, isClosing }) => {
 };
 
 export default CategoryEditModal;
-
-
-
