@@ -8,6 +8,7 @@ from .broker import broker_bp
 from .loans import loans_bp
 from .categories import categories_bp
 from .predictions import predictions_bp
+from .imports import imports_bp
 from .settings import settings_bp
 
 __all__ = [
@@ -19,6 +20,6 @@ __all__ = [
     'loans_bp',
     'categories_bp',
     'predictions_bp',
+    'imports_bp',
     'settings_bp'
 ]
-

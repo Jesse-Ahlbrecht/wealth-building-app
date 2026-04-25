@@ -13,5 +13,5 @@ export { loansAPI } from './loans';
 export { categoriesAPI } from './categories';
 export { predictionsAPI } from './predictions';
 export { documentsAPI } from './documents';
+export { importsAPI } from './imports';
 export { settingsApi } from './settings';
-

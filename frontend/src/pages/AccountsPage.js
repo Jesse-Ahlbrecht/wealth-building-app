@@ -10,17 +10,19 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { accountsAPI } from '../api';
+import { accountsAPI, importsAPI } from '../api';
 import { formatCurrency, formatDate } from '../utils';
 import { EUR_TO_CHF_RATE } from '../utils/finance';
 
 const AccountsPage = () => {
   const [accounts, setAccounts] = useState(null);
+  const [coverageByAccount, setCoverageByAccount] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     loadAccounts();
+    loadCoverageOverview();
   }, []);
 
   const loadAccounts = async () => {
@@ -58,6 +60,41 @@ const AccountsPage = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadCoverageOverview = async () => {
+    try {
+      const response = await importsAPI.getOverview();
+      const data = response?.data || response || {};
+      const nextCoverage = {};
+      (data.accounts || []).forEach((account) => {
+        nextCoverage[account.accountName] = account;
+      });
+      setCoverageByAccount(nextCoverage);
+    } catch (coverageError) {
+      console.error('Error loading account coverage:', coverageError);
+      setCoverageByAccount({});
+    }
+  };
+
+  const renderCoverageMeta = (accountName) => {
+    const coverage = coverageByAccount[accountName];
+    if (!coverage || !coverage.segments || coverage.segments.length === 0) {
+      return <span className="account-meta-item">No import coverage yet</span>;
+    }
+
+    const firstSegment = coverage.segments[0];
+    const lastSegment = coverage.segments[coverage.segments.length - 1];
+    return (
+      <>
+        <span className="account-meta-item">
+          Coverage: {formatDate(firstSegment.startDate)} to {formatDate(lastSegment.endDate)}
+        </span>
+        <span className="account-meta-item">
+          {coverage.gaps?.length ? `${coverage.gaps.length} gap${coverage.gaps.length === 1 ? '' : 's'} detected` : 'No coverage gaps'}
+        </span>
+      </>
+    );
   };
 
   if (loading) {
@@ -254,6 +291,7 @@ const AccountsPage = () => {
                   {account.last_transaction_date && (
                     <span className="account-meta-item">Last: {formatDate(account.last_transaction_date)}</span>
                   )}
+                  {renderCoverageMeta(account.account)}
                 </div>
               </div>
             ))}
@@ -281,6 +319,7 @@ const AccountsPage = () => {
                   {account.last_transaction_date && (
                     <span className="account-meta-item">Last: {formatDate(account.last_transaction_date)}</span>
                   )}
+                  {renderCoverageMeta(account.account)}
                 </div>
               </div>
             ))}
@@ -306,6 +345,7 @@ const AccountsPage = () => {
                   {account.last_transaction_date && (
                     <span className="account-meta-item">Last: {formatDate(account.last_transaction_date)}</span>
                   )}
+                  {renderCoverageMeta(account.account)}
                 </div>
               </div>
             ))}
@@ -317,4 +357,3 @@ const AccountsPage = () => {
 };
 
 export default AccountsPage;
-

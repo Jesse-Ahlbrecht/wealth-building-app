@@ -42,7 +42,7 @@ const TAB_ITEMS = [
   { key: 'broker', label: 'Broker' },
   { key: 'loans', label: 'Loans' },
   { key: 'projection', label: 'Wealth Projection' },
-  { key: 'data', label: 'Manage Files' }
+  { key: 'data', label: 'Imports' }
 ].map(item => ({
   ...item,
   path: labelToPath(item.label)
@@ -65,7 +65,7 @@ const TAB_DESCRIPTIONS = {
   'broker': 'Inspect performance of your investment accounts',
   'loans': 'Stay on top of loan balances and payments',
   'projection': 'Model future net worth using your current savings rate',
-  'data': 'Upload and manage statements, broker reports, and loan documents'
+  'data': 'Import statements locally and review timeline coverage by account'
 };
 
 
@@ -438,7 +438,7 @@ function AppContent() {
                 <ProjectionPage />
               </>
             } />
-            <Route path="/manage-files" element={<DocumentsPage />} />
+            <Route path="/imports" element={<DocumentsPage />} />
           </Routes>
         </main>
       </div>

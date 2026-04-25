@@ -7,6 +7,26 @@
 import { useState, useEffect } from 'react';
 import { authAPI, apiClient } from '../api';
 
+const localAuthBypassEnabled = () => {
+  if (process.env.REACT_APP_LOCAL_AUTH_BYPASS === '0') {
+    return false;
+  }
+
+  if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') {
+    return false;
+  }
+
+  return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+};
+
+const localDevUser = {
+  id: 'local-dev',
+  email: 'local-dev@example.test',
+  name: 'Local Development',
+  tenant: 'local-dev',
+  email_verified: true,
+};
+
 export const useAuth = () => {
   const [sessionToken, setSessionToken] = useState(null);
   const [user, setUser] = useState(null);
@@ -14,6 +34,14 @@ export const useAuth = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (localAuthBypassEnabled()) {
+      setUser(localDevUser);
+      setIsAuthenticated(true);
+      setIsLoading(false);
+      apiClient.setSessionToken(null);
+      return;
+    }
+
     // Load session token from storage
     const stored = sessionStorage.getItem('sessionToken');
     console.log('Loading session token from storage:', stored ? 'found' : 'not found');
@@ -86,6 +114,14 @@ export const useAuth = () => {
   };
 
   const logout = () => {
+    if (localAuthBypassEnabled()) {
+      setSessionToken(null);
+      setUser(localDevUser);
+      setIsAuthenticated(true);
+      apiClient.setSessionToken(null);
+      return;
+    }
+
     authAPI.logout();
     setSessionToken(null);
     setUser(null);
@@ -114,4 +150,3 @@ export const useAuth = () => {
     register,
   };
 };
-

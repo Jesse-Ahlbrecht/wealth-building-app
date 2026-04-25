@@ -33,6 +33,7 @@ from routes import (
     loans_bp,
     categories_bp,
     predictions_bp,
+    imports_bp,
     settings_bp
 )
 
@@ -55,6 +56,7 @@ app.register_blueprint(broker_bp)
 app.register_blueprint(loans_bp)
 app.register_blueprint(categories_bp)
 app.register_blueprint(predictions_bp)
+app.register_blueprint(imports_bp)
 app.register_blueprint(settings_bp)
 
 
@@ -77,6 +79,7 @@ def root():
             '/api/broker',
             '/api/loans',
             '/api/categories',
+            '/api/imports',
             '/api/documents/*',
             '/api/predictions/*'
         ]

@@ -84,6 +84,30 @@ class WealthDatabase:
     def __init__(self):
         self.db = get_database()
 
+    def _ensure_import_batches_table(self, cursor):
+        """Create import batch storage on demand for normalized client-side imports."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS import_batches (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER REFERENCES tenants(id),
+                account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+                source_type VARCHAR(50) NOT NULL,
+                filename VARCHAR(255),
+                statement_start_date DATE NOT NULL,
+                statement_end_date DATE NOT NULL,
+                transaction_count INTEGER DEFAULT 0,
+                imported_count INTEGER DEFAULT 0,
+                skipped_count INTEGER DEFAULT 0,
+                checksum VARCHAR(64),
+                metadata JSONB DEFAULT '{}'::jsonb,
+                imported_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_import_batches_tenant_account_dates
+            ON import_batches(tenant_id, account_id, statement_start_date, statement_end_date)
+        """)
+
     def set_tenant_context(self, tenant_id: str) -> int:
         """
         Set the current tenant context and return tenant database ID
@@ -347,14 +371,15 @@ class WealthDatabase:
                        a.account_name, a.account_type
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.id
+                WHERE t.tenant_id = %s
             """
             
             if source_document_id:
-                query = base_query + " WHERE t.source_document_id = %s ORDER BY t.transaction_date DESC, t.created_at DESC LIMIT %s OFFSET %s"
-                params = [tenant_db_id, tenant_db_id, tenant_db_id, source_document_id, limit, offset]
+                query = base_query + " AND t.source_document_id = %s ORDER BY t.transaction_date DESC, t.created_at DESC LIMIT %s OFFSET %s"
+                params = [tenant_db_id, tenant_db_id, tenant_db_id, tenant_db_id, source_document_id, limit, offset]
             else:
                 query = base_query + " ORDER BY t.transaction_date DESC, t.created_at DESC LIMIT %s OFFSET %s"
-                params = [tenant_db_id, tenant_db_id, tenant_db_id, limit, offset]
+                params = [tenant_db_id, tenant_db_id, tenant_db_id, tenant_db_id, limit, offset]
             
             cursor.execute(query, params)
 
@@ -391,6 +416,95 @@ class WealthDatabase:
                     'balance': row[3], 'currency': row[4], 'account_number': row[5],
                     'routing_number': row[6], 'institution': row[7],
                     'created_at': row[8], 'updated_at': row[9]
+                })
+            return results
+
+    def update_account_balance(self, tenant_id: str, account_id: int, balance: float, currency: str = None):
+        """Update an account balance when an import provides a fresh statement balance."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            if currency:
+                cursor.execute("""
+                    UPDATE accounts
+                    SET balance = %s, currency = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND tenant_id = %s
+                """, [balance, currency, account_id, tenant_db_id])
+            else:
+                cursor.execute("""
+                    UPDATE accounts
+                    SET balance = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s AND tenant_id = %s
+                """, [balance, account_id, tenant_db_id])
+
+    def create_import_batch(self, tenant_id: str, batch_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Record metadata for a normalized import batch."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            self._ensure_import_batches_table(cursor)
+            cursor.execute("""
+                INSERT INTO import_batches (
+                    tenant_id, account_id, source_type, filename,
+                    statement_start_date, statement_end_date,
+                    transaction_count, imported_count, skipped_count,
+                    checksum, metadata
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                RETURNING id, imported_at
+            """, [
+                tenant_db_id,
+                batch_data['account_id'],
+                batch_data.get('source_type', 'csv_import'),
+                batch_data.get('filename'),
+                batch_data['statement_start_date'],
+                batch_data['statement_end_date'],
+                batch_data.get('transaction_count', 0),
+                batch_data.get('imported_count', 0),
+                batch_data.get('skipped_count', 0),
+                batch_data.get('checksum'),
+                json.dumps(batch_data.get('metadata') or {})
+            ])
+            result = cursor.fetchone()
+            return {
+                'id': result[0],
+                'imported_at': result[1]
+            }
+
+    def list_import_batches(self, tenant_id: str) -> List[Dict[str, Any]]:
+        """List all normalized import batches with account details."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            self._ensure_import_batches_table(cursor)
+            cursor.execute("""
+                SELECT ib.id, ib.source_type, ib.filename, ib.statement_start_date,
+                       ib.statement_end_date, ib.transaction_count, ib.imported_count,
+                       ib.skipped_count, ib.checksum, ib.metadata, ib.imported_at,
+                       a.account_name, a.currency, a.account_type
+                FROM import_batches ib
+                JOIN accounts a ON ib.account_id = a.id
+                WHERE ib.tenant_id = %s
+                ORDER BY ib.imported_at DESC, ib.id DESC
+            """, [tenant_db_id])
+
+            results = []
+            for row in cursor.fetchall():
+                metadata = row[9] if isinstance(row[9], dict) else {}
+                results.append({
+                    'id': row[0],
+                    'source_type': row[1],
+                    'filename': row[2],
+                    'statement_start_date': row[3],
+                    'statement_end_date': row[4],
+                    'transaction_count': row[5],
+                    'imported_count': row[6],
+                    'skipped_count': row[7],
+                    'checksum': row[8],
+                    'metadata': metadata,
+                    'imported_at': row[10],
+                    'account_name': row[11],
+                    'currency': row[12],
+                    'account_type': row[13]
                 })
             return results
 

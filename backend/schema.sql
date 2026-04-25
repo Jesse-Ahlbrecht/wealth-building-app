@@ -215,6 +215,23 @@ CREATE TABLE file_attachments (
     holding_id INTEGER REFERENCES investment_holdings(id)
 );
 
+-- Import batches (normalized client-side imports without raw document storage)
+CREATE TABLE import_batches (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER REFERENCES tenants(id),
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    source_type VARCHAR(50) NOT NULL,
+    filename VARCHAR(255),
+    statement_start_date DATE NOT NULL,
+    statement_end_date DATE NOT NULL,
+    transaction_count INTEGER DEFAULT 0,
+    imported_count INTEGER DEFAULT 0,
+    skipped_count INTEGER DEFAULT 0,
+    checksum VARCHAR(64),
+    metadata JSONB DEFAULT '{}'::jsonb,
+    imported_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Audit log for all encryption/decryption operations
 CREATE TABLE audit_log (
     id SERIAL PRIMARY KEY,
@@ -243,6 +260,7 @@ CREATE INDEX idx_transactions_source_document ON transactions(source_document_id
 CREATE INDEX idx_accounts_tenant ON accounts(tenant_id);
 CREATE INDEX idx_categories_tenant_type ON categories(tenant_id, category_type);
 CREATE INDEX idx_files_tenant_type ON file_attachments(tenant_id, file_type);
+CREATE INDEX idx_import_batches_tenant_account_dates ON import_batches(tenant_id, account_id, statement_start_date, statement_end_date);
 CREATE INDEX idx_audit_tenant_action ON audit_log(tenant_id, action, created_at DESC);
 
 -- Functions for encryption/decryption helpers
