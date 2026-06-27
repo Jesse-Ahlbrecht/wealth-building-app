@@ -4,12 +4,22 @@ Wealth Management App - Main Application Entry Point
 A clean, modular Flask application for wealth tracking and management.
 """
 
+import logging
+import os
+
 from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# Configure application logging. Level is controlled via the LOG_LEVEL env var
+# (defaults to INFO); set LOG_LEVEL=DEBUG for verbose local debugging.
+logging.basicConfig(
+    level=os.environ.get('LOG_LEVEL', 'INFO').upper(),
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+)
 
 # Import core dependencies
 from encryption import get_encryption_service
@@ -42,7 +52,22 @@ from middleware.error_handlers import register_error_handlers
 
 # Create Flask app
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
+
+# Restrict CORS to known origins. Override with a comma-separated CORS_ORIGINS env
+# var in production; defaults to common local dev origins.
+_cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        'CORS_ORIGINS',
+        'http://localhost:3000,http://127.0.0.1:3000'
+    ).split(',')
+    if origin.strip()
+]
+CORS(app, resources={r"/api/*": {
+    "origins": _cors_origins,
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization"],
+}})
 
 # Register error handlers
 register_error_handlers(app)
@@ -87,7 +112,6 @@ def root():
 
 
 if __name__ == '__main__':
-    import os
     port = int(os.environ.get('PORT', 5001))
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     app.run(host='0.0.0.0', port=port, debug=debug)

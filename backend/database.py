@@ -7,6 +7,8 @@ Implements PostgreSQL with pgcrypto for encrypted data storage
 import os
 import uuid
 import hashlib
+import logging
+import re
 import secrets
 import pg8000
 from contextlib import contextmanager
@@ -14,6 +16,8 @@ from typing import Dict, List, Any, Optional, Generator
 from datetime import datetime, date
 from decimal import Decimal
 import json
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseConnection:
@@ -35,10 +39,10 @@ class DatabaseConnection:
                 'password': os.environ.get('DB_PASSWORD', ''),
             }
 
-            print("Database connection parameters initialized successfully")
+            logger.info("Database connection parameters initialized successfully")
 
         except Exception as e:
-            print(f"Failed to initialize database connection parameters: {e}")
+            logger.error("Failed to initialize database connection parameters: %s", e)
             raise
 
     @contextmanager
@@ -83,6 +87,39 @@ class WealthDatabase:
 
     def __init__(self):
         self.db = get_database()
+
+    @staticmethod
+    def _normalize_category_rule_text(value: str) -> str:
+        """Normalize counterparty text for learned category matching."""
+        normalized = (value or '').lower()
+        normalized = re.sub(r'[^\w\s]', ' ', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        return normalized
+
+    def _category_rule_key(self, recipient: str = '', description: str = '') -> str:
+        recipient_key = self._normalize_category_rule_text(recipient)
+        if recipient_key:
+            return recipient_key
+        return self._normalize_category_rule_text(description)
+
+    def _ensure_category_rules_table(self, cursor):
+        """Create the learned-category rule lookup table on demand.
+
+        This is a denormalized index of (counterparty -> category) decisions so
+        imports can resolve a learned category with a single indexed lookup
+        instead of decrypting every prior override.
+        """
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS category_rules (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                rule_key TEXT NOT NULL,
+                transaction_type VARCHAR(20) NOT NULL DEFAULT '',
+                override_category TEXT NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (tenant_id, rule_key, transaction_type)
+            )
+        """)
 
     def _ensure_import_batches_table(self, cursor):
         """Create import batch storage on demand for normalized client-side imports."""
@@ -246,8 +283,15 @@ class WealthDatabase:
         # twice in the same file, it's assumed to be intentional (real double booking)
         existing = self.get_transaction_by_hash(tenant_id, transaction_hash)
         if existing:
-            print(f"Duplicate found across files: {transaction_data.get('recipient', 'Unknown')} on {transaction_data.get('date')} - skipping")
+            logger.debug("Duplicate transaction found across files - skipping")
             return None  # Return None to indicate it was skipped
+
+        learned_category = self.get_learned_category_for_transaction(tenant_id, transaction_data)
+        if learned_category:
+            transaction_data = {
+                **transaction_data,
+                'category': learned_category
+            }
 
         try:
             with self.db.get_cursor() as cursor:
@@ -287,7 +331,7 @@ class WealthDatabase:
             error_str = str(e)
             if 'duplicate key' in error_str.lower() or '23505' in error_str or 'failed transaction block' in error_str.lower():
                 # Duplicate transaction - return None to indicate it was skipped
-                print(f"Duplicate transaction (race condition): {transaction_data.get('recipient', 'Unknown')} on {transaction_data.get('date')} - skipping")
+                logger.debug("Duplicate transaction (race condition) - skipping")
                 return None
             # Re-raise other errors
             raise
@@ -329,6 +373,39 @@ class WealthDatabase:
         hash_string = f"{account_id}|{transaction_data['date']}|{transaction_data['amount']}|{transaction_data.get('description', '')}|{normalized_recipient}"
 
         return hashlib.sha256(hash_string.encode()).hexdigest()
+
+    def get_learned_category_for_transaction(self, tenant_id: str, transaction_data: Dict[str, Any]) -> Optional[str]:
+        """Return a manually learned category for a similar transaction, if one exists."""
+        current_category = transaction_data.get('category')
+        if current_category == 'Internal Transfer':
+            return None
+
+        rule_key = self._category_rule_key(
+            transaction_data.get('recipient', ''),
+            transaction_data.get('description', '')
+        )
+        if len(rule_key) < 3:
+            return None
+
+        transaction_type = str(transaction_data.get('type') or '')
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            self._ensure_category_rules_table(cursor)
+            # Single indexed lookup keyed on the normalized counterparty. A rule
+            # stored without a type ('') applies to any transaction type.
+            cursor.execute("""
+                SELECT override_category
+                FROM category_rules
+                WHERE tenant_id = %s
+                  AND rule_key = %s
+                  AND (transaction_type = %s OR transaction_type = '')
+                ORDER BY (transaction_type = %s) DESC, updated_at DESC
+                LIMIT 1
+            """, [tenant_db_id, rule_key, transaction_type, transaction_type])
+
+            row = cursor.fetchone()
+            return row[0] if row else None
 
     def get_transaction_by_hash(self, tenant_id: str, transaction_hash: str) -> Optional[Dict[str, Any]]:
         """Get transaction by its hash"""
@@ -709,9 +786,9 @@ class WealthDatabase:
         """Create a custom category for a tenant"""
         try:
             tenant_db_id = self.set_tenant_context(tenant_id)
-            print(f"Creating category for tenant_id={tenant_id}, tenant_db_id={tenant_db_id}")
+            logger.debug("Creating category for tenant_db_id=%s", tenant_db_id)
         except Exception as e:
-            print(f"Error getting tenant_db_id: {e}")
+            logger.error("Error resolving tenant context: %s", e)
             raise ValueError(f"Tenant not found: {tenant_id}")
 
         with self.db.get_cursor() as cursor:
@@ -724,15 +801,15 @@ class WealthDatabase:
                 """, (tenant_db_id, category_name, category_type))
                 
                 result = cursor.fetchone()
-                print(f"Category created successfully: {result}")
+                logger.info("Category created successfully (id=%s)", result[0])
                 return {
                     'id': result[0],
-                    'category_name': result[1], 
+                    'category_name': result[1],
                     'category_type': result[2],
                     'created_at': result[3]
                 }
             except Exception as e:
-                print(f"Database error creating category: {e}")
+                logger.error("Database error creating category: %s", e)
                 # Handle duplicate category gracefully
                 if 'unique constraint' in str(e).lower():
                     raise ValueError(f"Category '{category_name}' already exists")
@@ -744,13 +821,18 @@ class WealthDatabase:
         tenant_db_id = self.set_tenant_context(tenant_id)
 
         with self.db.get_cursor() as cursor:
-            # Get the current category first
-            cursor.execute(
-                "SELECT category FROM transactions WHERE transaction_hash = %s",
-                (transaction_hash,)
-            )
+            # Get the current transaction first; its counterparty becomes the learned rule.
+            cursor.execute("""
+                SELECT category, transaction_type,
+                       decrypt_tenant_data(encrypted_recipient, %s) as recipient,
+                       decrypt_tenant_data(encrypted_description, %s) as description
+                FROM transactions
+                WHERE transaction_hash = %s AND tenant_id = %s
+            """, (tenant_db_id, tenant_db_id, transaction_hash, tenant_db_id))
             current = cursor.fetchone()
             original_category = current[0] if current else None
+            current_type = current[1] if current else None
+            current_rule_key = self._category_rule_key(current[2], current[3]) if current else ''
 
             # Create override
             cursor.execute("""
@@ -763,13 +845,48 @@ class WealthDatabase:
 
             result = cursor.fetchone()
 
-            # Update the transaction category
+            matching_hashes = [transaction_hash]
+            if current_rule_key:
+                cursor.execute("""
+                    SELECT transaction_hash, transaction_type,
+                           decrypt_tenant_data(encrypted_recipient, %s) as recipient,
+                           decrypt_tenant_data(encrypted_description, %s) as description
+                    FROM transactions
+                    WHERE tenant_id = %s
+                      AND transaction_hash IS NOT NULL
+                """, (tenant_db_id, tenant_db_id, tenant_db_id))
+
+                for candidate_hash, candidate_type, recipient, description in cursor.fetchall():
+                    if current_type and candidate_type and str(candidate_type) != str(current_type):
+                        continue
+                    if self._category_rule_key(recipient, description) == current_rule_key:
+                        matching_hashes.append(candidate_hash)
+
+            matching_hashes = list(dict.fromkeys(matching_hashes))
+            placeholders = ', '.join(['%s'] * len(matching_hashes))
             cursor.execute(
-                "UPDATE transactions SET category = %s WHERE transaction_hash = %s",
-                (override_category, transaction_hash)
+                f"UPDATE transactions SET category = %s WHERE tenant_id = %s AND transaction_hash IN ({placeholders})",
+                [override_category, tenant_db_id, *matching_hashes]
             )
 
-            return {'id': result[0], 'created_at': result[1]}
+            # Persist a fast-lookup rule so future imports can resolve this
+            # counterparty's category without decrypting every prior override.
+            if current_rule_key:
+                self._ensure_category_rules_table(cursor)
+                cursor.execute("""
+                    INSERT INTO category_rules (
+                        tenant_id, rule_key, transaction_type, override_category, updated_at
+                    ) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (tenant_id, rule_key, transaction_type)
+                    DO UPDATE SET override_category = EXCLUDED.override_category,
+                                  updated_at = CURRENT_TIMESTAMP
+                """, [tenant_db_id, current_rule_key, str(current_type or ''), override_category])
+
+            return {
+                'id': result[0],
+                'created_at': result[1],
+                'updated_transactions': len(matching_hashes)
+            }
 
     def create_file_attachment(self, tenant_id: str, file_data: Dict[str, Any],
                              encrypted_data: bytes, encryption_metadata: Dict[str, Any],
@@ -1011,16 +1128,16 @@ class WealthDatabase:
         return deleted_records
 
     def get_file_attachment(self, tenant_id: str, file_id: int) -> Optional[Dict[str, Any]]:
-        """Retrieve a file attachment"""
-        self.set_tenant_context(tenant_id)
+        """Retrieve a file attachment scoped to the owning tenant."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
 
         with self.db.get_cursor() as cursor:
             cursor.execute("""
                 SELECT id, file_name, original_name, file_size, mime_type,
                        encrypted_data, encryption_metadata, checksum, uploaded_at
                 FROM file_attachments
-                WHERE id = %s
-            """, (file_id,))
+                WHERE id = %s AND tenant_id = %s
+            """, (file_id, tenant_db_id))
 
             result = cursor.fetchone()
             if not result:
@@ -1099,11 +1216,11 @@ class WealthDatabase:
                 ))
         except Exception as e:
             # Don't let audit logging failures break the main operation
-            print(f"Failed to log audit event: {e}")
+            logger.warning("Failed to log audit event: %s", e)
 
     def get_summary_data(self, tenant_id: str, months: int = 12) -> List[Dict[str, Any]]:
         """Get summary data for the specified number of months"""
-        self.set_tenant_context(tenant_id)
+        tenant_db_id = self.set_tenant_context(tenant_id)
 
         with self.db.get_cursor() as cursor:
             # Get monthly summaries
@@ -1116,10 +1233,11 @@ class WealthDatabase:
                     SUM(CASE WHEN transaction_type = 'expense' THEN amount ELSE 0 END) as expenses,
                     COUNT(*) as transaction_count
                 FROM transactions
-                WHERE transaction_date >= CURRENT_DATE - (INTERVAL '1 month' * %s)
+                WHERE tenant_id = %s
+                  AND transaction_date >= CURRENT_DATE - (INTERVAL '1 month' * %s)
                 GROUP BY DATE_TRUNC('month', transaction_date)
                 ORDER BY month DESC
-            """, (months,))
+            """, (tenant_db_id, months))
 
             summaries = []
             # Get column names from cursor description
@@ -1160,25 +1278,21 @@ class WealthDatabase:
                 
                 if result:
                     # Parse JSON array from database
-                    import json
                     return json.loads(result[0])
                 else:
                     # Return default essential categories
                     return ['Rent', 'Insurance', 'Groceries', 'Utilities']
         except Exception as e:
-            print(f"Error in get_essential_categories: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Error in get_essential_categories: %s", e, exc_info=True)
             # Return default on error
             return ['Rent', 'Insurance', 'Groceries', 'Utilities']
 
     def save_essential_categories(self, tenant_id: str, categories: List[str]) -> None:
         """Save user's essential categories preferences"""
         try:
-            print(f"Saving essential categories for tenant {tenant_id}: {categories}")
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 # Check if table exists and create it if needed
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS essential_categories (
@@ -1187,41 +1301,20 @@ class WealthDatabase:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+
+                # Upsert the categories payload
+                cursor.execute("""
+                    INSERT INTO essential_categories (tenant_id, categories, updated_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (tenant_id)
+                    DO UPDATE SET categories = EXCLUDED.categories,
+                                  updated_at = CURRENT_TIMESTAMP
+                """, (tenant_id, json.dumps(categories)))
+
                 conn.commit()
-                print("Table created/verified")
-                
-                # Convert list to JSON string for storage
-                import json
-                categories_json = json.dumps(categories)
-                print(f"Categories JSON: {categories_json}")
-                
-                # Check if record exists
-                cursor.execute(
-                    "SELECT tenant_id FROM essential_categories WHERE tenant_id = %s",
-                    (tenant_id,)
-                )
-                exists = cursor.fetchone()
-                
-                if exists:
-                    print("Updating existing record")
-                    cursor.execute("""
-                        UPDATE essential_categories 
-                        SET categories = %s, updated_at = CURRENT_TIMESTAMP
-                        WHERE tenant_id = %s
-                    """, (categories_json, tenant_id))
-                else:
-                    print("Inserting new record")
-                    cursor.execute("""
-                        INSERT INTO essential_categories (tenant_id, categories, updated_at)
-                        VALUES (%s, %s, CURRENT_TIMESTAMP)
-                    """, (tenant_id, categories_json))
-                
-                conn.commit()
-                print("✓ Essential categories saved successfully")
+                logger.info("Essential categories saved for tenant")
         except Exception as e:
-            print(f"Error in save_essential_categories: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Error in save_essential_categories: %s", e, exc_info=True)
             raise
 
     def get_broker_valuation_cache(self, tenant_id: str) -> Optional[Dict[str, Any]]:
@@ -1256,9 +1349,7 @@ class WealthDatabase:
                     "updated_at": updated_at
                 }
         except Exception as e:
-            print(f"Error in get_broker_valuation_cache: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Error in get_broker_valuation_cache: %s", e, exc_info=True)
             return None
 
     def save_broker_valuation_cache(self, tenant_id: str, data: Dict[str, Any]) -> None:
@@ -1288,9 +1379,7 @@ class WealthDatabase:
                 )
                 conn.commit()
         except Exception as e:
-            print(f"Error in save_broker_valuation_cache: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Error in save_broker_valuation_cache: %s", e, exc_info=True)
             # Do not raise, caching is best-effort
 
     def update_file_attachment_metadata(self, tenant_id: str, file_id: int, 
