@@ -15,6 +15,8 @@ from utils.response_helpers import error_response
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/api')
 wealth_db = get_wealth_database()
 
+SAVINGS_MOVEMENT_CATEGORIES = {'Investment Account Payment'}
+
 
 @transactions_bp.route('/transactions')
 @authenticate_request
@@ -86,6 +88,9 @@ def get_summary():
         'income_transactions': defaultdict(list),
         'expense_categories': defaultdict(float),
         'expense_transactions': defaultdict(list),
+        'savings_categories': defaultdict(float),
+        'savings_transactions': defaultdict(list),
+        'savings_movement_total': 0,
         'internal_transfer_total': 0,
         'internal_transfer_transactions': [],
         'currency_totals': {'EUR': 0, 'CHF': 0}
@@ -126,6 +131,8 @@ def get_summary():
                     'recipient': t['recipient'],
                     'description': t['description'],
                     'account': t['account'],
+                    'category': t['category'],
+                    'type': t['type'],
                     'transaction_hash': t.get('transaction_hash', '')
                 })
                 monthly_data[month_key]['currency_totals'][t['currency']] += t['amount']
@@ -142,6 +149,23 @@ def get_summary():
                     'recipient': t['recipient'],
                     'description': t['description'],
                     'account': t['account'],
+                    'category': t['category'],
+                    'type': t['type'],
+                    'transaction_hash': t.get('transaction_hash', '')
+                })
+            elif t['category'] in SAVINGS_MOVEMENT_CATEGORIES:
+                amount = abs(t['amount'])
+                monthly_data[month_key]['savings_movement_total'] += amount
+                monthly_data[month_key]['savings_categories'][t['category']] += amount
+                monthly_data[month_key]['savings_transactions'][t['category']].append({
+                    'date': t['date'],
+                    'amount': t['amount'],
+                    'currency': t['currency'],
+                    'recipient': t['recipient'],
+                    'description': t['description'],
+                    'account': t['account'],
+                    'category': t['category'],
+                    'type': t['type'],
                     'transaction_hash': t.get('transaction_hash', '')
                 })
             else:
@@ -155,6 +179,8 @@ def get_summary():
                     'recipient': t['recipient'],
                     'description': t['description'],
                     'account': t['account'],
+                    'category': t['category'],
+                    'type': t['type'],
                     'transaction_hash': t.get('transaction_hash', '')
                 })
 
@@ -173,8 +199,10 @@ def get_summary():
         # Convert defaultdicts to regular dicts
         income_categories = dict(data['income_categories'])
         expense_categories = dict(data['expense_categories'])
+        savings_categories = dict(data['savings_categories'])
         income_transactions = {k: list(v) for k, v in data['income_transactions'].items()}
         expense_transactions = {k: list(v) for k, v in data['expense_transactions'].items()}
+        savings_transactions = {k: list(v) for k, v in data['savings_transactions'].items()}
         
         summary.append({
             'month': month,
@@ -186,6 +214,9 @@ def get_summary():
             'incomeTransactions': income_transactions,
             'expenseCategories': expense_categories,
             'expenseTransactions': expense_transactions,
+            'savingsCategories': savings_categories,
+            'savingsTransactions': savings_transactions,
+            'savingsMovementTotal': data['savings_movement_total'],
             'internalTransferTotal': data['internal_transfer_total'],
             'internalTransferTransactions': data['internal_transfer_transactions'],
             'currencyTotals': data['currency_totals']
@@ -194,4 +225,3 @@ def get_summary():
     print(f"Returning summary with {len(summary)} months")
     print(f"Sample month data: {summary[0] if summary else 'No months'}")
     return jsonify(summary)
-

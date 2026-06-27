@@ -132,15 +132,19 @@ def update_category():
         print(f"Updating transaction {transaction_hash} to category: {new_category}")
 
         # Update the category in the database
-        wealth_db.create_category_override(
+        result = wealth_db.create_category_override(
             tenant_id=tenant_id,
             transaction_hash=transaction_hash,
             override_category=new_category,
             reason='Manual user override'
         )
 
-        print(f"✓ Category updated successfully")
-        return success_response(message='Category updated successfully')
+        updated_count = result.get('updated_transactions', 1) if isinstance(result, dict) else 1
+        print(f"✓ Category updated successfully ({updated_count} transaction(s))")
+        return success_response(
+            data={'updatedTransactions': updated_count},
+            message='Category updated successfully'
+        )
 
     except Exception as e:
         print(f"Error updating category: {e}")
@@ -172,4 +176,3 @@ def save_essential_categories():
         print(f"Error saving essential categories: {e}")
         traceback.print_exc()
         return error_response('Failed to save essential categories', 500)
-
