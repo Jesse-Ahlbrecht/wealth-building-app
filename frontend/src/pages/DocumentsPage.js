@@ -128,20 +128,26 @@ const DocumentsPage = () => {
         <div>
           <h3>Imports</h3>
           <p>
-            Import CSV statements locally in the browser, upload normalized transactions,
+            Import statement files locally in the browser, upload normalized transactions,
             and track coverage by account instead of managing raw files.
           </p>
         </div>
         <label className={`imports-upload-button ${uploading ? 'disabled' : ''}`}>
-          <input type="file" accept=".csv,text/csv" multiple onChange={handleFilesSelected} disabled={uploading} />
-          {uploading ? 'Importing…' : 'Import CSV statements'}
+          <input
+            type="file"
+            accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            multiple
+            onChange={handleFilesSelected}
+            disabled={uploading}
+          />
+          {uploading ? 'Importing…' : 'Import statements'}
         </label>
       </section>
 
       <section className="imports-upload-card">
         <div>
           <h4>Supported imports</h4>
-          <p>DKB, YUH, and Swisscard CSV exports are parsed client-side. The server stores only normalized transactions and import coverage metadata.</p>
+          <p>DKB, YUH, Swisscard CSV exports, and Amazon Visa Excel exports are parsed client-side. The server stores only normalized transactions and import coverage metadata.</p>
         </div>
         <button type="button" className="documents-refresh-button" onClick={loadOverview} disabled={loading || uploading}>
           {loading ? 'Refreshing…' : 'Refresh overview'}
@@ -182,7 +188,7 @@ const DocumentsPage = () => {
         {loading ? (
           <div className="documents-loading">Loading import coverage…</div>
         ) : accountsWithCoverage.length === 0 ? (
-          <div className="documents-empty-state">No accounts yet. Import a CSV statement to create your first account timeline.</div>
+          <div className="documents-empty-state">No accounts yet. Import a statement to create your first account timeline.</div>
         ) : (
           <div className="imports-coverage-grid">
             {accountsWithCoverage.map((account) => (

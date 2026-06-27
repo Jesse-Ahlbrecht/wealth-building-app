@@ -98,9 +98,14 @@ const CategoryEditModal = ({
 
     setLoading(true);
     try {
-      await transactionsAPI.updateCategory(transaction, newCategory);
-      await onUpdated();
+      const result = await transactionsAPI.updateCategory(transaction, newCategory);
       onClose();
+      try {
+        await onUpdated(transaction, newCategory, result);
+      } catch (refreshError) {
+        console.error('Category saved, but refresh failed:', refreshError);
+        alert(`Category saved, but the list did not refresh: ${refreshError.message}`);
+      }
     } catch (error) {
       console.error('Category update failed:', error);
       alert(`Failed to update category: ${error.message}`);

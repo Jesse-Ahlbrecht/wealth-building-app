@@ -1,3 +1,5 @@
+import * as XLSX from 'xlsx';
+
 const parseDelimitedLine = (line, delimiter) => {
   const values = [];
   let current = '';
@@ -58,9 +60,12 @@ const parseRows = (lines, delimiter, headerIndex) => {
 
 const parseAmount = (value, { decimalComma = false } = {}) => {
   if (!value) return 0;
+  const cleaned = String(value)
+    .replace(/\s/g, '')
+    .replace(/[\u20ac$A-Z]{3}|[\u20ac$]/gi, '');
   const normalized = decimalComma
-    ? value.replace(/\./g, '').replace(',', '.')
-    : value.replace(/'/g, '').replace(',', '.');
+    ? cleaned.replace(/\./g, '').replace(',', '.')
+    : cleaned.replace(/'/g, '').replace(',', '.');
   return Number.parseFloat(normalized) || 0;
 };
 
@@ -71,14 +76,16 @@ const formatIsoDate = (value, format) => {
   let year;
 
   if (format === 'dkb') {
-    [day, month, year] = value.split('.');
+    [day, month, year] = String(value).trim().split('.').map((part) => part.trim());
     if (year && year.length === 2) {
       year = `20${year}`;
     }
   } else if (format === 'yuh') {
-    [day, month, year] = value.split('/');
+    [day, month, year] = String(value).trim().split('/').map((part) => part.trim());
   } else if (format === 'swisscard') {
-    [day, month, year] = value.split('.');
+    [day, month, year] = String(value).trim().split('.').map((part) => part.trim());
+  } else if (format === 'amazon_visa') {
+    [day, month, year] = String(value).trim().split('.').map((part) => part.trim());
   }
 
   if (!day || !month || !year) return null;
@@ -282,22 +289,99 @@ const parseSwisscard = (text, filename, checksum) => {
   }));
 };
 
+const parseAmazonVisaWorkbook = (arrayBuffer, filename, checksum) => {
+  const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    throw new Error('Amazon Visa workbook has no sheets');
+  }
+
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+    header: 1,
+    raw: false,
+    defval: ''
+  });
+
+  const headerIndex = rows.findIndex((row) => {
+    const normalized = row.map((cell) => normalizeCell(String(cell)));
+    return normalized.includes('Datum') && normalized.includes('Beschreibung') && normalized.includes('Betrag');
+  });
+
+  if (headerIndex < 0) {
+    throw new Error('Could not find Amazon Visa header row');
+  }
+
+  const header = rows[headerIndex].map((cell) => normalizeCell(String(cell)));
+  const columnIndex = (name) => header.indexOf(name);
+  const dateIndex = columnIndex('Datum');
+  const cardIndex = columnIndex('Karte');
+  const descriptionIndex = columnIndex('Beschreibung');
+  const categoryIndex = columnIndex('Umsatzkategorie');
+  const subcategoryIndex = columnIndex('Unterkategorie');
+  const amountIndex = columnIndex('Betrag');
+
+  const grouped = new Map();
+
+  rows.slice(headerIndex + 1).forEach((row) => {
+    const date = formatIsoDate(row[dateIndex], 'amazon_visa');
+    if (!date) return;
+
+    const amount = parseAmount(row[amountIndex], { decimalComma: true });
+    if (!amount) return;
+
+    const cardDigits = String(row[cardIndex] || '').replace(/\D/g, '').slice(-4);
+    const accountName = cardDigits ? `Amazon Visa ${cardDigits}` : 'Amazon Visa';
+    if (!grouped.has(accountName)) {
+      grouped.set(accountName, []);
+    }
+
+    const description = normalizeCell(String(row[descriptionIndex] || ''));
+    const category = normalizeCell(String(row[categoryIndex] || ''));
+    const subcategory = normalizeCell(String(row[subcategoryIndex] || ''));
+
+    grouped.get(accountName).push({
+      date,
+      amount: Math.abs(amount),
+      currency: 'EUR',
+      type: amount > 0 ? 'income' : 'expense',
+      recipient: description,
+      description: [category, subcategory].filter(Boolean).join(' - '),
+      reference: ''
+    });
+  });
+
+  return Array.from(grouped.entries()).map(([accountName, transactions]) => buildBatch({
+    accountName,
+    currency: 'EUR',
+    sourceType: 'amazon_visa_xls',
+    filename,
+    checksum,
+    transactions
+  }));
+};
+
 const detectParser = (text) => {
   const preview = text.slice(0, 2000);
   const normalizedPreview = preview.replace(/"/g, '').replace(/^\uFEFF/, '');
   if (/Transaktionsdatum,Beschreibung,Händler,Kartennummer/.test(normalizedPreview)) return parseSwisscard;
   if (/DATE;.*ACTIVITY/.test(normalizedPreview) || /DATE;.*DEBIT;.*CREDIT/.test(normalizedPreview)) return parseYuh;
   if (/(Buchungstag|Buchungsdatum|Buchung).*Betrag/.test(normalizedPreview)) return parseDkb;
-  throw new Error('Unsupported CSV format. Supported imports: DKB, YUH, Swisscard.');
+  throw new Error('Unsupported CSV format. Supported imports: DKB, YUH, Swisscard, Amazon Visa XLS.');
 };
 
-const sha256 = async (text) => {
-  const data = new TextEncoder().encode(text);
+const sha256 = async (input) => {
+  const data = typeof input === 'string' ? new TextEncoder().encode(input) : input;
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hashBuffer)).map((value) => value.toString(16).padStart(2, '0')).join('');
 };
 
 export const parseImportFile = async (file) => {
+  if (/\.(xls|xlsx)$/i.test(file.name)) {
+    const arrayBuffer = await file.arrayBuffer();
+    const checksum = await sha256(arrayBuffer);
+    return parseAmazonVisaWorkbook(arrayBuffer, file.name, checksum);
+  }
+
   const text = await file.text();
   const checksum = await sha256(text);
   const parser = detectParser(text);
