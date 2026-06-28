@@ -1,0 +1,1 @@
+Start the wealth app. Use `./run_local.sh` to start both backend (port 5001) and frontend (port 3000). If the user only wants the backend, use `./run_backend.sh`. Both scripts handle PostgreSQL startup and DB creation automatically. After starting, confirm both services are reachable.
