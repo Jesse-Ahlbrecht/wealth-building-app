@@ -42,10 +42,12 @@ def get_categories():
         # Get tenant-specific custom categories from database
         db_categories = wealth_db.get_categories(tenant_id)
         
+        savings_categories = ['Transfer', 'Internal Transfer', 'Loan Payment', 'Investment Account Payment']
+
         # Combine default and custom categories (return just names)
         all_categories = {
             'income': list(income_categories.keys()) + [c['category_name'] for c in db_categories.get('income', [])],
-            'expense': list(spending_categories.keys()) + [c['category_name'] for c in db_categories.get('expense', [])]
+            'expense': list(spending_categories.keys()) + savings_categories + [c['category_name'] for c in db_categories.get('expense', [])]
         }
         
         return jsonify(all_categories)

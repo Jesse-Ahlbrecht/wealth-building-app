@@ -116,9 +116,12 @@ def get_predictions_for_month(month):
         with wealth_db.db.get_cursor() as cursor:
             dismissed = get_dismissed_predictions(cursor, tenant_id, month)
         
-        # Generate predictions for the target month
-        predictions = detector.generate_predictions_for_month(patterns, month, dismissed)
-        
+        same_month_actuals = [t for t in transactions if str(t['date'])[:7] == month]
+
+        # Generate predictions for the target month, suppressing any (recipient, category, type)
+        # that already has an actual transaction this month
+        predictions = detector.generate_predictions_for_month(patterns, month, dismissed, same_month_actuals)
+
         return jsonify(predictions)
         
     except Exception as e:

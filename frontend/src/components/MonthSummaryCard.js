@@ -232,12 +232,11 @@ const MonthSummaryCard = ({
     
     // Add predicted transactions for this category if it's the current month
     if (isCurrentMonth && predictions && predictions.length > 0) {
-      const predictedForCategory = predictions.filter(p => 
-        p.category === category && 
+      const predictedForCategory = predictions.filter(p =>
+        p.category === category &&
         p.type === (type === 'income' ? 'income' : 'expense')
       );
-      
-      // Merge predicted transactions with actual ones, sorted by date
+
       const allTransactions = [...actualTransactions, ...predictedForCategory];
       return sortTransactions(allTransactions, type);
     }

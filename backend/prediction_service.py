@@ -340,35 +340,37 @@ class RecurringPatternDetector:
         key_string = f"{recipient}|{category}|{recurrence_type}"
         return hashlib.sha256(key_string.encode()).hexdigest()[:16]
     
-    def generate_predictions_for_month(self, patterns: List[Dict[str, Any]], 
+    def generate_predictions_for_month(self, patterns: List[Dict[str, Any]],
                                        target_month: str,
-                                       dismissed_predictions: Set[str]) -> List[Dict[str, Any]]:
-        """
-        Generate predicted transactions for a specific month.
-        
-        Args:
-            patterns: List of detected patterns
-            target_month: Month in format 'YYYY-MM'
-            dismissed_predictions: Set of prediction_keys that have been dismissed
-            
-        Returns:
-            List of predicted transactions
-        """
+                                       dismissed_predictions: Set[str],
+                                       same_month_actuals: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         predictions = []
-        
-        # Parse target month
+
         try:
             target_year, target_month_num = map(int, target_month.split('-'))
             target_date = datetime(target_year, target_month_num, 1)
         except:
             return predictions
-        
-        # Get current date for checking if patterns have stopped
+
+        # Build (recipient, category, type) set from transactions that already exist this month
+        actual_keys = set()
+        for t in (same_month_actuals or []):
+            actual_keys.add((
+                (t.get('recipient') or '').strip(),
+                t.get('category', ''),
+                t.get('type', '')
+            ))
+
         current_date = datetime.now()
-        
+
         for pattern in patterns:
             # Skip dismissed predictions
             if pattern['prediction_key'] in dismissed_predictions:
+                continue
+
+            # Skip if an actual transaction with matching (recipient, category, type) exists this month
+            pattern_key = (pattern['recipient'], pattern['category'], pattern['type'])
+            if pattern_key in actual_keys:
                 continue
             
             # Check if pattern should predict for this month
