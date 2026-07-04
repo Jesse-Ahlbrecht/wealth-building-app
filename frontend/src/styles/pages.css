@@ -97,57 +97,6 @@
   transition: color 0.3s ease;
 }
 
-.chart-summary-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.chart-summary-item-clickable {
-  cursor: pointer;
-  transition: color 0.2s;
-}
-
-.chart-summary-item-clickable:hover {
-  color: var(--color-text-primary);
-}
-
-.chart-summary-item-clickable:hover .summary-dot {
-  transform: scale(1.1);
-}
-
-.summary-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #94a3b8;
-  transition: transform 0.2s;
-}
-
-.summary-dot.essential {
-  background: #2563eb;
-}
-
-.summary-dot.non-essential {
-  background: #f97316;
-}
-
-.summary-dot.savings {
-  background: #10b981;
-}
-
-.summary-dot.unused {
-  background: #d1d5db;
-}
-
-.summary-dot.positive {
-  background: #16a34a;
-}
-
-.summary-dot.negative {
-  background: #dc2626;
-}
-
 .segment-detail {
   margin-top: 20px;
   background: var(--color-bg-card);
@@ -892,22 +841,6 @@
   background: #ffffff;
 }
 
-.bar-essential {
-  background: #1a1a1a !important;
-}
-
-.dark-theme .bar-essential {
-  background: #ffffff !important;
-}
-
-.bar-non-essential {
-  background: #1a1a1a !important;
-}
-
-.dark-theme .bar-non-essential {
-  background: #ffffff !important;
-}
-
 .category-item-income:hover {
   background: #f5f5f5;
 }
@@ -1551,13 +1484,6 @@
   margin-top: 8px;
   color: var(--color-text-tertiary);
   font-size: 12px;
-}
-
-.chart-toggle-row {
-  display: flex;
-  justify-content: center;
-  margin-top: 24px;
-  margin-bottom: 16px;
 }
 
 .drilldown-details {
@@ -2471,32 +2397,6 @@
   font-size: 14px;
   color: var(--color-text-muted);
   transition: color 0.3s ease;
-}
-
-/* Essential Categories Edit Button */
-.edit-categories-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: #ffffff;
-  color: #1a1a1a;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.edit-categories-btn:hover {
-  background: #1a1a1a;
-  color: #ffffff;
-  border-color: #1a1a1a;
-}
-
-.edit-categories-btn i {
-  font-size: 12px;
 }
 
 .documents-page {

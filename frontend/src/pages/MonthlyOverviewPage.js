@@ -5,34 +5,33 @@
  * Updated to use hooks and API layer with proper CSS classes.
  */
 
-import React, { useState, useEffect } from 'react';
-import { transactionsAPI, categoriesAPI, predictionsAPI } from '../api';
+import React, { useState, useEffect, useMemo } from 'react';
+import { transactionsAPI, predictionsAPI } from '../api';
 import { useAppContext } from '../context/AppContext';
+import { useCategoryData } from '../hooks';
 import MonthSummaryCard from '../components/MonthSummaryCard';
+import { parseSummaryResponse } from '../utils/apiHelpers';
 import {
-  unwrapList,
   getPredictionKey,
   getPredictionMonth,
-  getLatestMonthKey
+  getLatestMonthKey,
+  fetchPredictionsForMonth,
+  fetchAverageEssentialSpending
 } from '../utils/predictionHelpers';
 
 const MonthlyOverviewPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
+  const { essentialCategories, availableCategories } = useCategoryData();
   const [summary, setSummary] = useState([]);
-  const [availableCategories, setAvailableCategories] = useState({ income: [], expense: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // Initialize state from preferences or defaults
-  const [showEssentialSplit, setShowEssentialSplit] = useState(false);
   const [includeLoanPayments, setIncludeLoanPayments] = useState(false);
   const [expenseSort, setExpenseSort] = useState('amount_desc');
 
   useEffect(() => {
     if (preferences) {
-      if (preferences.monthlyOverview_showEssentialSplit !== undefined) {
-        setShowEssentialSplit(preferences.monthlyOverview_showEssentialSplit);
-      }
       if (preferences.monthlyOverview_includeLoanPayments !== undefined) {
         setIncludeLoanPayments(preferences.monthlyOverview_includeLoanPayments);
       }
@@ -41,11 +40,6 @@ const MonthlyOverviewPage = () => {
       }
     }
   }, [preferences]);
-
-  const handleEssentialSplitChange = (value) => {
-    setShowEssentialSplit(value);
-    updatePreferences({ monthlyOverview_showEssentialSplit: value });
-  };
 
   const handleIncludeLoanPaymentsChange = (value) => {
     setIncludeLoanPayments(value);
@@ -57,16 +51,13 @@ const MonthlyOverviewPage = () => {
     updatePreferences({ monthlyOverview_expenseSort: value });
   };
 
-  const [essentialCategories, setEssentialCategories] = useState([]);
   const [expandedCategories, setExpandedCategories] = useState({});
-  const [expandedSections, setExpandedSections] = useState({}); // Track expanded sections (essential/non-essential)
-  const [predictions, setPredictions] = useState({}); // month -> predictions array
-  const [averageEssentialSpending, setAverageEssentialSpending] = useState({}); // month -> average
+  const [expandedSections, setExpandedSections] = useState({});
+  const [predictions, setPredictions] = useState({});
+  const [averageEssentialSpending, setAverageEssentialSpending] = useState({});
 
   useEffect(() => {
     loadSummary();
-    loadEssentialCategories();
-    loadAvailableCategories();
   }, []);
 
   useEffect(() => {
@@ -88,17 +79,7 @@ const MonthlyOverviewPage = () => {
       setLoading(true);
       setError(null);
       const response = await transactionsAPI.getSummary();
-
-      let summaryData = [];
-      if (Array.isArray(response)) {
-        summaryData = response;
-      } else if (response && Array.isArray(response.data)) {
-        summaryData = response.data;
-      } else if (response && response.summary && Array.isArray(response.summary)) {
-        summaryData = response.summary;
-      }
-
-      setSummary(summaryData);
+      setSummary(parseSummaryResponse(response));
     } catch (err) {
       console.error('Error loading summary:', err);
       setError(err.message || 'Failed to load transaction summary');
@@ -107,44 +88,12 @@ const MonthlyOverviewPage = () => {
     }
   };
 
-  const loadEssentialCategories = async () => {
-    try {
-      const categories = await categoriesAPI.getEssentialCategories();
-      // Handle different response formats
-      const categoriesList = Array.isArray(categories)
-        ? categories
-        : (categories?.categories || categories?.data || []);
-      setEssentialCategories(categoriesList);
-    } catch (err) {
-      console.error('Error loading essential categories:', err);
-      // Use default essential categories on error
-      setEssentialCategories(['Rent', 'Insurance', 'Groceries', 'Utilities']);
-    }
-  };
-
-  const loadAvailableCategories = async () => {
-    try {
-      const response = await categoriesAPI.getCategories();
-      const categories = response?.data || response || {};
-      setAvailableCategories({
-        income: Array.isArray(categories.income) ? categories.income : [],
-        expense: Array.isArray(categories.expense) ? categories.expense : []
-      });
-    } catch (err) {
-      console.error('Error loading available categories:', err);
-      setAvailableCategories({
-        income: ['Salary', 'Income', 'Other'],
-        expense: ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Utilities', 'Loan Payment', 'Investment Account Payment', 'Rent', 'Insurance', 'Transfer', 'Other']
-      });
-    }
-  };
-
   const loadPredictionsForMonth = async (month) => {
     try {
-      const predictionsData = await predictionsAPI.getPredictionsForMonth(month);
+      const predictionsData = await fetchPredictionsForMonth(month);
       setPredictions(prev => ({
         ...prev,
-        [month]: unwrapList(predictionsData)
+        [month]: predictionsData
       }));
     } catch (err) {
       console.error(`Error loading predictions for ${month}:`, err);
@@ -157,8 +106,7 @@ const MonthlyOverviewPage = () => {
 
   const loadAverageEssentialSpending = async (month) => {
     try {
-      const avgData = await predictionsAPI.getAverageEssentialSpending(month);
-      const average = avgData?.average ?? avgData?.data?.average ?? 0;
+      const average = await fetchAverageEssentialSpending(month);
       setAverageEssentialSpending(prev => ({
         ...prev,
         [month]: average
@@ -210,6 +158,11 @@ const MonthlyOverviewPage = () => {
     }
   };
 
+  const sortedMonths = useMemo(
+    () => [...summary].sort((a, b) => new Date(b.month + '-01') - new Date(a.month + '-01')),
+    [summary]
+  );
+
   if (loading) {
     return (
       <div className="current-month-container">
@@ -242,12 +195,6 @@ const MonthlyOverviewPage = () => {
     );
   }
 
-  // Get latest month (current month) and all previous months
-  const sortedMonths = [...summary].sort((a, b) => {
-    const dateA = new Date(a.month + '-01');
-    const dateB = new Date(b.month + '-01');
-    return dateB - dateA;
-  });
   const latestMonth = sortedMonths[0];
   const previousMonths = sortedMonths.slice(1);
 
@@ -263,20 +210,6 @@ const MonthlyOverviewPage = () => {
     <>
       {/* Controls at the top */}
       <div className="details-controls">
-        <div className="chart-toggle">
-          <button
-            className={`chart-toggle-btn ${showEssentialSplit ? '' : 'active'}`}
-            onClick={() => handleEssentialSplitChange(false)}
-          >
-            All Categories
-          </button>
-          <button
-            className={`chart-toggle-btn ${showEssentialSplit ? 'active' : ''}`}
-            onClick={() => handleEssentialSplitChange(true)}
-          >
-            Essentials Split
-          </button>
-        </div>
         <div className="loan-payment-toggle">
           <button
             className={`chart-toggle-btn ${includeLoanPayments ? 'active' : ''}`}
@@ -294,13 +227,11 @@ const MonthlyOverviewPage = () => {
           month={latestMonth}
           isCurrentMonth={true}
           defaultCurrency={defaultCurrency}
-          showEssentialSplit={showEssentialSplit}
           essentialCategories={essentialCategories}
           expandedCategories={expandedCategories}
           setExpandedCategories={setExpandedCategories}
           expandedSections={expandedSections}
           setExpandedSections={setExpandedSections}
-          allMonthsData={summary}
           includeLoanPayments={includeLoanPayments}
           expenseSort={expenseSort}
           onExpenseSortChange={handleExpenseSortChange}
@@ -326,13 +257,11 @@ const MonthlyOverviewPage = () => {
                 month={month}
                 isCurrentMonth={false}
                 defaultCurrency={defaultCurrency}
-                showEssentialSplit={showEssentialSplit}
                 essentialCategories={essentialCategories}
                 expandedCategories={expandedCategories}
                 setExpandedCategories={setExpandedCategories}
                 expandedSections={expandedSections}
                 setExpandedSections={setExpandedSections}
-                allMonthsData={summary}
                 includeLoanPayments={includeLoanPayments}
                 expenseSort={expenseSort}
                 onExpenseSortChange={handleExpenseSortChange}

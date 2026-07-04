@@ -1,33 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { transactionsAPI } from '../api';
 import { formatCurrency, formatDate } from '../utils';
-
-const SAVINGS_CATEGORY_NAMES = new Set(['Transfer', 'Internal Transfer', 'Loan Payment', 'Investment Account Payment']);
-
-const groupExpenseCategories = (categories, essentialCategories) => {
-  const essentialSet = new Set((essentialCategories || []).map((category) => category.toLowerCase()));
-  const groups = {
-    essential: [],
-    nonEssential: [],
-    savings: []
-  };
-
-  (categories || []).forEach((category) => {
-    if (SAVINGS_CATEGORY_NAMES.has(category)) {
-      groups.savings.push(category);
-      return;
-    }
-
-    if (essentialSet.has(category.toLowerCase())) {
-      groups.essential.push(category);
-      return;
-    }
-
-    groups.nonEssential.push(category);
-  });
-
-  return groups;
-};
+import { groupExpenseCategoryNames } from '../utils/categoryHelpers';
 
 const CategorySection = ({
   title,
@@ -85,7 +59,7 @@ const CategoryEditModal = ({
       };
     }
 
-    return groupExpenseCategories(
+    return groupExpenseCategoryNames(
       Array.isArray(availableCategories?.expense) ? availableCategories.expense : [],
       essentialCategories
     );

@@ -264,29 +264,3 @@
   color: var(--color-text-muted);
   transition: color 0.3s ease;
 }
-
-/* Essential Categories Edit Button */
-.edit-categories-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: #ffffff;
-  color: #1a1a1a;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.edit-categories-btn:hover {
-  background: #1a1a1a;
-  color: #ffffff;
-  border-color: #1a1a1a;
-}
-
-.edit-categories-btn i {
-  font-size: 12px;
-}

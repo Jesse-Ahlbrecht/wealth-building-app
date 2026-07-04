@@ -10,7 +10,7 @@
  * - Essential/non-essential spending analysis
  */
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from 'react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -22,12 +22,20 @@ import {
   ReferenceLine,
   Cell
 } from 'recharts';
-import { transactionsAPI, categoriesAPI, predictionsAPI } from '../api';
+import { transactionsAPI, predictionsAPI } from '../api';
 import {
   formatCurrency,
   formatMonth
 } from '../utils';
-import { unwrapList, getPredictionKey, getPredictionMonth } from '../utils/predictionHelpers';
+import { parseSummaryResponse } from '../utils/apiHelpers';
+import { getLoanPaymentFromExpenseCategories } from '../utils/categoryHelpers';
+import { useCategoryData } from '../hooks';
+import {
+  getPredictionKey,
+  getPredictionMonth,
+  fetchPredictionsForMonth,
+  fetchAverageEssentialSpending
+} from '../utils/predictionHelpers';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
@@ -41,9 +49,8 @@ const ChartsPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
 
   // Data state
+  const { essentialCategories, availableCategories } = useCategoryData();
   const [summary, setSummary] = useState([]);
-  const [availableCategories, setAvailableCategories] = useState({ income: [], expense: [] });
-  const [essentialCategories, setEssentialCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -52,7 +59,6 @@ const ChartsPage = () => {
   const [chartView, setChartView] = useState('absolute');
   const [includeLoanPayments, setIncludeLoanPayments] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(null);
-  const [showEssentialSplit, setShowEssentialSplit] = useState(false);
 
   useEffect(() => {
     if (preferences) {
@@ -92,22 +98,14 @@ const ChartsPage = () => {
   const [hasMoved, setHasMoved] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState(null);
   const [showCustomHelp, setShowCustomHelp] = useState(false);
+  const plotMetricsRef = useRef(null);
 
-  // Load data on mount
   const loadSummary = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       const response = await transactionsAPI.getSummary();
-
-      let summaryData = [];
-      if (Array.isArray(response)) {
-        summaryData = response;
-      } else if (response && Array.isArray(response.data)) {
-        summaryData = response.data;
-      } else if (response && response.summary && Array.isArray(response.summary)) {
-        summaryData = response.summary;
-      }
+      const summaryData = parseSummaryResponse(response);
 
       setSummary(summaryData);
       setSelectedMonth((currentSelectedMonth) => {
@@ -126,92 +124,31 @@ const ChartsPage = () => {
 
   useEffect(() => {
     loadSummary();
-    loadEssentialCategories();
-    loadAvailableCategories();
   }, [loadSummary]);
-
-  const loadEssentialCategories = async () => {
-    try {
-      const response = await categoriesAPI.getEssentialCategories();
-      const categories = response?.categories || response || [];
-      setEssentialCategories(categories);
-    } catch (err) {
-      console.error('Error loading essential categories:', err);
-      // Use defaults if loading fails
-      setEssentialCategories(['Rent', 'Insurance', 'Groceries', 'Utilities']);
-    }
-  };
-
-  const loadAvailableCategories = async () => {
-    try {
-      const response = await categoriesAPI.getCategories();
-      const categories = response?.data || response || {};
-      setAvailableCategories({
-        income: Array.isArray(categories.income) ? categories.income : [],
-        expense: Array.isArray(categories.expense) ? categories.expense : []
-      });
-    } catch (err) {
-      console.error('Error loading available categories:', err);
-      setAvailableCategories({
-        income: ['Salary', 'Income', 'Other'],
-        expense: ['Groceries', 'Cafeteria', 'Outsourced Cooking', 'Dining', 'Shopping', 'Transport', 'Subscriptions', 'Utilities', 'Loan Payment', 'Investment Account Payment', 'Rent', 'Insurance', 'Transfer', 'Other']
-      });
-    }
-  };
 
   const loadAverageEssentialSpending = useCallback(async (month) => {
     try {
-      // Calculate average essential spending from previous 3 months
-      const sortedMonths = [...summary]
-        .sort((a, b) => new Date(b.month + '-01') - new Date(a.month + '-01'));
-
-      const currentMonthIndex = sortedMonths.findIndex(m => m.month === month);
-      const startIndex = currentMonthIndex >= 0 ? currentMonthIndex + 1 : 0;
-      const previousMonths = sortedMonths.slice(startIndex, startIndex + 3);
-
-      if (previousMonths.length === 0) {
-        setAverageEssentialSpending(prev => ({ ...prev, [month]: 0 }));
-        return;
-      }
-
-      const totals = previousMonths.map(m => {
-        if (!m || !m.expenseCategories) return 0;
-        return Object.entries(m.expenseCategories)
-          .filter(([cat]) => {
-            const isLoanPayment = cat.toLowerCase().includes('loan payment');
-            if (isLoanPayment) return includeLoanPayments;
-            return essentialCategories.some(
-              essentialCat => essentialCat.toLowerCase() === cat.toLowerCase()
-            );
-          })
-          .reduce((sum, [, catData]) => {
-            const amount = typeof catData === 'number' ? catData : (catData?.total || 0);
-            return sum + amount;
-          }, 0);
-      });
-
-      const average = totals.reduce((a, b) => a + b, 0) / totals.length;
+      const average = await fetchAverageEssentialSpending(month);
       setAverageEssentialSpending(prev => ({ ...prev, [month]: average }));
     } catch (err) {
       console.error(`Error loading average essential spending for ${month}:`, err);
       setAverageEssentialSpending(prev => ({ ...prev, [month]: 0 }));
     }
-  }, [summary, essentialCategories, includeLoanPayments]);
+  }, []);
 
-  // Load predictions and average essential spending for selected month
   useEffect(() => {
     if (selectedMonth) {
       loadPredictionsForMonth(selectedMonth.month);
       loadAverageEssentialSpending(selectedMonth.month);
     }
-  }, [selectedMonth, essentialCategories, loadAverageEssentialSpending]);
+  }, [selectedMonth, loadAverageEssentialSpending]);
 
   const loadPredictionsForMonth = async (month) => {
     try {
-      const predictionsData = await predictionsAPI.getPredictionsForMonth(month);
+      const predictionsData = await fetchPredictionsForMonth(month);
       setPredictions(prev => ({
         ...prev,
-        [month]: unwrapList(predictionsData)
+        [month]: predictionsData
       }));
     } catch (err) {
       console.error(`Error loading predictions for ${month}:`, err);
@@ -222,28 +159,13 @@ const ChartsPage = () => {
     }
   };
 
-  // Transform summary data for charts
-  const chartData = summary
+  const chartData = useMemo(() => summary
     .sort((a, b) => new Date(a.month + '-01') - new Date(b.month + '-01'))
     .map((month) => {
-      // Calculate loan payment amount from expense categories
-      let monthlyLoanPayment = 0;
-      if (month.expenseCategories || month.expense_categories) {
-        const expenseCategories = month.expenseCategories || month.expense_categories || {};
-        const loanCategory = Object.keys(expenseCategories).find(cat =>
-          cat.toLowerCase().includes('loan payment') || cat.toLowerCase().includes('loan')
-        );
-        if (loanCategory) {
-          const loanData = expenseCategories[loanCategory];
-          monthlyLoanPayment = typeof loanData === 'number' ? loanData : (loanData?.total || 0);
-        }
-      }
-
-      // Calculate adjusted savings based on includeLoanPayments toggle
+      const expenseCategories = month.expenseCategories || month.expense_categories || {};
+      const monthlyLoanPayment = getLoanPaymentFromExpenseCategories(expenseCategories);
       const baseSavings = month.savings || 0;
       const adjustedSavings = includeLoanPayments ? baseSavings + monthlyLoanPayment : baseSavings;
-
-      // Calculate adjusted savings rate
       const income = month.income || 0;
       const adjustedSavingsRate = income > 0 ? ((adjustedSavings / income) * 100) : 0;
       const baseSavingsRate = month.saving_rate || month.savingRate || 0;
@@ -253,11 +175,11 @@ const ChartsPage = () => {
         monthKey: month.month,
         savings: adjustedSavings,
         savingRate: includeLoanPayments ? adjustedSavingsRate : baseSavingsRate,
-        income: income,
+        income,
         expenses: month.expenses || 0,
         loanPayment: monthlyLoanPayment
       };
-    });
+    }), [summary, includeLoanPayments]);
 
   const reloadSelectedMonthPredictions = async () => {
     if (selectedMonth) {
@@ -307,8 +229,7 @@ const ChartsPage = () => {
     return color;
   };
 
-  // Filter data based on time range or selected range
-  const getFilteredData = () => {
+  const filteredData = useMemo(() => {
     if (selectedRange !== null) {
       const { startIndex, endIndex } = selectedRange;
       const start = Math.min(startIndex, endIndex);
@@ -321,57 +242,103 @@ const ChartsPage = () => {
 
     const months = timeRange === '3m' ? 3 : timeRange === '6m' ? 6 : 12;
     return chartData.slice(-months);
-  };
+  }, [chartData, selectedRange, timeRange]);
 
-  const filteredData = getFilteredData();
-
-  // Calculate which data point corresponds to an x coordinate
-  const getDataIndexFromX = useCallback((clientX, clientY) => {
-    if (!chartContainerRef.current || filteredData.length === 0) return null;
+  const refreshPlotMetrics = useCallback(() => {
+    if (!chartContainerRef.current || filteredData.length === 0) {
+      plotMetricsRef.current = null;
+      return;
+    }
 
     const chartWrapper = chartContainerRef.current.querySelector('.recharts-wrapper');
-    if (!chartWrapper) return null;
+    if (!chartWrapper) {
+      plotMetricsRef.current = null;
+      return;
+    }
 
     const wrapperRect = chartWrapper.getBoundingClientRect();
-
     const xAxis = chartWrapper.querySelector('.recharts-cartesian-axis-x');
     const yAxis = chartWrapper.querySelector('.recharts-cartesian-axis-y');
-
-    let plotAreaLeft, plotAreaRight, plotAreaTop, plotAreaBottom, plotAreaWidth;
 
     if (xAxis && yAxis) {
       const yAxisRect = yAxis.getBoundingClientRect();
       const xAxisRect = xAxis.getBoundingClientRect();
+      const plotAreaLeft = yAxisRect.right;
+      const plotAreaRight = xAxisRect.right;
+      const plotAreaTop = yAxisRect.top;
+      const plotAreaBottom = xAxisRect.top;
+      const plotAreaWidth = plotAreaRight - plotAreaLeft;
 
-      plotAreaLeft = yAxisRect.right;
-      plotAreaRight = xAxisRect.right;
-      plotAreaBottom = xAxisRect.top;
-      plotAreaTop = yAxisRect.top;
-      plotAreaWidth = plotAreaRight - plotAreaLeft;
-
-      if (clientX < plotAreaLeft || clientX > plotAreaRight) return null;
-      if (clientY < plotAreaTop || clientY > plotAreaBottom) return null;
-    } else {
-      const marginLeft = 20;
-      const marginRight = 30;
-      const marginTop = 20;
-      const marginBottom = 20;
-      plotAreaLeft = wrapperRect.left + marginLeft;
-      plotAreaRight = wrapperRect.right - marginRight;
-      plotAreaTop = wrapperRect.top + marginTop;
-      plotAreaBottom = wrapperRect.bottom - marginBottom;
-      plotAreaWidth = plotAreaRight - plotAreaLeft;
-
-      if (clientX < wrapperRect.left || clientX > wrapperRect.right) return null;
-      if (clientY < wrapperRect.top || clientY > wrapperRect.bottom) return null;
+      plotMetricsRef.current = {
+        plotAreaLeft,
+        plotAreaRight,
+        plotAreaTop,
+        plotAreaBottom,
+        barWidth: plotAreaWidth / filteredData.length,
+        useWrapperBounds: false,
+        wrapperRect
+      };
+      return;
     }
 
-    const barWidth = plotAreaWidth / filteredData.length;
+    const marginLeft = 20;
+    const marginRight = 30;
+    const marginTop = 20;
+    const marginBottom = 20;
+    const plotAreaLeft = wrapperRect.left + marginLeft;
+    const plotAreaRight = wrapperRect.right - marginRight;
+    const plotAreaTop = wrapperRect.top + marginTop;
+    const plotAreaBottom = wrapperRect.bottom - marginBottom;
+
+    plotMetricsRef.current = {
+      plotAreaLeft,
+      plotAreaRight,
+      plotAreaTop,
+      plotAreaBottom,
+      barWidth: (plotAreaRight - plotAreaLeft) / filteredData.length,
+      useWrapperBounds: true,
+      wrapperRect
+    };
+  }, [filteredData]);
+
+  useLayoutEffect(() => {
+    refreshPlotMetrics();
+    window.addEventListener('resize', refreshPlotMetrics);
+    return () => window.removeEventListener('resize', refreshPlotMetrics);
+  }, [refreshPlotMetrics, chartView, filteredData.length]);
+
+  useEffect(() => {
+    const frameId = requestAnimationFrame(refreshPlotMetrics);
+    return () => cancelAnimationFrame(frameId);
+  }, [filteredData, chartView, refreshPlotMetrics]);
+
+  const getDataIndexFromX = useCallback((clientX, clientY) => {
+    const metrics = plotMetricsRef.current;
+    if (!metrics || filteredData.length === 0) return null;
+
+    const {
+      plotAreaLeft,
+      plotAreaRight,
+      plotAreaTop,
+      plotAreaBottom,
+      barWidth,
+      useWrapperBounds,
+      wrapperRect
+    } = metrics;
+
+    if (useWrapperBounds) {
+      if (clientX < wrapperRect.left || clientX > wrapperRect.right) return null;
+      if (clientY < wrapperRect.top || clientY > wrapperRect.bottom) return null;
+    } else {
+      if (clientX < plotAreaLeft || clientX > plotAreaRight) return null;
+      if (clientY < plotAreaTop || clientY > plotAreaBottom) return null;
+    }
+
     const relativeX = clientX - plotAreaLeft;
     const index = Math.floor(relativeX / barWidth);
 
     return Math.max(0, Math.min(filteredData.length - 1, index));
-  }, [filteredData]);
+  }, [filteredData.length]);
 
   // Handle mouse down - start selection
   const handleMouseDown = useCallback((e) => {
@@ -803,26 +770,6 @@ const ChartsPage = () => {
         </div>
       </div>
 
-      {/* Category View Toggle - Only show when month is selected */}
-      {selectedMonth && (
-        <div className="chart-toggle-row">
-          <div className="chart-toggle">
-            <button
-              className={`chart-toggle-btn ${showEssentialSplit ? '' : 'active'}`}
-              onClick={() => setShowEssentialSplit(false)}
-            >
-              All Categories
-            </button>
-            <button
-              className={`chart-toggle-btn ${showEssentialSplit ? 'active' : ''}`}
-              onClick={() => setShowEssentialSplit(true)}
-            >
-              Essentials Split
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Drilldown Details */}
       {selectedMonth && (
         <div id="drilldown-details" className="drilldown-details">
@@ -838,13 +785,11 @@ const ChartsPage = () => {
               month={selectedMonth}
               isCurrentMonth={false}
               defaultCurrency={defaultCurrency}
-              showEssentialSplit={showEssentialSplit}
               essentialCategories={essentialCategories}
               expandedCategories={expandedCategories}
               setExpandedCategories={setExpandedCategories}
               expandedSections={expandedSections}
               setExpandedSections={setExpandedSections}
-              allMonthsData={summary}
               includeLoanPayments={includeLoanPayments}
               predictions={predictions[selectedMonth.month] || []}
               averageEssentialSpending={averageEssentialSpending[selectedMonth.month] || 0}

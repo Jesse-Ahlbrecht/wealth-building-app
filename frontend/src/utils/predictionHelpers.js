@@ -1,5 +1,18 @@
+import { predictionsAPI } from '../api/predictions';
+
 export const unwrapList = (data) =>
   Array.isArray(data) ? data : (data?.data || []);
+
+export const parseAverageEssentialSpending = (avgData) => avgData?.average ?? 0;
+
+export async function fetchPredictionsForMonth(month) {
+  return unwrapList(await predictionsAPI.getPredictionsForMonth(month));
+}
+
+export async function fetchAverageEssentialSpending(month) {
+  const avgData = await predictionsAPI.getAverageEssentialSpending(month);
+  return parseAverageEssentialSpending(avgData);
+}
 
 export const getPredictionKey = (prediction) =>
   prediction.prediction_key || prediction.predictionKey;

@@ -5,12 +5,14 @@
  * Used in both MonthlyOverviewPage and ChartsPage drilldown.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { formatCurrency, formatMonth, formatDate } from '../utils';
+import {
+  getLoanPaymentFromExpenseCategories,
+  splitExpenseCategoryAmounts
+} from '../utils/categoryHelpers';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
-
-const SAVINGS_CATEGORY_NAMES = new Set(['Transfer', 'Internal Transfer', 'Loan Payment', 'Investment Account Payment']);
 
 /**
  * Metric Bar Component
@@ -45,13 +47,11 @@ const MonthSummaryCard = ({
   month, 
   isCurrentMonth, 
   defaultCurrency = 'CHF', 
-  showEssentialSplit = false, 
   essentialCategories = [],
   expandedCategories = {},
   setExpandedCategories = () => {},
   expandedSections = {},
   setExpandedSections = () => {},
-  allMonthsData = [],
   includeLoanPayments = false,
   expenseSort = 'amount_desc',
   onExpenseSortChange = () => {},
@@ -67,92 +67,30 @@ const MonthSummaryCard = ({
   const [predictionMenu, setPredictionMenu] = React.useState(null);
   const [predictionModal, setPredictionModal] = React.useState(null);
   const income = month.income || 0;
-  const baseExpenses = month.expenses || 0;
-  
-  // Find loan payment amount from expense categories
-  let monthlyLoanPayment = 0;
-  if (month.expenseCategories) {
-    const loanCategory = Object.keys(month.expenseCategories).find(cat => 
-      cat.toLowerCase().includes('loan payment') || cat.toLowerCase().includes('loan')
-    );
-    if (loanCategory) {
-      monthlyLoanPayment = month.expenseCategories[loanCategory] || 0;
-    }
-  }
-  
-  // Calculate adjusted expenses (exclude loan payments if they're counted as savings)
-  const expenses = includeLoanPayments ? baseExpenses - monthlyLoanPayment : baseExpenses;
-  
-  // Calculate adjusted savings
-  const actualSavings = month.savings || 0;
-  const adjustedSavings = includeLoanPayments ? actualSavings + monthlyLoanPayment : actualSavings;
-  
-  const savings = adjustedSavings;
-
-  // Group expense categories into essential and non-essential
-  const groupExpensesByEssential = (expenseCategories) => {
-    if (!expenseCategories || Object.keys(expenseCategories).length === 0) {
-      return { essential: {}, nonEssential: {}, savingsCategories: {} };
-    }
-
-    const essential = {};
-    const nonEssential = {};
-    const savingsCategories = {};
-
-    Object.entries(expenseCategories).forEach(([category, amount]) => {
-      // Check if this is a loan payment category (case-insensitive)
-      const isLoanPayment = category.toLowerCase().includes('loan payment') || category.toLowerCase().includes('loan');
-
-      if (SAVINGS_CATEGORY_NAMES.has(category) && !(isLoanPayment && !includeLoanPayments)) {
-        savingsCategories[category] = amount;
-        return;
-      }
-      
-      // If loan payments are counted as savings, exclude them from spending entirely
-      if (includeLoanPayments && isLoanPayment) {
-        return; // Skip this category
-      }
-      
-      // If loan payments are NOT counted as savings, always treat them as essential
-      if (!includeLoanPayments && isLoanPayment) {
-        essential[category] = amount;
-        return;
-      }
-      
-      // Check if category matches any essential category (case-insensitive)
-      const isEssential = essentialCategories.some(
-        essentialCat => essentialCat.toLowerCase() === category.toLowerCase()
-      );
-      
-      if (isEssential) {
-        essential[category] = amount;
-      } else {
-        nonEssential[category] = amount;
-      }
-    });
-
-    return { essential, nonEssential, savingsCategories };
-  };
+  const monthlyLoanPayment = getLoanPaymentFromExpenseCategories(month.expenseCategories);
 
   const {
     essential: essentialExpenses,
     nonEssential: nonEssentialExpenses,
-    savingsCategories: legacySavingsCategories
-  } =
-    showEssentialSplit ? groupExpensesByEssential(month.expenseCategories) : { essential: {}, nonEssential: {}, savingsCategories: {} };
-  const savingsCategories = {
-    ...(month.savingsCategories || {})
-  };
-  Object.entries(legacySavingsCategories).forEach(([category, amount]) => {
-    savingsCategories[category] = (savingsCategories[category] || 0) + amount;
-  });
+    savingsCategories: expenseSavingsCategories
+  } = useMemo(
+    () => splitExpenseCategoryAmounts(month.expenseCategories, essentialCategories, includeLoanPayments),
+    [month.expenseCategories, essentialCategories, includeLoanPayments]
+  );
+
+  const savingsCategories = useMemo(() => {
+    const merged = { ...(month.savingsCategories || {}) };
+    Object.entries(expenseSavingsCategories).forEach(([category, amount]) => {
+      merged[category] = (merged[category] || 0) + amount;
+    });
+    return merged;
+  }, [month.savingsCategories, expenseSavingsCategories]);
   
   const essentialTotal = Object.values(essentialExpenses).reduce((sum, val) => sum + val, 0);
   const nonEssentialTotal = Object.values(nonEssentialExpenses).reduce((sum, val) => sum + val, 0);
   const savingsCategoryTotal = Object.values(savingsCategories).reduce((sum, val) => sum + val, 0);
   const splitExpensesTotal = essentialTotal + nonEssentialTotal;
-  const expensesForDisplay = showEssentialSplit ? splitExpensesTotal : expenses;
-  const savingsForDisplay = showEssentialSplit ? income - splitExpensesTotal : savings;
+  const savingsForDisplay = income - splitExpensesTotal;
   
   // Calculate predicted essential spending (use average if higher than current)
   const predictedEssentialAverage = isCurrentMonth ? (averageEssentialSpending || 0) : 0;
@@ -163,7 +101,7 @@ const MonthSummaryCard = ({
   const basePredictedSavings = income - totalPredictedExpenses;
   const predictedSavings = includeLoanPayments ? basePredictedSavings + monthlyLoanPayment : basePredictedSavings;
   const savingsMetricValue = isCurrentMonth && predictedSavings !== savingsForDisplay ? predictedSavings : savingsForDisplay;
-  const metricMaxValue = Math.max(income, expensesForDisplay, Math.abs(savingsMetricValue));
+  const metricMaxValue = Math.max(income, splitExpensesTotal, Math.abs(savingsMetricValue));
 
   // Helper to toggle category expansion
   const toggleCategory = (categoryKey) => {
@@ -224,6 +162,27 @@ const MonthSummaryCard = ({
     }
 
     return sorted.sort((a, b) => getDate(b) - getDate(a));
+  };
+
+  const getCategoryTransactionCount = (category, type) => {
+    const transactionsKey =
+      type === 'income'
+        ? 'incomeTransactions'
+        : type === 'savings'
+          ? 'savingsTransactions'
+          : 'expenseTransactions';
+    const actualCount = (month[transactionsKey]?.[category] || []).length;
+
+    if (!isCurrentMonth || !predictions?.length) {
+      return actualCount;
+    }
+
+    const predictedCount = predictions.filter((prediction) =>
+      prediction.category === category &&
+      prediction.type === (type === 'income' ? 'income' : 'expense')
+    ).length;
+
+    return actualCount + predictedCount;
   };
 
   const getCategoryTransactions = (category, type) => {
@@ -444,7 +403,7 @@ const MonthSummaryCard = ({
           currency={defaultCurrency}
           type="positive"
         />
-        {showEssentialSplit && (essentialTotal > 0 || nonEssentialTotal > 0 || savingsCategoryTotal > 0) ? (
+        {(essentialTotal > 0 || nonEssentialTotal > 0 || savingsCategoryTotal > 0) ? (
           <>
             <div className="metric-bar-item">
               <div className="metric-bar-header">
@@ -492,7 +451,7 @@ const MonthSummaryCard = ({
         ) : (
           <MetricBar
             label="Expenses"
-            value={expensesForDisplay}
+            value={splitExpensesTotal}
             maxValue={metricMaxValue}
             currency={defaultCurrency}
             type="negative"
@@ -523,9 +482,6 @@ const MonthSummaryCard = ({
       </div>
 
       {/* Category Breakdown */}
-      {showEssentialSplit ? (
-        <>
-          {/* Essential Expenses */}
           {Object.keys(essentialExpenses).length > 0 && (
             <div className="categories-section">
               <div 
@@ -570,7 +526,7 @@ const MonthSummaryCard = ({
                       .map(([category, amount]) => {
                         const categoryKey = `${month.month}-essential-${category}`;
                         const isExpanded = expandedCategories[categoryKey];
-                        const transactions = getCategoryTransactions(category, 'expense');
+                        const transactionCount = getCategoryTransactionCount(category, 'expense');
                         
                         return (
                           <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
@@ -585,8 +541,8 @@ const MonthSummaryCard = ({
                                     {isExpanded ? '▼' : '▶'}
                                   </span>
                                   {category}
-                                  {transactions.length > 0 && (
-                                    <span className="transaction-count">({transactions.length})</span>
+                                  {transactionCount > 0 && (
+                                    <span className="transaction-count">({transactionCount})</span>
                                   )}
                                 </div>
                                 <div className="category-bar">
@@ -600,11 +556,11 @@ const MonthSummaryCard = ({
                                 {formatCurrency(amount, defaultCurrency)}
                               </div>
                             </div>
-                          {isExpanded && transactions.length > 0 && (
+                          {isExpanded && transactionCount > 0 && (
                             <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
                               {renderExpenseSortControls()}
                               <div className="transaction-list">
-                                {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
+                                {getCategoryTransactions(category, 'expense').map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
                               </div>
                             </div>
                           )}
@@ -679,7 +635,7 @@ const MonthSummaryCard = ({
                       .map(([category, amount]) => {
                         const categoryKey = `${month.month}-nonessential-${category}`;
                         const isExpanded = expandedCategories[categoryKey];
-                        const transactions = getCategoryTransactions(category, 'expense');
+                        const transactionCount = getCategoryTransactionCount(category, 'expense');
                         
                         return (
                           <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
@@ -694,8 +650,8 @@ const MonthSummaryCard = ({
                                     {isExpanded ? '▼' : '▶'}
                                   </span>
                                   {category}
-                                  {transactions.length > 0 && (
-                                    <span className="transaction-count">({transactions.length})</span>
+                                  {transactionCount > 0 && (
+                                    <span className="transaction-count">({transactionCount})</span>
                                   )}
                                 </div>
                                 <div className="category-bar">
@@ -709,11 +665,11 @@ const MonthSummaryCard = ({
                                 {formatCurrency(amount, defaultCurrency)}
                               </div>
                             </div>
-                          {isExpanded && transactions.length > 0 && (
+                          {isExpanded && transactionCount > 0 && (
                             <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
                               {renderExpenseSortControls()}
                               <div className="transaction-list">
-                                {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
+                                {getCategoryTransactions(category, 'expense').map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
                               </div>
                             </div>
                             )}
@@ -779,7 +735,7 @@ const MonthSummaryCard = ({
                       .map(([category, amount]) => {
                         const categoryKey = `${month.month}-savings-${category}`;
                         const isExpanded = expandedCategories[categoryKey];
-                        const transactions = getCategoryTransactions(category, 'savings');
+                        const transactionCount = getCategoryTransactionCount(category, 'savings');
 
                         return (
                           <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
@@ -794,8 +750,8 @@ const MonthSummaryCard = ({
                                     {isExpanded ? '▼' : '▶'}
                                   </span>
                                   {category}
-                                  {transactions.length > 0 && (
-                                    <span className="transaction-count">({transactions.length})</span>
+                                  {transactionCount > 0 && (
+                                    <span className="transaction-count">({transactionCount})</span>
                                   )}
                                 </div>
                                 <div className="category-bar">
@@ -809,11 +765,11 @@ const MonthSummaryCard = ({
                                 {formatCurrency(amount, defaultCurrency)}
                               </div>
                             </div>
-                            {isExpanded && transactions.length > 0 && (
+                            {isExpanded && transactionCount > 0 && (
                               <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
                                 {renderExpenseSortControls()}
                                 <div className="transaction-list">
-                                  {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
+                                  {getCategoryTransactions(category, 'savings').map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
                                 </div>
                               </div>
                             )}
@@ -834,211 +790,6 @@ const MonthSummaryCard = ({
               })()}
             </div>
           )}
-        </>
-      ) : (
-        /* All Categories View */
-        (() => {
-          const expenseCategories = month.expenseCategories || {};
-          const categoryEntries = Object.entries(expenseCategories);
-          const savingsEntries = Object.entries(savingsCategories);
-          if (categoryEntries.length === 0 && savingsEntries.length === 0) return null;
-          
-          const maxExpenseAmount = categoryEntries.length > 0
-            ? Math.max(...categoryEntries.map(([, amount]) => amount))
-            : 0;
-          const expenseTotal = Object.values(expenseCategories).reduce((sum, val) => sum + val, 0);
-          const maxSavingsAmount = savingsEntries.length > 0
-            ? Math.max(...savingsEntries.map(([, amount]) => amount))
-            : 0;
-          const savingsTotal = Object.values(savingsCategories).reduce((sum, val) => sum + val, 0);
-          
-          return (
-            <>
-            {savingsEntries.length > 0 && (
-            <div className="categories-section">
-              <div
-                className="category-item category-section-header"
-                onClick={() => {
-                  const sectionKey = `${month.month}-savings-section`;
-                  setExpandedSections(prev => ({
-                    ...prev,
-                    [sectionKey]: !prev[sectionKey]
-                  }));
-                }}
-                style={{
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  marginBottom: expandedSections[`${month.month}-savings-section`] ? '8px' : '0'
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <span className="category-name">
-                    <span className="expand-arrow" style={{ marginRight: '8px' }}>
-                      {expandedSections[`${month.month}-savings-section`] ? '▼' : '▶'}
-                    </span>
-                    Savings Movements
-                  </span>
-                </div>
-                <span className="stat-value" style={{ fontWeight: '700' }}>
-                  {formatCurrency(savingsTotal, defaultCurrency)}
-                </span>
-              </div>
-
-              {expandedSections[`${month.month}-savings-section`] && (
-                <div className="category-list">
-                  {savingsEntries
-                    .sort(([, a], [, b]) => b - a)
-                    .map(([category, amount]) => {
-                      const categoryKey = `${month.month}-savings-${category}`;
-                      const isExpanded = expandedCategories[categoryKey];
-                      const transactions = getCategoryTransactions(category, 'savings');
-
-                      return (
-                        <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
-                          <div
-                            className="category-item category-subitem"
-                            onClick={() => toggleCategory(categoryKey)}
-                            style={{ cursor: 'pointer' }}
-                          >
-                            <div style={{ flex: 1 }}>
-                              <div className="category-name">
-                                <span className="expand-arrow">{isExpanded ? '▼' : '▶'}</span>
-                                {category}
-                                <span className="transaction-count">
-                                  ({transactions.length})
-                                </span>
-                              </div>
-                              <div className="category-bar">
-                                <div
-                                  className="category-bar-fill category-bar-income"
-                                  style={{ width: `${maxSavingsAmount > 0 ? (amount / maxSavingsAmount) * 100 : 0}%` }}
-                                />
-                              </div>
-                            </div>
-                            <div className="category-amount">
-                              {formatCurrency(amount, defaultCurrency)}
-                            </div>
-                          </div>
-                          {isExpanded && transactions.length > 0 && (
-                            <div className="transaction-list-wrapper">
-                              {renderExpenseSortControls()}
-                              <div className="transaction-list">
-                                {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)' }}>
-                    <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
-                      <span className="category-name">Total Savings Movements</span>
-                      <span className="stat-value" style={{ fontWeight: '700' }}>
-                        {formatCurrency(savingsTotal, defaultCurrency)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-            )}
-
-            {categoryEntries.length > 0 && (
-            <div className="categories-section">
-              <div 
-                className="category-item category-section-header" 
-                onClick={() => {
-                  const sectionKey = `${month.month}-expense-section`;
-                  setExpandedSections(prev => ({
-                    ...prev,
-                    [sectionKey]: !prev[sectionKey]
-                  }));
-                }}
-                style={{ 
-                  cursor: 'pointer', 
-                  fontWeight: '600', 
-                  marginBottom: expandedSections[`${month.month}-expense-section`] ? '8px' : '0'
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <span className="category-name">
-                    <span className="expand-arrow" style={{ marginRight: '8px' }}>
-                      {expandedSections[`${month.month}-expense-section`] ? '▼' : '▶'}
-                    </span>
-                    Expenses
-                  </span>
-                </div>
-                <span className="stat-value" style={{ fontWeight: '700' }}>
-                  {formatCurrency(expenseTotal, defaultCurrency)}
-                </span>
-              </div>
-              
-              {/* Individual categories - shown when expanded */}
-              {expandedSections[`${month.month}-expense-section`] && (
-                <div className="category-list">
-                  {categoryEntries
-                    .sort(([, a], [, b]) => b - a)
-                    .map(([category, amount]) => {
-                      const categoryKey = `${month.month}-expense-${category}`;
-                      const isExpanded = expandedCategories[categoryKey];
-                      const transactions = getCategoryTransactions(category, 'expense');
-                      
-                      return (
-                        <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
-                          <div 
-                            className="category-item category-subitem" 
-                            onClick={() => toggleCategory(categoryKey)}
-                            style={{ cursor: 'pointer' }}
-                          >
-                            <div style={{ flex: 1 }}>
-                              <div className="category-name">
-                                <span className="expand-arrow">{isExpanded ? '▼' : '▶'}</span>
-                                {category}
-                                <span className="transaction-count">
-                                  ({transactions.length})
-                                </span>
-                              </div>
-                              <div className="category-bar">
-                                <div
-                                  className="category-bar-fill"
-                                  style={{ width: `${maxExpenseAmount > 0 ? (amount / maxExpenseAmount) * 100 : 0}%` }}
-                                />
-                              </div>
-                            </div>
-                            <div className="category-amount">
-                              {formatCurrency(amount, defaultCurrency)}
-                            </div>
-                          </div>
-                          {isExpanded && transactions.length > 0 && (
-                            <div className="transaction-list-wrapper">
-                              {renderExpenseSortControls()}
-                              <div className="transaction-list">
-                                {transactions.map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  
-                  {/* Total at the bottom when expanded */}
-                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)' }}>
-                    <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
-                      <span className="category-name">Total Expenses</span>
-                      <span className="stat-value" style={{ fontWeight: '700' }}>
-                        {formatCurrency(expenseTotal, defaultCurrency)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-            )}
-            </>
-          );
-        })()
-      )}
 
       {/* Income Categories */}
       {(month.incomeCategories && Object.keys(month.incomeCategories).length > 0) && (() => {
@@ -1087,7 +838,7 @@ const MonthSummaryCard = ({
                     .map(([category, amount]) => {
                       const categoryKey = `${month.month}-income-${category}`;
                       const isExpanded = expandedCategories[categoryKey];
-                      const transactions = getCategoryTransactions(category, 'income');
+                      const transactionCount = getCategoryTransactionCount(category, 'income');
                       
                       return (
                         <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
@@ -1102,8 +853,8 @@ const MonthSummaryCard = ({
                                   {isExpanded ? '▼' : '▶'}
                                 </span>
                                 {category}
-                                {transactions.length > 0 && (
-                                  <span className="transaction-count">({transactions.length})</span>
+                                {transactionCount > 0 && (
+                                  <span className="transaction-count">({transactionCount})</span>
                                 )}
                               </div>
                               <div className="category-bar">
@@ -1117,10 +868,10 @@ const MonthSummaryCard = ({
                               {formatCurrency(amount, defaultCurrency)}
                             </div>
                           </div>
-                        {isExpanded && transactions.length > 0 && (
+                        {isExpanded && transactionCount > 0 && (
                           <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
                             <div className="transaction-list">
-                              {transactions.map((txn, idx) => renderTransactionItem(txn, idx))}
+                              {getCategoryTransactions(category, 'income').map((txn, idx) => renderTransactionItem(txn, idx))}
                             </div>
                           </div>
                         )}
