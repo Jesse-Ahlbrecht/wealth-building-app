@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { transactionsAPI, accountsAPI, brokerAPI } from '../api';
 import { formatCurrency, convertAmountToCurrency, EUR_TO_CHF_RATE } from '../utils';
+import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
+import { computeMonthExpenseBreakdown } from '../utils/categoryHelpers';
 import WealthProjectionCalculator from '../components/WealthProjectionCalculator';
 
 const ProjectionPage = () => {
@@ -36,17 +38,14 @@ const ProjectionPage = () => {
         }
       }
 
-      // Calculate average monthly savings from last 6 months
-      const sortedMonths = [...summaryData]
-        .sort((a, b) => new Date(b.month + '-01') - new Date(a.month + '-01'))
-        .slice(0, 6);
-      
-      const totalSavings = sortedMonths.reduce((sum, month) => sum + (month.savings || 0), 0);
-      const averageMonthlySavings = sortedMonths.length > 0 ? totalSavings / sortedMonths.length : 0;
-      
-      // Calculate average savings rate
-      const totalSavingRate = sortedMonths.reduce((sum, month) => sum + (month.savingRate || 0), 0);
-      const averageSavingsRate = sortedMonths.length > 0 ? totalSavingRate / sortedMonths.length : 0;
+      const lastSixMonths = sortMonthsReverseChronologically(summaryData).slice(0, 6);
+      const savingsBreakdowns = lastSixMonths.map((month) => computeMonthExpenseBreakdown(month, []));
+      const averageMonthlySavings = savingsBreakdowns.length > 0
+        ? savingsBreakdowns.reduce((sum, point) => sum + point.savings, 0) / savingsBreakdowns.length
+        : 0;
+      const averageSavingsRate = savingsBreakdowns.length > 0
+        ? savingsBreakdowns.reduce((sum, point) => sum + point.savingRate, 0) / savingsBreakdowns.length
+        : 0;
 
       // Calculate current net worth from accounts
       let currentNetWorth = 0;

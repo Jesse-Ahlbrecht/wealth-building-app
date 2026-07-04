@@ -27,3 +27,9 @@ export const getPreviousMonth = (monthStr) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 };
 
+export const sortMonthsChronologically = (summary) =>
+  [...summary].sort((a, b) => new Date(a.month + '-01') - new Date(b.month + '-01'));
+
+export const sortMonthsReverseChronologically = (summary) =>
+  [...summary].sort((a, b) => new Date(b.month + '-01') - new Date(a.month + '-01'));
+

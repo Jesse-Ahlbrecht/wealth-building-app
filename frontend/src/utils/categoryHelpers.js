@@ -14,22 +14,17 @@ export const isLoanPaymentCategory = (category) => {
 export const buildEssentialCategorySet = (essentialCategories) =>
   new Set((essentialCategories || []).map((category) => category.toLowerCase()));
 
-export const classifyExpenseCategory = (category, essentialSet, includeLoanPayments) => {
-  const isLoanPayment = isLoanPaymentCategory(category);
-
-  if (SAVINGS_CATEGORY_NAMES.has(category) && !(isLoanPayment && !includeLoanPayments)) {
+export const classifyExpenseCategory = (category, essentialSet) => {
+  if (SAVINGS_CATEGORY_NAMES.has(category)) {
     return 'savings';
   }
-  if (includeLoanPayments && isLoanPayment) {
+  if (isLoanPaymentCategory(category)) {
     return 'skip';
-  }
-  if (!includeLoanPayments && isLoanPayment) {
-    return 'essential';
   }
   return essentialSet.has(category.toLowerCase()) ? 'essential' : 'nonEssential';
 };
 
-export const splitExpenseCategoryAmounts = (expenseCategories, essentialCategories, includeLoanPayments) => {
+export const splitExpenseCategoryAmounts = (expenseCategories, essentialCategories, essentialSet = null) => {
   const essential = {};
   const nonEssential = {};
   const savingsCategories = {};
@@ -38,10 +33,10 @@ export const splitExpenseCategoryAmounts = (expenseCategories, essentialCategori
     return { essential, nonEssential, savingsCategories };
   }
 
-  const essentialSet = buildEssentialCategorySet(essentialCategories);
+  const set = essentialSet ?? buildEssentialCategorySet(essentialCategories);
 
   Object.entries(expenseCategories).forEach(([category, amount]) => {
-    const bucket = classifyExpenseCategory(category, essentialSet, includeLoanPayments);
+    const bucket = classifyExpenseCategory(category, set);
     if (bucket === 'skip') return;
     if (bucket === 'savings') savingsCategories[category] = amount;
     else if (bucket === 'essential') essential[category] = amount;
@@ -56,26 +51,14 @@ export const groupExpenseCategoryNames = (categories, essentialCategories) => {
   const groups = { essential: [], nonEssential: [], savings: [] };
 
   (categories || []).forEach((category) => {
-    if (SAVINGS_CATEGORY_NAMES.has(category)) {
-      groups.savings.push(category);
-      return;
-    }
-    if (essentialSet.has(category.toLowerCase())) {
-      groups.essential.push(category);
-      return;
-    }
-    groups.nonEssential.push(category);
+    const bucket = classifyExpenseCategory(category, essentialSet);
+    if (bucket === 'skip') return;
+    if (bucket === 'savings') groups.savings.push(category);
+    else if (bucket === 'essential') groups.essential.push(category);
+    else groups.nonEssential.push(category);
   });
 
   return groups;
-};
-
-export const getLoanPaymentFromExpenseCategories = (expenseCategories) => {
-  if (!expenseCategories) return 0;
-  const loanCategory = Object.keys(expenseCategories).find(isLoanPaymentCategory);
-  if (!loanCategory) return 0;
-  const value = expenseCategories[loanCategory];
-  return typeof value === 'number' ? value : (value?.total || 0);
 };
 
 export const sumCategoryAmounts = (categories) =>
@@ -87,4 +70,29 @@ export const mergeSavingsCategories = (month, expenseSavingsCategories) => {
     merged[category] = (merged[category] || 0) + amount;
   });
   return merged;
+};
+
+export const computeMonthExpenseBreakdown = (month, essentialCategories, essentialSet = null) => {
+  const income = month.income || 0;
+  const set = essentialSet ?? buildEssentialCategorySet(essentialCategories);
+  const { essential, nonEssential, savingsCategories: expenseSavingsCategories } =
+    splitExpenseCategoryAmounts(month.expenseCategories, essentialCategories, set);
+
+  const essentialTotal = sumCategoryAmounts(essential);
+  const nonEssentialTotal = sumCategoryAmounts(nonEssential);
+  const splitExpensesTotal = essentialTotal + nonEssentialTotal;
+  const savings = income - splitExpensesTotal;
+  const savingRate = income > 0 ? (savings / income) * 100 : 0;
+
+  return {
+    essential,
+    nonEssential,
+    expenseSavingsCategories,
+    essentialTotal,
+    nonEssentialTotal,
+    splitExpensesTotal,
+    savings,
+    savingRate,
+    income
+  };
 };

@@ -18,7 +18,7 @@ import {
   CockpitTooltip
 } from '../utils/cockpitChartConfig';
 import CockpitViewToggle from '../components/CockpitViewToggle';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
 import ChartPageStates from '../components/ChartPageStates';
 import MonthDrilldownPanel from '../components/MonthDrilldownPanel';
 import { useAppContext } from '../context/AppContext';
@@ -71,13 +71,6 @@ const CockpitPage = () => {
     preferences,
     updatePreferences
   );
-  const [includeLoanPayments, setIncludeLoanPayments] = usePreferenceState(
-    'cockpit_includeLoanPayments',
-    false,
-    preferences,
-    updatePreferences
-  );
-
   const selectedMonthKey = selectedMonth?.month;
   const {
     predictions,
@@ -88,8 +81,8 @@ const CockpitPage = () => {
   } = useMonthPredictions(selectedMonthKey);
 
   const stats = useMemo(
-    () => buildCockpitChartData(summary, essentialCategories, 12, includeLoanPayments),
-    [summary, essentialCategories, includeLoanPayments]
+    () => buildCockpitChartData(summary, essentialCategories, 12),
+    [summary, essentialCategories]
   );
   const { chartData } = stats;
   const view = COCKPIT_VIEWS[chartView];
@@ -145,6 +138,20 @@ const CockpitPage = () => {
     [view.yAxisIsRate]
   );
 
+  const drilldownPanelProps = useMonthDrilldownPanelProps({
+    selectedMonth,
+    setSelectedMonth,
+    defaultCurrency,
+    essentialCategories,
+    availableCategories,
+    predictions,
+    averageEssentialSpending,
+    handleSkipPrediction,
+    handleDeletePrediction,
+    reloadPredictions,
+    refreshSummary
+  });
+
   return (
     <ChartPageStates
       loading={loading}
@@ -154,19 +161,7 @@ const CockpitPage = () => {
       loadingMessage="Loading cockpit..."
       emptyMessage="Upload bank statements to see your savings progress here."
     >
-      <div className="cockpit-toolbar">
-        <CockpitViewToggle value={chartView} onChange={setChartView} />
-        <div className="cockpit-option-toggle">
-          <button
-            type="button"
-            className={`cockpit-option-toggle__btn${includeLoanPayments ? ' active' : ''}`}
-            onClick={() => setIncludeLoanPayments(!includeLoanPayments)}
-            title="Include monthly loan payments in savings calculation"
-          >
-            Include loans
-          </button>
-        </div>
-      </div>
+      <CockpitViewToggle value={chartView} onChange={setChartView} />
       <div className="charts-container charts-layout">
         <div className="chart-section">
           <div className="chart-header-row">
@@ -327,20 +322,7 @@ const CockpitPage = () => {
           </div>
         </div>
 
-        <MonthDrilldownPanel
-          selectedMonth={selectedMonth}
-          onClose={() => setSelectedMonth(null)}
-          defaultCurrency={defaultCurrency}
-          essentialCategories={essentialCategories}
-          availableCategories={availableCategories}
-          includeLoanPayments={includeLoanPayments}
-          predictions={predictions[selectedMonthKey] || []}
-          averageEssentialSpending={averageEssentialSpending[selectedMonthKey] || 0}
-          onSkipPrediction={handleSkipPrediction}
-          onDeletePrediction={handleDeletePrediction}
-          onPredictionChanged={reloadPredictions}
-          onTransactionCategoryUpdated={refreshSummary}
-        />
+        <MonthDrilldownPanel {...drilldownPanelProps} />
       </div>
     </ChartPageStates>
   );

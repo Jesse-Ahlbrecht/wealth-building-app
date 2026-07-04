@@ -1,48 +1,40 @@
-import { formatMonth } from '../utils';
+import { formatMonth, sortMonthsChronologically } from './dateHelpers';
 import {
-  getLoanPaymentFromExpenseCategories,
-  splitExpenseCategoryAmounts,
-  sumCategoryAmounts,
-  mergeSavingsCategories
+  buildEssentialCategorySet,
+  computeMonthExpenseBreakdown,
+  mergeSavingsCategories,
+  sumCategoryAmounts
 } from './categoryHelpers';
 
-export const sortMonthsChronologically = (summary) =>
-  [...summary].sort((a, b) => new Date(a.month + '-01') - new Date(b.month + '-01'));
+export { sortMonthsChronologically, sortMonthsReverseChronologically } from './dateHelpers';
 
 export const getLastNMonths = (summary, count) =>
   sortMonthsChronologically(summary).slice(-count);
 
-export const buildMonthlySavingsPoint = (month, includeLoanPayments = false) => {
-  const monthlyLoanPayment = getLoanPaymentFromExpenseCategories(month.expenseCategories);
-  const baseSavings = month.savings || 0;
-  const adjustedSavings = includeLoanPayments ? baseSavings + monthlyLoanPayment : baseSavings;
-  const income = month.income || 0;
-  const adjustedSavingsRate = income > 0 ? (adjustedSavings / income) * 100 : 0;
-  const baseSavingsRate = month.savingRate || 0;
+export const buildMonthlySavingsPoint = (month, essentialCategories = [], essentialSet = null) => {
+  const { savings, savingRate, income } = computeMonthExpenseBreakdown(
+    month,
+    essentialCategories,
+    essentialSet
+  );
 
   return {
     month: formatMonth(month.month),
     monthKey: month.month,
-    savings: adjustedSavings,
-    savingRate: includeLoanPayments ? adjustedSavingsRate : baseSavingsRate,
+    savings,
+    savingRate,
     income,
-    expenses: month.expenses || 0,
-    loanPayment: monthlyLoanPayment
+    expenses: month.expenses || 0
   };
 };
-
-export const buildMonthlySavingsPoints = (summary, includeLoanPayments = false) =>
-  sortMonthsChronologically(summary).map((month) =>
-    buildMonthlySavingsPoint(month, includeLoanPayments)
-  );
 
 export const buildCockpitChartData = (
   summary,
   essentialCategories,
-  monthCount = 12,
-  includeLoanPayments = false
+  monthCount = 12
 ) => {
   const lastMonths = getLastNMonths(summary, monthCount);
+  const essentialSet = buildEssentialCategorySet(essentialCategories);
 
   let cumulative = 0;
   let cumulativeEssential = 0;
@@ -52,18 +44,19 @@ export const buildCockpitChartData = (
   let totalIncome = 0;
 
   const data = lastMonths.map((month) => {
-    const income = month.income || 0;
-    const savingsPoint = buildMonthlySavingsPoint(month, includeLoanPayments);
-    const monthlySavings = savingsPoint.savings;
+    const {
+      expenseSavingsCategories,
+      essentialTotal: monthlyEssential,
+      nonEssentialTotal: monthlyNonEssential,
+      savings: monthlySavings,
+      savingRate,
+      income
+    } = computeMonthExpenseBreakdown(month, essentialCategories, essentialSet);
+
     cumulative += monthlySavings;
     cumulativeIncome += income;
     totalIncome += income;
-    const savingRate = savingsPoint.savingRate;
 
-    const { essential, nonEssential, savingsCategories: expenseSavingsCategories } =
-      splitExpenseCategoryAmounts(month.expenseCategories, essentialCategories, false);
-    const monthlyEssential = sumCategoryAmounts(essential);
-    const monthlyNonEssential = sumCategoryAmounts(nonEssential);
     const monthlySavingsCategories = sumCategoryAmounts(
       mergeSavingsCategories(month, expenseSavingsCategories)
     );

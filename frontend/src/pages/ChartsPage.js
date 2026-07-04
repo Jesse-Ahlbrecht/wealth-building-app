@@ -23,9 +23,9 @@ import {
   Cell
 } from 'recharts';
 import { formatCurrency } from '../utils';
-import { buildMonthlySavingsPoints } from '../utils/chartDataHelpers';
+import { buildMonthlySavingsPoint, sortMonthsChronologically } from '../utils/chartDataHelpers';
 import { scrollToDrilldown, selectMonthFromChart } from '../utils/domHelpers';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
@@ -55,13 +55,6 @@ const ChartsPage = () => {
     preferences,
     updatePreferences
   );
-  const [includeLoanPayments, setIncludeLoanPayments] = usePreferenceState(
-    'charts_includeLoanPayments',
-    false,
-    preferences,
-    updatePreferences
-  );
-
   const selectedMonthKey = selectedMonth?.month;
   const {
     predictions,
@@ -85,9 +78,25 @@ const ChartsPage = () => {
   const plotMetricsRef = useRef(null);
 
   const chartData = useMemo(
-    () => buildMonthlySavingsPoints(summary, includeLoanPayments),
-    [summary, includeLoanPayments]
+    () => sortMonthsChronologically(summary).map((month) =>
+      buildMonthlySavingsPoint(month, essentialCategories)
+    ),
+    [summary, essentialCategories]
   );
+
+  const drilldownPanelProps = useMonthDrilldownPanelProps({
+    selectedMonth,
+    setSelectedMonth,
+    defaultCurrency,
+    essentialCategories,
+    availableCategories,
+    predictions,
+    averageEssentialSpending,
+    handleSkipPrediction,
+    handleDeletePrediction,
+    reloadPredictions,
+    refreshSummary
+  });
 
   // Helper function to lighten a color
   const lightenColor = (color, amount) => {
@@ -473,15 +482,6 @@ const ChartsPage = () => {
                 Rate
               </button>
             </div>
-            <div className="loan-payment-toggle">
-              <button
-                className={`chart-toggle-btn ${includeLoanPayments ? 'active' : ''}`}
-                onClick={() => setIncludeLoanPayments(!includeLoanPayments)}
-                title="Include monthly loan payments in savings calculation"
-              >
-                Include Loans
-              </button>
-            </div>
           </div>
         </div>
         <div
@@ -609,20 +609,7 @@ const ChartsPage = () => {
         </div>
       </div>
 
-      <MonthDrilldownPanel
-        selectedMonth={selectedMonth}
-        onClose={() => setSelectedMonth(null)}
-        defaultCurrency={defaultCurrency}
-        essentialCategories={essentialCategories}
-        availableCategories={availableCategories}
-        includeLoanPayments={includeLoanPayments}
-        predictions={predictions[selectedMonthKey] || []}
-        averageEssentialSpending={averageEssentialSpending[selectedMonthKey] || 0}
-        onSkipPrediction={handleSkipPrediction}
-        onDeletePrediction={handleDeletePrediction}
-        onPredictionChanged={reloadPredictions}
-        onTransactionCategoryUpdated={refreshSummary}
-      />
+      <MonthDrilldownPanel {...drilldownPanelProps} />
     </div>
     </ChartPageStates>
   );

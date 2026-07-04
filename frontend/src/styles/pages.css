@@ -614,16 +614,6 @@
   margin-bottom: 32px;
 }
 
-  .details-controls {
-    display: flex;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid #e5e7eb;
-  }
-
 .stat-card {
   padding: 20px;
   background: var(--color-bg-tertiary);
@@ -1039,52 +1029,6 @@
   color: var(--color-text-secondary);
 }
 
-.loan-payment-toggle {
-  display: flex;
-  gap: 0;
-  background: transparent;
-  padding: 0;
-  border-radius: 8px;
-}
-
-.loan-payment-toggle {
-  display: flex;
-  align-items: center;
-}
-
-.loan-payment-toggle .chart-toggle-btn {
-  font-weight: 500;
-  border: 1px solid var(--color-border-primary);
-  background: var(--color-bg-card);
-  transition: all 0.2s, background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
-  padding: 8px 16px;
-  font-size: 14px;
-  line-height: 1.4;
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  min-height: calc(8px * 2 + 14px * 1.4);
-  height: calc(8px * 2 + 14px * 1.4);
-}
-
-.loan-payment-toggle .chart-toggle-btn:hover {
-  background: var(--color-bg-button-secondary);
-  border-color: var(--color-border-hover);
-}
-
-.loan-payment-toggle .chart-toggle-btn.active {
-  background: var(--color-bg-button);
-  color: var(--color-text-button);
-  border-color: var(--color-bg-button);
-  font-weight: 500;
-  box-shadow: 0 1px 3px var(--color-shadow-sm);
-}
-
-.loan-payment-toggle .chart-toggle-btn.active:hover {
-  background: var(--color-bg-button-hover);
-  border-color: var(--color-bg-button-hover);
-}
-
 .transaction-details {
   flex: 1;
   min-width: 0;
@@ -1260,16 +1204,9 @@
   flex-wrap: wrap;
 }
 
-.cockpit-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 20px;
-}
-
 .cockpit-view-toggle {
   display: inline-flex;
+  margin-bottom: 20px;
   padding: 3px;
   gap: 2px;
   border-radius: 10px;
@@ -1316,30 +1253,6 @@
 
 .cockpit-view-toggle__btn.active .cockpit-view-toggle__dot {
   opacity: 1;
-}
-
-.cockpit-option-toggle__btn {
-  padding: 7px 12px;
-  border: 1px solid var(--color-border-secondary);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text-tertiary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-
-.cockpit-option-toggle__btn:hover {
-  color: var(--color-text-primary);
-  border-color: var(--color-border-primary);
-}
-
-.cockpit-option-toggle__btn.active {
-  color: var(--color-text-primary);
-  background: var(--color-bg-secondary);
-  border-color: var(--color-border-primary);
 }
 
 .custom-range-wrapper {

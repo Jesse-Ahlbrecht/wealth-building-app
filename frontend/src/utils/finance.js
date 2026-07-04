@@ -1,7 +1,9 @@
 export const SAVINGS_GOAL_CHF = 3000; // Monthly savings goal in CHF
 export const EUR_TO_CHF_RATE = 0.9355; // Exchange rate: 1 EUR = 0.9355 CHF (update as needed)
 export const SAVINGS_GOAL_EUR = SAVINGS_GOAL_CHF / EUR_TO_CHF_RATE; // Monthly savings goal in EUR
-export const SAVINGS_RATE_GOAL = 20; // Target savings rate percentage
+export const getSavingsGoalForCurrency = (currency) =>
+  currency === 'EUR' ? SAVINGS_GOAL_EUR : SAVINGS_GOAL_CHF;
+export const SAVINGS_RATE_GOAL = 20;
 
 export const convertAmountToCurrency = (amount, currency) => {
   if (!Number.isFinite(amount)) return 0;

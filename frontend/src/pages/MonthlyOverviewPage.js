@@ -3,18 +3,12 @@ import { useAppContext } from '../context/AppContext';
 import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
 import MonthSummaryCard from '../components/MonthSummaryCard';
 import ChartPageStates from '../components/ChartPageStates';
-import { getLatestMonthKey } from '../utils/predictionHelpers';
+import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
 
 const MonthlyOverviewPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
   const { essentialCategories, availableCategories } = useCategoryData();
   const { summary, loading, error, loadSummary, refreshSummary } = useTransactionSummary();
-  const [includeLoanPayments, setIncludeLoanPayments] = usePreferenceState(
-    'monthlyOverview_includeLoanPayments',
-    false,
-    preferences,
-    updatePreferences
-  );
   const [expenseSort, setExpenseSort] = usePreferenceState(
     'monthlyOverview_expenseSort',
     'amount_desc',
@@ -22,7 +16,12 @@ const MonthlyOverviewPage = () => {
     updatePreferences
   );
 
-  const latestMonthKey = getLatestMonthKey(summary);
+  const sortedMonths = useMemo(
+    () => sortMonthsReverseChronologically(summary),
+    [summary]
+  );
+
+  const latestMonthKey = sortedMonths[0]?.month ?? null;
   const {
     predictions,
     averageEssentialSpending,
@@ -30,11 +29,6 @@ const MonthlyOverviewPage = () => {
     handleSkipPrediction,
     handleDeletePrediction
   } = useMonthPredictions(latestMonthKey);
-
-  const sortedMonths = useMemo(
-    () => [...summary].sort((a, b) => new Date(b.month + '-01') - new Date(a.month + '-01')),
-    [summary]
-  );
 
   const latestMonth = sortedMonths[0];
   const previousMonths = sortedMonths.slice(1);
@@ -56,25 +50,12 @@ const MonthlyOverviewPage = () => {
         </div>
       ) : (
         <>
-          <div className="details-controls">
-            <div className="loan-payment-toggle">
-              <button
-                className={`chart-toggle-btn ${includeLoanPayments ? 'active' : ''}`}
-                onClick={() => setIncludeLoanPayments(!includeLoanPayments)}
-                title="Include monthly loan payments in savings calculation"
-              >
-                Include loans in saving
-              </button>
-            </div>
-          </div>
-
           <div className="current-month-container">
             <MonthSummaryCard
               month={latestMonth}
               isCurrentMonth={true}
               defaultCurrency={defaultCurrency}
               essentialCategories={essentialCategories}
-              includeLoanPayments={includeLoanPayments}
               expenseSort={expenseSort}
               onExpenseSortChange={setExpenseSort}
               predictions={predictions[latestMonthKey] || []}
@@ -99,7 +80,6 @@ const MonthlyOverviewPage = () => {
                     isCurrentMonth={false}
                     defaultCurrency={defaultCurrency}
                     essentialCategories={essentialCategories}
-                    includeLoanPayments={includeLoanPayments}
                     expenseSort={expenseSort}
                     onExpenseSortChange={setExpenseSort}
                     availableCategories={availableCategories}

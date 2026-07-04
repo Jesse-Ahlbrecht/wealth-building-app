@@ -7,7 +7,6 @@ const MonthDrilldownPanel = ({
   defaultCurrency,
   essentialCategories,
   availableCategories,
-  includeLoanPayments = false,
   predictions = [],
   averageEssentialSpending = 0,
   onSkipPrediction,
@@ -34,7 +33,6 @@ const MonthDrilldownPanel = ({
           isCurrentMonth={false}
           defaultCurrency={defaultCurrency}
           essentialCategories={essentialCategories}
-          includeLoanPayments={includeLoanPayments}
           predictions={predictions}
           averageEssentialSpending={averageEssentialSpending}
           onSkipPrediction={onSkipPrediction}

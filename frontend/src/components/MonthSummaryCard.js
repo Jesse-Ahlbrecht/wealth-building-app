@@ -8,11 +8,11 @@
 import React, { useMemo } from 'react';
 import { formatCurrency, formatMonth, formatDate } from '../utils';
 import {
-  getLoanPaymentFromExpenseCategories,
-  splitExpenseCategoryAmounts,
+  computeMonthExpenseBreakdown,
   mergeSavingsCategories,
   sumCategoryAmounts
 } from '../utils/categoryHelpers';
+import { getSavingsGoalForCurrency } from '../utils/finance';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
 
@@ -50,7 +50,6 @@ const MonthSummaryCard = ({
   isCurrentMonth, 
   defaultCurrency = 'CHF', 
   essentialCategories = [],
-  includeLoanPayments = false,
   expenseSort = 'amount_desc',
   onExpenseSortChange = () => {},
   predictions = [],
@@ -66,37 +65,35 @@ const MonthSummaryCard = ({
   const [predictionModal, setPredictionModal] = React.useState(null);
   const [expandedCategories, setExpandedCategories] = React.useState({});
   const [expandedSections, setExpandedSections] = React.useState({});
-  const income = month.income || 0;
-  const monthlyLoanPayment = getLoanPaymentFromExpenseCategories(month.expenseCategories);
+  const expenseBreakdown = useMemo(
+    () => computeMonthExpenseBreakdown(month, essentialCategories),
+    [month, essentialCategories]
+  );
 
   const {
     essential: essentialExpenses,
     nonEssential: nonEssentialExpenses,
-    savingsCategories: expenseSavingsCategories
-  } = useMemo(
-    () => splitExpenseCategoryAmounts(month.expenseCategories, essentialCategories, includeLoanPayments),
-    [month.expenseCategories, essentialCategories, includeLoanPayments]
-  );
+    expenseSavingsCategories,
+    essentialTotal,
+    nonEssentialTotal,
+    splitExpensesTotal,
+    savings: savingsForDisplay,
+    income
+  } = expenseBreakdown;
 
   const savingsCategories = useMemo(
     () => mergeSavingsCategories(month, expenseSavingsCategories),
     [month, expenseSavingsCategories]
   );
 
-  const essentialTotal = sumCategoryAmounts(essentialExpenses);
-  const nonEssentialTotal = sumCategoryAmounts(nonEssentialExpenses);
   const savingsCategoryTotal = sumCategoryAmounts(savingsCategories);
-  const splitExpensesTotal = essentialTotal + nonEssentialTotal;
-  const savingsForDisplay = income - splitExpensesTotal;
   
   // Calculate predicted essential spending (use average if higher than current)
   const predictedEssentialAverage = isCurrentMonth ? (averageEssentialSpending || 0) : 0;
   const predictedEssentialDifference = Math.max(predictedEssentialAverage - essentialTotal, 0);
   const effectiveEssential = predictedEssentialAverage > 0 ? Math.max(essentialTotal, predictedEssentialAverage) : essentialTotal;
   const totalPredictedExpenses = effectiveEssential + nonEssentialTotal;
-  // Calculate predicted savings, adding loan payments if they're counted as savings
-  const basePredictedSavings = income - totalPredictedExpenses;
-  const predictedSavings = includeLoanPayments ? basePredictedSavings + monthlyLoanPayment : basePredictedSavings;
+  const predictedSavings = income - totalPredictedExpenses;
   const savingsMetricValue = isCurrentMonth && predictedSavings !== savingsForDisplay ? predictedSavings : savingsForDisplay;
   const metricMaxValue = Math.max(income, splitExpensesTotal, Math.abs(savingsMetricValue));
 
@@ -457,7 +454,7 @@ const MonthSummaryCard = ({
         <div className="metric-bar-item">
           <div className="metric-bar-header">
             <span className="metric-bar-label">
-              {includeLoanPayments && monthlyLoanPayment > 0 ? "Savings (incl. loans)" : "Savings"}
+              Savings
             </span>
             <div className={`metric-bar-value ${savingsMetricValue >= 0 ? 'positive' : 'negative'}`}>
               {savingsMetricValue >= 0 ? '+' : ''}{formatCurrency(savingsMetricValue, defaultCurrency)}
@@ -470,10 +467,7 @@ const MonthSummaryCard = ({
             />
           </div>
           <div className="metric-bar-footer" style={{ fontSize: '12px', marginTop: '8px' }}>
-            {(() => {
-              const savingsGoal = defaultCurrency === 'CHF' ? 2000 : defaultCurrency === 'EUR' ? 2000 : 2200;
-              return `${((savingsMetricValue / savingsGoal) * 100).toFixed(0)}% of goal`;
-            })()}
+            {`${((savingsMetricValue / getSavingsGoalForCurrency(defaultCurrency)) * 100).toFixed(0)}% of goal`}
           </div>
         </div>
       </div>
@@ -895,4 +889,4 @@ const MonthSummaryCard = ({
   );
 };
 
-export default MonthSummaryCard;
+export default React.memo(MonthSummaryCard);

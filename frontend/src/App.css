@@ -995,16 +995,6 @@
   margin-bottom: 32px;
 }
 
-  .details-controls {
-    display: flex;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid #e5e7eb;
-  }
-
 .stat-card {
   padding: 20px;
   background: var(--color-bg-tertiary);
@@ -1338,52 +1328,6 @@
 .account-badge-kfw {
   background: #fef2f2;
   color: #dc2626;
-}
-
-.loan-payment-toggle {
-  display: flex;
-  gap: 0;
-  background: transparent;
-  padding: 0;
-  border-radius: 8px;
-}
-
-.loan-payment-toggle {
-  display: flex;
-  align-items: center;
-}
-
-.loan-payment-toggle .chart-toggle-btn {
-  font-weight: 500;
-  border: 1px solid var(--color-border-primary);
-  background: var(--color-bg-card);
-  transition: all 0.2s, background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
-  padding: 8px 16px;
-  font-size: 14px;
-  line-height: 1.4;
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  min-height: calc(8px * 2 + 14px * 1.4);
-  height: calc(8px * 2 + 14px * 1.4);
-}
-
-.loan-payment-toggle .chart-toggle-btn:hover {
-  background: var(--color-bg-button-secondary);
-  border-color: var(--color-border-hover);
-}
-
-.loan-payment-toggle .chart-toggle-btn.active {
-  background: var(--color-bg-button);
-  color: var(--color-text-button);
-  border-color: var(--color-bg-button);
-  font-weight: 500;
-  box-shadow: 0 1px 3px var(--color-shadow-sm);
-}
-
-.loan-payment-toggle .chart-toggle-btn.active:hover {
-  background: var(--color-bg-button-hover);
-  border-color: var(--color-bg-button-hover);
 }
 
 .transaction-details {

@@ -10,4 +10,5 @@ export { useCategoryData } from './useCategoryData';
 export { useTransactionSummary } from './useTransactionSummary';
 export { useMonthPredictions } from './useMonthPredictions';
 export { usePreferenceState } from './usePreferenceState';
+export { useMonthDrilldownPanelProps } from './useMonthDrilldownPanelProps';
 
