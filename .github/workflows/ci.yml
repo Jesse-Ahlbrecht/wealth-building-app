@@ -1,0 +1,16 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  sync-agent-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify agent docs are in sync
+        run: |
+          ./scripts/sync-agent-docs.sh
+          git diff --exit-code AGENTS.md CLAUDE.md backend/AGENTS.md frontend/AGENTS.md .claude/rules .cursor/rules .agents/skills .claude/skills .cursor/skills

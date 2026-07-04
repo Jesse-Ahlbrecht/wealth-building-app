@@ -1,0 +1,14 @@
+---
+description: React patterns for frontend JavaScript code
+alwaysApply: false
+globs: frontend/src/**/*.js
+---
+
+# Frontend (React)
+
+- JavaScript only — no TypeScript unless explicitly requested
+- Components in `frontend/src/components/`, pages in `frontend/src/pages/`
+- API calls in `frontend/src/api/` — do not fetch directly from components
+- State via React context (`frontend/src/context/`) — no Redux unless asked
+- Keep components presentational; put data shaping in hooks or page-level logic
+- Sanitize user-visible output; never trust client-side data as authoritative

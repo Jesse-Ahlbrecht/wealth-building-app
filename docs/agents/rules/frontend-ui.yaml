@@ -1,0 +1,34 @@
+description: CSS design system and UI styling conventions
+alwaysApply: false
+paths:
+  - frontend/src/**/*.css
+  - frontend/src/**/*.js
+codexTarget: frontend
+body: |
+  # UI/UX Styling
+
+  Design system uses CSS custom properties in `frontend/src/styles/variables.css` and component styles in `frontend/src/styles/`.
+
+  ## Conventions
+
+  - Class naming: `{component}-{element}-{modifier}` (e.g. `documents-primary-button`)
+  - Use CSS variables for colors, spacing, shadows — support light/dark themes
+  - Standard spacing: 8, 12, 16, 20, 24, 28px
+  - Transitions on interactive elements: 0.2s–0.3s ease
+  - Border radius: 8px cards/buttons, 12px modals
+  - Avoid inline styles; add classes to `frontend/src/styles/components.css` or page CSS
+
+  ## Buttons
+
+  - Primary: `.documents-primary-button` — `var(--color-accent-secondary)`, white text, hover opacity 0.9 + translateY(-1px)
+  - Secondary/cancel: `.documents-cancel-button` — card bg, border, hover `--color-bg-hover`
+
+  ## Modals
+
+  - Overlay: `.modal-overlay`
+  - Content: `.modal-content` (12px radius, shadow)
+  - Actions row: `.documents-confirm-actions` with gap 12px
+
+  ## Interactive states
+
+  Hover: bg/border change, slight elevation. Disabled: opacity 0.5, `cursor: not-allowed`. Maintain WCAG AA contrast.

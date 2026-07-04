@@ -1,0 +1,14 @@
+description: Flask and Python conventions for backend code
+alwaysApply: false
+paths:
+  - backend/**/*.py
+codexTarget: backend
+body: |
+  # Backend (Python/Flask)
+
+  - Routes live in `backend/routes/`; register blueprints in `app.py`
+  - All DB access through `database.py`
+  - Auth middleware in `backend/middleware/` — do not bypass for user data routes
+  - Keep parsers and ingestion helpers pure; routes orchestrate only
+  - Avoid logging PII
+  - Match existing patterns in neighboring route files before adding new abstractions

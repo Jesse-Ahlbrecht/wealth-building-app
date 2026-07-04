@@ -167,3 +167,13 @@ Edit `frontend/src/App.css` to customize the color scheme and styling.
 
 ### Add More Bank Statements
 The app automatically finds and parses all `.csv` files in the `bank statements/dkb/` and `bank statements/yuh/` folders. Just drop new CSV files into these folders!
+
+## AI agent instructions
+
+Instructions for Claude Code, Cursor, and Codex live in **`docs/agents/`** (source) and are synced to `AGENTS.md`, rules, and skills.
+
+- **Edit** `docs/agents/core/`, `docs/agents/rules/`, or `docs/agents/skills/` — not generated files
+- **Sync** after changes: `./scripts/sync-agent-docs.sh`
+- Pre-commit runs sync automatically when `docs/agents/` changes
+
+Generated artifacts: `AGENTS.md`, `CLAUDE.md` (symlink), `.claude/rules/`, `.cursor/rules/`, `backend/AGENTS.md`, `frontend/AGENTS.md`, and skill symlinks under `.agents/skills/`, `.claude/skills/`, `.cursor/skills/`.

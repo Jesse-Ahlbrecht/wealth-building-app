@@ -1,0 +1,8 @@
+---
+description: Tenant-scoped DB queries are mandatory
+alwaysApply: true
+---
+
+Every DB query MUST be scoped to a tenant. `database.py` sets context via `set_tenant_context(tenant_id)`.
+Never query, return, or modify another tenant's transactions, accounts, or user data without filtering by `tenant_id`.
+Missing tenant scope = data leak across users. Manual psql queries must also filter by `tenant_id`.
