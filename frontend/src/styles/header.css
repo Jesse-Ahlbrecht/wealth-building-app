@@ -3,15 +3,17 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  height: 52px;
   background: var(--color-bg-header);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
   color: var(--color-text-header);
   display: flex;
   align-items: center;
   padding: 0 24px;
   z-index: 1000;
-  box-shadow: 0 2px 8px var(--color-shadow-md);
-  transition: background-color 0.3s ease, color 0.3s ease;
+  border-bottom: 1px solid var(--color-border-primary);
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 .top-header .header-actions {
@@ -30,9 +32,9 @@
 }
 
 .top-header-title {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 600;
-  margin: 0 0 0 56px;
+  margin: 0 0 0 48px;
   color: var(--color-text-header);
   letter-spacing: -0.02em;
   transition: color 0.3s ease;
@@ -61,7 +63,7 @@
 
 .sidebar-toggle {
   position: fixed;
-  top: 14px;
+  top: 10px;
   left: 16px;
   z-index: 1001;
   background: transparent;
@@ -131,22 +133,22 @@
 
 .settings-button {
   position: fixed;
-  top: 12px;
-  right: 24px; /* Moved further right */
+  top: 8px;
+  right: 20px;
   z-index: 1001;
   background: transparent;
   border: none;
   border-radius: 8px;
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s ease, background-color 0.3s ease, color 0.3s ease;
   padding: 0;
-  color: var(--color-text-header);
-  font-size: 22px;
+  color: var(--color-text-tertiary);
+  font-size: 17px;
 }
 
 .settings-button i {
@@ -194,7 +196,7 @@
 }
 
 .settings-section:not(:last-child) {
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--color-border-primary);
 }
 
 .settings-section-title {
@@ -223,32 +225,27 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  padding: 16px;
-  background: var(--color-bg-button-secondary);
-  border: 2px solid var(--color-border-primary);
-  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s, background-color 0.3s ease, border-color 0.3s ease;
   text-align: left;
 }
 
 .currency-option:hover {
-  background: var(--color-bg-button-secondary-hover);
+  background: var(--color-bg-hover);
   border-color: var(--color-border-tertiary);
 }
 
 .currency-option.active {
-  background: var(--color-bg-button);
-  border-color: var(--color-bg-button);
+  border-color: var(--color-accent-primary);
+  box-shadow: 0 0 0 1px var(--color-accent-primary);
 }
 
 .currency-option.active .currency-code {
-  color: var(--color-text-button);
-}
-
-.currency-option.active .currency-name {
-  color: var(--color-text-button);
-  opacity: 0.9;
+  color: var(--color-accent-primary);
 }
 
 .currency-code {

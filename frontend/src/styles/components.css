@@ -195,7 +195,7 @@
 .custom-category-section {
   margin-top: 20px;
   padding-top: 20px;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--color-border-secondary);
 }
 
 .create-category-btn {
@@ -293,16 +293,16 @@
 }
 
 .transaction-item.transaction-pending {
-  border-color: #c7d2fe;
-  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.12);
+  border-color: var(--color-info-border);
+  box-shadow: 0 6px 16px var(--color-info-soft);
 }
 
 .transaction-item.transaction-flip-out {
   animation: transactionFlipOut 0.5s forwards ease;
   transform-origin: center left;
   pointer-events: none;
-  border-color: #e0e7ff;
-  box-shadow: 0 8px 16px rgba(99, 102, 241, 0.12);
+  border-color: var(--color-info-border);
+  box-shadow: 0 8px 16px var(--color-info-soft);
   transform-style: preserve-3d;
   transition: none;
 }
@@ -317,8 +317,8 @@
 
 /* Predicted transaction styles */
 .transaction-item-predicted {
-  background: linear-gradient(135deg, #f8f9ff 0%, #fafbff 100%);
-  border-left: 3px dashed #6b7eff !important;
+  background: var(--color-info-soft);
+  border-left: 3px dashed var(--color-accent-secondary) !important;
   opacity: 0.90;
   position: relative;
   cursor: pointer !important;
@@ -327,8 +327,8 @@
 
 .transaction-item-predicted:hover {
   opacity: 1;
-  box-shadow: 0 2px 8px rgba(107, 126, 255, 0.15);
-  border-color: #5a6eee !important;
+  box-shadow: 0 2px 8px var(--color-info-soft);
+  border-color: var(--color-accent-secondary) !important;
   transform: translateX(2px);
 }
 
@@ -339,12 +339,12 @@
   top: 0;
   bottom: 0;
   width: 3px;
-  background: linear-gradient(180deg, #6b7eff 0%, #8b9aff 100%);
+  background: var(--color-accent-secondary);
   opacity: 0.3;
 }
 
 .account-badge-predicted {
-  background: linear-gradient(135deg, #6b7eff 0%, #8b9aff 100%);
+  background: var(--color-accent-secondary);
   color: white;
   font-weight: 500;
   padding: 4px 8px;
@@ -352,7 +352,6 @@
   font-size: 11px;
   display: inline-flex;
   align-items: center;
-  box-shadow: 0 2px 4px rgba(107, 126, 255, 0.2);
 }
 
 @keyframes transactionFlipOut {

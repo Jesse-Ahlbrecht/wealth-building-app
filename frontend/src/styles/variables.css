@@ -1,107 +1,111 @@
 /**
  * CSS Variables for Theming
- * 
- * Defines color variables for light and dark themes
+ *
+ * Apple-style palette: white/grey light theme, true-grey dark theme
  */
 
 /* CSS Variables for Light Theme (default) */
 :root {
-  --color-bg-primary: #fafafa;
+  --color-bg-primary: #f5f5f7;
   --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #f8fafc;
+  --color-bg-tertiary: #f5f5f7;
   --color-bg-card: #ffffff;
-  --color-bg-sidebar: #ffffff;
-  --color-bg-header: #1a1a1a;
-  --color-bg-overlay: rgba(0, 0, 0, 0.5);
+  --color-bg-sidebar: rgba(255, 255, 255, 0.85);
+  --color-bg-header: rgba(255, 255, 255, 0.8);
+  --color-bg-overlay: rgba(0, 0, 0, 0.35);
   --color-bg-hover: rgba(0, 0, 0, 0.04);
-  --color-bg-active: rgba(0, 0, 0, 0.06);
+  --color-bg-active: rgba(0, 0, 0, 0.07);
   --color-bg-input: #ffffff;
-  --color-bg-button: #1a1a1a;
-  --color-bg-button-hover: #000000;
-  --color-bg-button-secondary: #f5f5f5;
-  --color-bg-button-secondary-hover: #e5e5e5;
-  --color-bg-bar-container: #f8fafc;
-  
-  --color-text-primary: #1a1a1a;
+  --color-bg-button: #0d9488;
+  --color-bg-button-hover: #14b8a6;
+  --color-bg-button-secondary: #f5f5f7;
+  --color-bg-button-secondary-hover: #e8e8ed;
+  --color-bg-bar-container: #f5f5f7;
+
+  --color-text-primary: #1d1d1f;
   --color-text-secondary: #424245;
-  --color-text-tertiary: #64748b;
-  --color-text-muted: #666;
-  --color-text-light: #999;
-  --color-text-header: #ffffff;
+  --color-text-tertiary: #6e6e73;
+  --color-text-muted: #86868b;
+  --color-text-light: #a1a1a6;
+  --color-text-header: #1d1d1f;
   --color-text-button: #ffffff;
-  --color-text-button-secondary: #1a1a1a;
-  
-  --color-border-primary: #e5e7eb;
-  --color-border-secondary: #e5e5e5;
-  --color-border-tertiary: #d1d5db;
-  --color-border-hover: #d4dae5;
-  
-  --color-shadow-sm: rgba(0, 0, 0, 0.05);
-  --color-shadow-md: rgba(0, 0, 0, 0.1);
-  --color-shadow-lg: rgba(15, 23, 42, 0.06);
-  --color-shadow-xl: rgba(15, 23, 42, 0.08);
-  
-  --color-accent-primary: #1a1a1a;
-  --color-accent-secondary: #6366f1;
-  --color-success: #16a34a;
-  --color-success-bg: #f0fdf4;
-  --color-error: #dc2626;
-  --color-error-bg: #fef2f2;
-  --color-warning: #f97316;
-  --color-info: #2563eb;
-  --color-info-soft: rgba(37, 99, 235, 0.12);
-  --color-info-soft-hover: rgba(37, 99, 235, 0.18);
-  --color-info-border: rgba(37, 99, 235, 0.35);
-  
+  --color-text-button-secondary: #1d1d1f;
+
+  --color-border-primary: rgba(0, 0, 0, 0.08);
+  --color-border-secondary: #e8e8ed;
+  --color-border-tertiary: #d2d2d7;
+  --color-border-hover: #c7c7cc;
+
+  --color-shadow-sm: rgba(0, 0, 0, 0.04);
+  --color-shadow-md: rgba(0, 0, 0, 0.08);
+  --color-shadow-lg: rgba(0, 0, 0, 0.06);
+  --color-shadow-xl: rgba(0, 0, 0, 0.1);
+
+  --color-accent-primary: #0d9488;
+  --color-accent-secondary: #0d9488;
+  --color-success: #248a3d;
+  --color-success-fill: #34c759;
+  --color-success-bg: rgba(52, 199, 89, 0.12);
+  --color-error: #d70015;
+  --color-error-fill: #ff3b30;
+  --color-error-bg: rgba(255, 59, 48, 0.1);
+  --color-warning: #ff9f0a;
+  --color-info: #0d9488;
+  --color-info-soft: rgba(13, 148, 136, 0.1);
+  --color-info-soft-hover: rgba(13, 148, 136, 0.16);
+  --color-info-border: rgba(13, 148, 136, 0.3);
+
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 /* CSS Variables for Dark Theme */
 .dark-theme {
-  --color-bg-primary: #0f172a;
-  --color-bg-secondary: #1e293b;
-  --color-bg-tertiary: #1e293b;
-  --color-bg-card: #1e293b;
-  --color-bg-sidebar: #1e293b;
-  --color-bg-header: #020617;
-  --color-bg-overlay: rgba(0, 0, 0, 0.7);
-  --color-bg-hover: rgba(255, 255, 255, 0.1);
-  --color-bg-active: rgba(255, 255, 255, 0.15);
-  --color-bg-input: #334155;
-  --color-bg-button: #f1f5f9;
-  --color-bg-button-hover: #ffffff;
-  --color-bg-button-secondary: #334155;
-  --color-bg-button-secondary-hover: #475569;
-  --color-bg-bar-container: #0f172a;
-  
-  --color-text-primary: #f1f5f9;
-  --color-text-secondary: #cbd5e1;
-  --color-text-tertiary: #94a3b8;
-  --color-text-muted: #94a3b8;
-  --color-text-light: #64748b;
-  --color-text-header: #f1f5f9;
-  --color-text-button: #0f172a;
-  --color-text-button-secondary: #f1f5f9;
-  
-  --color-border-primary: #334155;
-  --color-border-secondary: #475569;
-  --color-border-tertiary: #64748b;
-  --color-border-hover: #64748b;
-  
-  --color-shadow-sm: rgba(0, 0, 0, 0.3);
-  --color-shadow-md: rgba(0, 0, 0, 0.4);
-  --color-shadow-lg: rgba(0, 0, 0, 0.5);
-  --color-shadow-xl: rgba(0, 0, 0, 0.6);
-  
-  --color-accent-primary: #f1f5f9;
-  --color-accent-secondary: #818cf8;
-  --color-success: #22c55e;
-  --color-success-bg: #14532d;
-  --color-error: #ef4444;
-  --color-error-bg: #7f1d1d;
-  --color-warning: #f97316;
-  --color-info: #3b82f6;
-  --color-info-soft: rgba(59, 130, 246, 0.18);
-  --color-info-soft-hover: rgba(59, 130, 246, 0.26);
-  --color-info-border: rgba(59, 130, 246, 0.4);
+  --color-bg-primary: #101012;
+  --color-bg-secondary: #1c1c1e;
+  --color-bg-tertiary: #2c2c2e;
+  --color-bg-card: #1c1c1e;
+  --color-bg-sidebar: rgba(22, 22, 23, 0.9);
+  --color-bg-header: rgba(22, 22, 23, 0.8);
+  --color-bg-overlay: rgba(0, 0, 0, 0.55);
+  --color-bg-hover: rgba(255, 255, 255, 0.06);
+  --color-bg-active: rgba(255, 255, 255, 0.1);
+  --color-bg-input: #2c2c2e;
+  --color-bg-button: #2dd4bf;
+  --color-bg-button-hover: #5eead4;
+  --color-bg-button-secondary: #2c2c2e;
+  --color-bg-button-secondary-hover: #3a3a3c;
+  --color-bg-bar-container: #2c2c2e;
+
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: #d1d1d6;
+  --color-text-tertiary: #a1a1a6;
+  --color-text-muted: #86868b;
+  --color-text-light: #6e6e73;
+  --color-text-header: #f5f5f7;
+  --color-text-button: #ffffff;
+  --color-text-button-secondary: #f5f5f7;
+
+  --color-border-primary: rgba(255, 255, 255, 0.1);
+  --color-border-secondary: #3a3a3c;
+  --color-border-tertiary: #48484a;
+  --color-border-hover: #636366;
+
+  --color-shadow-sm: rgba(0, 0, 0, 0.25);
+  --color-shadow-md: rgba(0, 0, 0, 0.35);
+  --color-shadow-lg: rgba(0, 0, 0, 0.4);
+  --color-shadow-xl: rgba(0, 0, 0, 0.5);
+
+  --color-accent-primary: #2dd4bf;
+  --color-accent-secondary: #2dd4bf;
+  --color-success: #30d158;
+  --color-success-fill: #30d158;
+  --color-success-bg: rgba(48, 209, 88, 0.15);
+  --color-error: #ff453a;
+  --color-error-fill: #ff453a;
+  --color-error-bg: rgba(255, 69, 58, 0.15);
+  --color-warning: #ff9f0a;
+  --color-info: #2dd4bf;
+  --color-info-soft: rgba(45, 212, 191, 0.15);
+  --color-info-soft-hover: rgba(45, 212, 191, 0.22);
+  --color-info-border: rgba(45, 212, 191, 0.35);
 }

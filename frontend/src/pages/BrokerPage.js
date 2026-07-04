@@ -507,7 +507,7 @@ const BrokerPage = () => {
               <div className="total-amount positive">
                 {formatCurrency(summary.ing_diba.total_current_value, summary.ing_diba.currency)}
               </div>
-              <div style={{ fontSize: '14px', marginTop: '4px', color: '#22c55e' }}>
+              <div style={{ fontSize: '14px', marginTop: '4px', color: '#34c759' }}>
                 +
                 {formatCurrency(
                   summary.ing_diba.total_current_value - summary.ing_diba.total_invested,
@@ -564,12 +564,12 @@ const BrokerPage = () => {
                 >
                   <defs>
                     <linearGradient id="colorInvested" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.05} />
+                      <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#14b8a6" stopOpacity={0.05} />
                     </linearGradient>
                     <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.1} />
+                      <stop offset="5%" stopColor="#34c759" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#34c759" stopOpacity={0.1} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
@@ -737,7 +737,7 @@ const BrokerPage = () => {
                             <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600 }}>
                               {displayDate}
                             </p>
-                            <p style={{ margin: 0, color: '#6366f1', fontSize: '14px' }}>
+                            <p style={{ margin: 0, color: '#14b8a6', fontSize: '14px' }}>
                               Invested: {formatCurrency(data.invested, 'CHF')}
                             </p>
                             {hasValue ? (
@@ -746,7 +746,7 @@ const BrokerPage = () => {
                                   style={{
                                     margin: 0,
                                     marginTop: '4px',
-                                    color: '#22c55e',
+                                    color: '#34c759',
                                     fontSize: '14px'
                                   }}
                                 >
@@ -762,7 +762,7 @@ const BrokerPage = () => {
                                   <p
                                     style={{
                                       margin: 0,
-                                      color: gain >= 0 ? '#22c55e' : '#ef4444',
+                                      color: gain >= 0 ? '#34c759' : '#ff3b30',
                                       fontSize: '13px',
                                       fontWeight: 600
                                     }}
@@ -796,7 +796,7 @@ const BrokerPage = () => {
                   <Area
                     type="monotone"
                     dataKey="invested"
-                    stroke="#6366f1"
+                    stroke="#14b8a6"
                     strokeWidth={2}
                     fill="url(#colorInvested)"
                     name="Total Invested (CHF)"
@@ -804,7 +804,7 @@ const BrokerPage = () => {
                   <Area
                     type="monotone"
                     dataKey="value"
-                    stroke="#22c55e"
+                    stroke="#34c759"
                     strokeWidth={3}
                     fill="url(#colorValue)"
                     name="Portfolio Value (CHF)"
@@ -849,16 +849,16 @@ const BrokerPage = () => {
                           >
                             <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600 }}>{data.date}</p>
                             {data.totalInvested !== undefined && (
-                              <p style={{ margin: 0, color: '#6366f1' }}>
+                              <p style={{ margin: 0, color: '#14b8a6' }}>
                                 Invested: {formatCurrency(data.totalInvested, 'CHF')}
                               </p>
                             )}
                             {data.currentValue !== undefined && (
                               <>
-                                <p style={{ margin: 0, marginTop: '4px', color: '#22c55e' }}>
+                                <p style={{ margin: 0, marginTop: '4px', color: '#34c759' }}>
                                   Current: {formatCurrency(data.currentValue, 'CHF')}
                                 </p>
-                                <p style={{ margin: 0, marginTop: '4px', color: '#f59e0b', fontSize: '12px' }}>
+                                <p style={{ margin: 0, marginTop: '4px', color: '#ff9f0a', fontSize: '12px' }}>
                                   Gain: {formatCurrency(data.currentValue - data.totalInvested, 'CHF')} (
                                   {(((data.currentValue - data.totalInvested) / data.totalInvested) * 100).toFixed(2)}%)
                                 </p>
@@ -874,19 +874,19 @@ const BrokerPage = () => {
                   <Line
                     type="monotone"
                     dataKey="totalInvested"
-                    stroke="#6366f1"
+                    stroke="#14b8a6"
                     strokeWidth={3}
                     name="Total Invested (CHF)"
-                    dot={{ fill: '#6366f1', r: 4 }}
+                    dot={{ fill: '#14b8a6', r: 4 }}
                     activeDot={{ r: 6 }}
                   />
                   <Line
                     type="monotone"
                     dataKey="currentValue"
-                    stroke="#22c55e"
+                    stroke="#34c759"
                     strokeWidth={3}
                     name="Current Value (CHF)"
-                    dot={{ fill: '#22c55e', r: 5 }}
+                    dot={{ fill: '#34c759', r: 5 }}
                     activeDot={{ r: 7 }}
                   />
                 </LineChart>
@@ -991,7 +991,7 @@ const BrokerPage = () => {
                           style={{
                             fontSize: '14px',
                             marginTop: '4px',
-                            color: profitLoss >= 0 ? '#22c55e' : '#ef4444'
+                            color: profitLoss >= 0 ? '#34c759' : '#ff3b30'
                           }}
                         >
                           {profitLoss >= 0 ? '+' : ''}
@@ -1062,7 +1062,7 @@ const BrokerPage = () => {
                           style={{
                             fontSize: '14px',
                             marginTop: '4px',
-                            color: profitLoss >= 0 ? '#22c55e' : '#ef4444'
+                            color: profitLoss >= 0 ? '#34c759' : '#ff3b30'
                           }}
                         >
                           {profitLoss >= 0 ? '+' : ''}

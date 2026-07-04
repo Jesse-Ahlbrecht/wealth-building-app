@@ -3,15 +3,15 @@ import { formatCurrency } from '../utils';
 import { SAVINGS_RATE_GOAL, formatSavingRateGoalMeta } from '../utils/finance';
 
 export const COCKPIT_COLORS = {
-  cumulative: '#22c55e',
-  cumulativeSelected: '#16a34a',
-  rate: '#3b82f6',
-  rateSelected: '#2563eb',
-  essential: '#94a3b8',
-  nonEssential: '#ef4444',
-  nonEssentialSelected: '#dc2626',
-  dot: '#64748b',
-  dotSelected: '#334155'
+  cumulative: '#34c759',
+  cumulativeSelected: '#248a3d',
+  rate: '#14b8a6',
+  rateSelected: '#0f766e',
+  essential: '#98989d',
+  nonEssential: '#ff3b30',
+  nonEssentialSelected: '#d70015',
+  dot: '#8e8e93',
+  dotSelected: '#48484a'
 };
 
 const renderIncomeMeta = (stats, currency) => (

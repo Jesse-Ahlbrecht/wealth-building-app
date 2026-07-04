@@ -225,13 +225,13 @@ const CockpitPage = () => {
                 {view.showGoalLine && (
                   <ReferenceLine
                     y={SAVINGS_RATE_GOAL}
-                    stroke="#f59e0b"
+                    stroke="#ff9f0a"
                     strokeDasharray="5 5"
                     strokeWidth={2}
                     label={{
                       value: `Goal: ${SAVINGS_RATE_GOAL}%`,
                       position: 'insideTopLeft',
-                      fill: '#f59e0b',
+                      fill: '#ff9f0a',
                       fontSize: 12,
                       fontWeight: 600,
                       offset: 10

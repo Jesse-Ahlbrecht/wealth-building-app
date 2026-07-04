@@ -553,13 +553,13 @@ const ChartsPage = () => {
               {chartView === 'absolute' && (
                 <ReferenceLine
                   y={SAVINGS_GOAL_CHF}
-                  stroke="#f59e0b"
+                  stroke="#ff9f0a"
                   strokeDasharray="5 5"
                   strokeWidth={2}
                   label={{
                     value: `Goal: ${formatCurrency(SAVINGS_GOAL_CHF, 'CHF')}`,
                     position: 'insideTopLeft',
-                    fill: '#f59e0b',
+                    fill: '#ff9f0a',
                     fontSize: 12,
                     fontWeight: 600,
                     offset: 10

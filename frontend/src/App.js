@@ -37,17 +37,39 @@ const labelToPath = (label) => {
 };
 
 // Constants
-const TAB_ITEMS = [
-  { key: 'cockpit', label: 'Cockpit' },
-  { key: 'monthly-overview', label: 'Monthly Overview' },
-  { key: 'predicted-payments', label: 'Predicted Payments' },
-  { key: 'charts', label: 'Savings Statistics' },
-  { key: 'accounts', label: 'Accounts' },
-  { key: 'broker', label: 'Broker' },
-  { key: 'loans', label: 'Loans' },
-  { key: 'projection', label: 'Wealth Projection' },
-  { key: 'data', label: 'Imports' }
-].map(item => ({
+const NAV_GROUPS = [
+  {
+    title: 'Overview',
+    items: [
+      { key: 'cockpit', label: 'Cockpit' },
+      { key: 'monthly-overview', label: 'Monthly Overview' },
+      { key: 'charts', label: 'Savings Statistics' }
+    ]
+  },
+  {
+    title: 'Planning',
+    items: [
+      { key: 'predicted-payments', label: 'Predicted Payments' },
+      { key: 'projection', label: 'Wealth Projection' }
+    ]
+  },
+  {
+    title: 'Assets',
+    items: [
+      { key: 'accounts', label: 'Accounts' },
+      { key: 'broker', label: 'Broker' },
+      { key: 'loans', label: 'Loans' }
+    ]
+  },
+  {
+    title: 'Data',
+    items: [
+      { key: 'data', label: 'Imports' }
+    ]
+  }
+];
+
+const TAB_ITEMS = NAV_GROUPS.flatMap(group => group.items).map(item => ({
   ...item,
   path: labelToPath(item.label)
 }));
@@ -359,17 +381,22 @@ function AppContent() {
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <nav className="sidebar-nav">
           <div className="sidebar-tabs-container">
-            {TAB_ITEMS.map((item) => (
-              <button
-                key={item.key}
-                className={`sidebar-tab ${activeTab === item.key ? 'active' : ''}`}
-                onClick={() => {
-                  handleTabChange(item.key);
-                  closeSidebar();
-                }}
-              >
-                {item.label}
-              </button>
+            {NAV_GROUPS.map((group) => (
+              <div key={group.title} className="sidebar-group">
+                <div className="sidebar-group-title">{group.title}</div>
+                {group.items.map((item) => (
+                  <button
+                    key={item.key}
+                    className={`sidebar-tab ${activeTab === item.key ? 'active' : ''}`}
+                    onClick={() => {
+                      handleTabChange(item.key);
+                      closeSidebar();
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
           <button

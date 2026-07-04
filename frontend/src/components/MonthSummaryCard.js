@@ -248,7 +248,7 @@ const MonthSummaryCard = ({
           )}
         </div>
         {txn.description && (
-          <div className="transaction-description" style={isPredicted ? { color: '#6366f1', fontSize: '12px' } : {}}>
+          <div className="transaction-description" style={isPredicted ? { color: 'var(--color-accent-secondary)', fontSize: '12px' } : {}}>
             {txn.description}
           </div>
         )}
@@ -269,7 +269,7 @@ const MonthSummaryCard = ({
         key={idx}
         className={`transaction-item ${isPredicted ? 'transaction-item-predicted' : ''}`}
         style={isPredicted ? {
-          borderColor: '#6366f1',
+          borderColor: 'var(--color-accent-secondary)',
           backgroundColor: 'var(--color-bg-tertiary)'
         } : {}}
       >

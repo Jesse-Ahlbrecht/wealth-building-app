@@ -196,7 +196,7 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
           }}
         >
           <div style={{ fontSize: '14px', color: 'var(--color-text-tertiary)', marginBottom: '4px' }}>Projected Net Worth</div>
-          <div style={{ fontSize: '28px', fontWeight: '700', color: '#22c55e' }}>
+          <div style={{ fontSize: '28px', fontWeight: '700', color: '#34c759' }}>
             {formatCurrency(finalProjection.netWorth, 'CHF')}
           </div>
         </div>
@@ -226,7 +226,7 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
           }}
         >
           <div style={{ fontSize: '14px', color: 'var(--color-text-tertiary)', marginBottom: '4px' }}>Interest Earned</div>
-          <div style={{ fontSize: '28px', fontWeight: '700', color: '#f59e0b' }}>
+          <div style={{ fontSize: '28px', fontWeight: '700', color: '#ff9f0a' }}>
             {formatCurrency(totalInterest, 'CHF')}
           </div>
         </div>
@@ -266,7 +266,7 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
                       }}
                     >
                       <p style={{ margin: 0, marginBottom: '8px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{data.yearLabel}</p>
-                      <p style={{ margin: 0, color: '#22c55e' }}>
+                      <p style={{ margin: 0, color: '#34c759' }}>
                         Net Worth: {formatCurrency(data.netWorth, 'CHF')}
                       </p>
                     </div>
@@ -278,10 +278,10 @@ const WealthProjectionCalculator = ({ projectionData, formatCurrency }) => {
             <Line
               type="monotone"
               dataKey="netWorth"
-              stroke="#22c55e"
+              stroke="#34c759"
               strokeWidth={3}
               name="Net Worth"
-              dot={{ fill: '#22c55e', r: 5 }}
+              dot={{ fill: '#34c759', r: 5 }}
               activeDot={{ r: 7 }}
             />
           </LineChart>
