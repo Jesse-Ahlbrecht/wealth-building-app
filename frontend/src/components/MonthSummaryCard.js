@@ -9,6 +9,7 @@ import React, { useMemo } from 'react';
 import { formatCurrency, formatMonth, formatDate } from '../utils';
 import {
   computeMonthExpenseBreakdown,
+  getSavingsCategoryTransactions,
   mergeSavingsCategories,
   sumCategoryAmounts
 } from '../utils/categoryHelpers';
@@ -159,13 +160,9 @@ const MonthSummaryCard = ({
   };
 
   const getCategoryTransactionCount = (category, type) => {
-    const transactionsKey =
-      type === 'income'
-        ? 'incomeTransactions'
-        : type === 'savings'
-          ? 'savingsTransactions'
-          : 'expenseTransactions';
-    const actualCount = (month[transactionsKey]?.[category] || []).length;
+    const actualCount = type === 'savings'
+      ? getSavingsCategoryTransactions(month, category).length
+      : (month[type === 'income' ? 'incomeTransactions' : 'expenseTransactions']?.[category] || []).length;
 
     if (!isCurrentMonth || !predictions?.length) {
       return actualCount;
@@ -180,13 +177,9 @@ const MonthSummaryCard = ({
   };
 
   const getCategoryTransactions = (category, type) => {
-    const transactionsKey =
-      type === 'income'
-        ? 'incomeTransactions'
-        : type === 'savings'
-          ? 'savingsTransactions'
-          : 'expenseTransactions';
-    const actualTransactions = month[transactionsKey]?.[category] || [];
+    const actualTransactions = type === 'savings'
+      ? getSavingsCategoryTransactions(month, category)
+      : (month[type === 'income' ? 'incomeTransactions' : 'expenseTransactions']?.[category] || []);
     
     // Add predicted transactions for this category if it's the current month
     if (isCurrentMonth && predictions && predictions.length > 0) {

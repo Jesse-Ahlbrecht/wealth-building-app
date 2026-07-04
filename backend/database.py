@@ -252,39 +252,31 @@ class WealthDatabase:
             result = cursor.fetchone()
             return {'id': result[0], 'username': result[1], 'created_at': result[2]}
 
-    def create_transaction(self, tenant_id: str, account_id: int, transaction_data: Dict[str, Any], 
-                          exclude_hashes: set = None, source_document_id: int = None) -> Dict[str, Any]:
+    def create_transaction(self, tenant_id: str, account_id: int, transaction_data: Dict[str, Any],
+                          source_document_id: int = None, seen_dedup_keys: set = None) -> Dict[str, Any]:
         """
-        Create a new transaction record with encrypted sensitive data
+        Create a new transaction record with encrypted sensitive data.
 
-        IMPORTANT ASSUMPTION: We do NOT check for duplicates within the same file.
-        If a transaction appears twice in the same file, it is assumed to be intentional
-        (e.g., a real double booking that should be visible to the user).
-        We only check for duplicates across different files to prevent re-importing
-        the same transaction from multiple bank statement files.
-
-        Args:
-            tenant_id: Tenant identifier
-            account_id: Database account ID
-            transaction_data: Transaction data dictionary
-            exclude_hashes: Set of transaction hashes (deprecated - kept for API compatibility but not used)
-            source_document_id: ID of the document this transaction was imported from
-
-        Returns:
-            Created transaction data, or None if duplicate found across different files
+        Skips insert when a matching transaction already exists (same hash or
+        format-normalized date/amount/recipient/description on the same account).
         """
         tenant_db_id = self.set_tenant_context(tenant_id)
+        dedup_key = self.get_transaction_dedup_key(account_id, transaction_data)
 
-        # Calculate transaction hash for duplicate detection
+        if seen_dedup_keys is not None:
+            if dedup_key in seen_dedup_keys:
+                return None
+            seen_dedup_keys.add(dedup_key)
+
         transaction_hash = self._calculate_transaction_hash(account_id, transaction_data)
 
-        # Check for duplicate in database (across different files only)
-        # We do NOT check for duplicates within the same file - if a transaction appears
-        # twice in the same file, it's assumed to be intentional (real double booking)
-        existing = self.get_transaction_by_hash(tenant_id, transaction_hash)
-        if existing:
-            logger.debug("Duplicate transaction found across files - skipping")
-            return None  # Return None to indicate it was skipped
+        if self._transaction_hash_exists(tenant_db_id, transaction_hash):
+            logger.debug("Duplicate transaction found by hash - skipping")
+            return None
+
+        if self._find_similar_by_dedup_key(tenant_db_id, dedup_key):
+            logger.debug("Duplicate transaction found by normalized fields - skipping")
+            return None
 
         learned_category = self.get_learned_category_for_transaction(tenant_id, transaction_data)
         if learned_category:
@@ -336,43 +328,97 @@ class WealthDatabase:
             # Re-raise other errors
             raise
 
-    def _calculate_transaction_hash(self, account_id: int, transaction_data: Dict[str, Any]) -> str:
-        """Calculate transaction hash for duplicate detection"""
-        import hashlib
-        import re
+    def _normalize_transaction_text(self, value: str, for_recipient: bool = False) -> str:
+        text = (value or '').strip()
+        if len(text) >= 2 and text[0] == text[-1] and text[0] in '"\'':
+            text = text[1:-1].strip()
 
-        # Normalize recipient for better duplicate detection
-        recipient = transaction_data.get('recipient', '').lower()
-        
-        # Common merchant name normalizations to catch duplicates
+        text = text.lower()
+        text = re.sub(r'[\s"\']+', ' ', text).strip()
+
+        if not for_recipient:
+            return text
+
+        compact = text.replace('.', '').replace(' ', '')
         merchant_mappings = {
             'amzn': 'amazon',
             'amznmktpde': 'amazon',
             'paypal': 'paypal',
             'pp': 'paypal',
         }
-        
-        # Apply merchant mappings
         for pattern, normalized in merchant_mappings.items():
-            if pattern in recipient.replace('.', '').replace(' ', ''):
-                recipient = normalized
-                break
-        
-        # Remove special chars and extra spaces
-        normalized_recipient = re.sub(r'[^\w\s]', '', recipient).strip()
-        normalized_recipient = re.sub(r'\s+', ' ', normalized_recipient)
-        
-        # For very long recipients (likely transaction IDs), extract just the first meaningful word
-        words = normalized_recipient.split()
-        if len(normalized_recipient) > 30 and words:
-            # Take first word if it's meaningful (>3 chars)
-            if len(words[0]) > 3:
-                normalized_recipient = words[0]
+            if pattern in compact:
+                return normalized
 
-        # Create a unique string from key transaction fields
-        hash_string = f"{account_id}|{transaction_data['date']}|{transaction_data['amount']}|{transaction_data.get('description', '')}|{normalized_recipient}"
+        text = re.sub(r'[^\w\s]', '', text).strip()
+        text = re.sub(r'\s+', ' ', text)
 
+        words = text.split()
+        if not words:
+            return text
+
+        if words[0] in ('amazon', 'amzn'):
+            return 'amazon'
+
+        if len(text) > 30 and len(words[0]) > 3:
+            return words[0]
+
+        return text
+
+    def get_transaction_dedup_key(self, account_id: int, transaction_data: Dict[str, Any]) -> tuple:
+        return (
+            account_id,
+            str(transaction_data['date']),
+            str(transaction_data['amount']),
+            transaction_data.get('currency', 'EUR'),
+            transaction_data.get('type'),
+            self._normalize_transaction_text(transaction_data.get('recipient', ''), for_recipient=True),
+            self._normalize_transaction_text(transaction_data.get('description', '')),
+        )
+
+    def _calculate_transaction_hash(self, account_id: int, transaction_data: Dict[str, Any]) -> str:
+        dedup_key = self.get_transaction_dedup_key(account_id, transaction_data)
+        hash_string = f"{dedup_key[0]}|{dedup_key[1]}|{dedup_key[2]}|{dedup_key[6]}|{dedup_key[5]}"
         return hashlib.sha256(hash_string.encode()).hexdigest()
+
+    def _transaction_hash_exists(self, tenant_db_id: int, transaction_hash: str) -> bool:
+        with self.db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT 1 FROM transactions
+                WHERE transaction_hash = %s AND tenant_id = %s
+                LIMIT 1
+            """, [transaction_hash, tenant_db_id])
+            return cursor.fetchone() is not None
+
+    def _find_similar_by_dedup_key(self, tenant_db_id: int, dedup_key: tuple) -> bool:
+        account_id, date_value, amount, currency, transaction_type, _, _ = dedup_key
+
+        with self.db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT transaction_date, amount, currency, transaction_type,
+                       decrypt_tenant_data(encrypted_description, %s) as description,
+                       decrypt_tenant_data(encrypted_recipient, %s) as recipient
+                FROM transactions
+                WHERE tenant_id = %s AND account_id = %s AND transaction_date = %s
+                  AND amount = %s AND currency = %s AND transaction_type = %s
+            """, [
+                tenant_db_id, tenant_db_id,
+                tenant_db_id, account_id, date_value, amount, currency, transaction_type
+            ])
+
+            for row in cursor.fetchall():
+                candidate_key = (
+                    account_id,
+                    str(row[0]),
+                    str(row[1]),
+                    row[2],
+                    row[3],
+                    self._normalize_transaction_text(row[5] or '', for_recipient=True),
+                    self._normalize_transaction_text(row[4] or ''),
+                )
+                if candidate_key == dedup_key:
+                    return True
+            return False
 
     def get_learned_category_for_transaction(self, tenant_id: str, transaction_data: Dict[str, Any]) -> Optional[str]:
         """Return a manually learned category for a similar transaction, if one exists."""
@@ -584,6 +630,21 @@ class WealthDatabase:
                     'account_type': row[13]
                 })
             return results
+
+    def import_batch_checksum_exists(self, tenant_id: str, account_id: int, checksum: str) -> bool:
+        if not checksum:
+            return False
+
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            self._ensure_import_batches_table(cursor)
+            cursor.execute("""
+                SELECT 1 FROM import_batches
+                WHERE tenant_id = %s AND account_id = %s AND checksum = %s
+                LIMIT 1
+            """, [tenant_db_id, account_id, checksum])
+            return cursor.fetchone() is not None
 
     def create_account(self, tenant_id: str, account_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new account"""

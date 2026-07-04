@@ -545,6 +545,7 @@ def _process_document_async(document_id, document_type, file_data, tenant_id):
                     stored_count = 0
                     skipped_count = 0
                     total_transactions = len(transactions)
+                    seen_dedup_keys = set()
                     for idx, txn in enumerate(transactions):
                         # Update progress every 10 transactions or at milestones
                         if idx % 10 == 0 or idx == total_transactions - 1:
@@ -567,15 +568,16 @@ def _process_document_async(document_id, document_type, file_data, tenant_id):
                                 'description': txn.get('description', ''),
                                 'category': txn.get('category', 'Uncategorized')
                             }
-                            
+
                             result = wealth_db.create_transaction(
                                 tenant_id=tenant_id,
                                 account_id=account_id,
                                 transaction_data=transaction_data,
-                                source_document_id=document_id
+                                source_document_id=document_id,
+                                seen_dedup_keys=seen_dedup_keys
                             )
                             
-                            if result:  # None means duplicate was skipped
+                            if result:
                                 stored_count += 1
                             else:
                                 skipped_count += 1

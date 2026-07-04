@@ -199,6 +199,46 @@ def get_import_overview():
         return error_response(f'Failed to load import overview: {exc}', 500)
 
 
+def _statement_dates(batch, transactions):
+    return (
+        batch.get('statementStartDate') or min(item['date'] for item in transactions),
+        batch.get('statementEndDate') or max(item['date'] for item in transactions),
+    )
+
+
+def _record_import_batch(tenant_id, account, account_name, batch, currency, transactions,
+                         imported_count, skipped_count, imported_batches, duplicate_file=False):
+    statement_start, statement_end = _statement_dates(batch, transactions)
+    metadata = {
+        'currency': currency,
+        'notes': batch.get('notes'),
+        'clientParserVersion': batch.get('clientParserVersion', 1),
+    }
+    if duplicate_file:
+        metadata['duplicateFile'] = True
+
+    batch_record = wealth_db.create_import_batch(tenant_id, {
+        'account_id': account['id'],
+        'source_type': batch.get('sourceType', 'csv_import'),
+        'filename': batch.get('filename'),
+        'statement_start_date': statement_start,
+        'statement_end_date': statement_end,
+        'transaction_count': len(transactions),
+        'imported_count': imported_count,
+        'skipped_count': skipped_count,
+        'checksum': batch.get('checksum'),
+        'metadata': metadata
+    })
+    imported_batches.append({
+        'id': batch_record['id'],
+        'accountName': account_name,
+        'importedCount': imported_count,
+        'skippedCount': skipped_count,
+        'statementStartDate': statement_start,
+        'statementEndDate': statement_end
+    })
+
+
 @imports_bp.route('', methods=['POST'])
 @authenticate_request
 @require_auth
@@ -234,6 +274,16 @@ def import_transactions():
             imported_count = 0
             skipped_count = 0
 
+            batch_checksum = batch.get('checksum')
+            if batch_checksum and wealth_db.import_batch_checksum_exists(tenant_id, account['id'], batch_checksum):
+                _record_import_batch(
+                    tenant_id, account, account_name, batch, currency, transactions,
+                    0, len(transactions), imported_batches, duplicate_file=True
+                )
+                continue
+
+            seen_dedup_keys = set()
+
             for transaction in transactions:
                 date_value = transaction.get('date')
                 amount = abs(float(transaction.get('amount', 0)))
@@ -247,53 +297,34 @@ def import_transactions():
                     account_name
                 )
 
+                transaction_data = {
+                    'date': date_value,
+                    'amount': amount,
+                    'currency': transaction.get('currency') or currency,
+                    'type': transaction_type,
+                    'recipient': recipient,
+                    'description': description,
+                    'reference': transaction.get('reference', ''),
+                    'category': category,
+                    'subcategory': transaction.get('subcategory'),
+                    'tags': transaction.get('tags', [])
+                }
+
                 result = wealth_db.create_transaction(
                     tenant_id=tenant_id,
                     account_id=account['id'],
-                    transaction_data={
-                        'date': date_value,
-                        'amount': amount,
-                        'currency': transaction.get('currency') or currency,
-                        'type': transaction_type,
-                        'recipient': recipient,
-                        'description': description,
-                        'reference': transaction.get('reference', ''),
-                        'category': category,
-                        'subcategory': transaction.get('subcategory'),
-                        'tags': transaction.get('tags', [])
-                    }
+                    transaction_data=transaction_data,
+                    seen_dedup_keys=seen_dedup_keys
                 )
                 if result:
                     imported_count += 1
                 else:
                     skipped_count += 1
 
-            statement_start = batch.get('statementStartDate') or min(item['date'] for item in transactions)
-            statement_end = batch.get('statementEndDate') or max(item['date'] for item in transactions)
-            batch_record = wealth_db.create_import_batch(tenant_id, {
-                'account_id': account['id'],
-                'source_type': batch.get('sourceType', 'csv_import'),
-                'filename': batch.get('filename'),
-                'statement_start_date': statement_start,
-                'statement_end_date': statement_end,
-                'transaction_count': len(transactions),
-                'imported_count': imported_count,
-                'skipped_count': skipped_count,
-                'checksum': batch.get('checksum'),
-                'metadata': {
-                    'currency': currency,
-                    'notes': batch.get('notes'),
-                    'clientParserVersion': batch.get('clientParserVersion', 1)
-                }
-            })
-            imported_batches.append({
-                'id': batch_record['id'],
-                'accountName': account_name,
-                'importedCount': imported_count,
-                'skippedCount': skipped_count,
-                'statementStartDate': statement_start,
-                'statementEndDate': statement_end
-            })
+            _record_import_batch(
+                tenant_id, account, account_name, batch, currency, transactions,
+                imported_count, skipped_count, imported_batches
+            )
 
         return success_response({'batches': imported_batches}, message='Import completed', status_code=201)
     except Exception as exc:

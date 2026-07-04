@@ -219,7 +219,7 @@ const parseYuh = (text, filename, checksum) => {
 
     const recipient = row.RECIPIENT || row['ACTIVITY NAME'] || '';
     const description = [row['ACTIVITY NAME'], row.LOCALITY].filter(Boolean).join(' ');
-    const goalName = (row.RECIPIENT || row.LOCALITY || '').trim();
+    const goalName = row.RECIPIENT || row.LOCALITY || '';
     const accountName = activityType.startsWith('GOAL_') && goalName ? `YUH - ${goalName}` : 'YUH';
 
     pushTransaction(accountName, {

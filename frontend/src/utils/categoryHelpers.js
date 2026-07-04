@@ -72,6 +72,17 @@ export const mergeSavingsCategories = (month, expenseSavingsCategories) => {
   return merged;
 };
 
+export const getSavingsCategoryTransactions = (month, category) => {
+  const fromSavings = month?.savingsTransactions?.[category] || [];
+  if (fromSavings.length > 0) {
+    return fromSavings;
+  }
+  if (category === 'Internal Transfer') {
+    return month?.internalTransferTransactions || [];
+  }
+  return month?.expenseTransactions?.[category] || [];
+};
+
 export const computeMonthExpenseBreakdown = (month, essentialCategories, essentialSet = null) => {
   const income = month.income || 0;
   const set = essentialSet ?? buildEssentialCategorySet(essentialCategories);
