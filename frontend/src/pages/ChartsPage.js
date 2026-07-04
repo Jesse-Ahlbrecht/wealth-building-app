@@ -27,6 +27,7 @@ import {
   formatCurrency,
   formatMonth
 } from '../utils';
+import { unwrapList, getPredictionKey, getPredictionMonth } from '../utils/predictionHelpers';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
@@ -210,7 +211,7 @@ const ChartsPage = () => {
       const predictionsData = await predictionsAPI.getPredictionsForMonth(month);
       setPredictions(prev => ({
         ...prev,
-        [month]: Array.isArray(predictionsData) ? predictionsData : (predictionsData?.data || [])
+        [month]: unwrapList(predictionsData)
       }));
     } catch (err) {
       console.error(`Error loading predictions for ${month}:`, err);
@@ -258,15 +259,32 @@ const ChartsPage = () => {
       };
     });
 
-  const handleDismissPrediction = async (prediction) => {
+  const reloadSelectedMonthPredictions = async () => {
+    if (selectedMonth) {
+      await loadPredictionsForMonth(selectedMonth.month);
+    }
+  };
+
+  const handleSkipPrediction = async (prediction) => {
     try {
-      await predictionsAPI.dismissPrediction(prediction.prediction_key, prediction.recurrence_type);
-      // Reload predictions for the selected month
-      if (selectedMonth) {
-        await loadPredictionsForMonth(selectedMonth.month);
-      }
+      const month = getPredictionMonth(prediction, selectedMonth?.month);
+      await predictionsAPI.skipPredictionForMonth(getPredictionKey(prediction), month);
+      await reloadSelectedMonthPredictions();
     } catch (err) {
-      console.error('Error dismissing prediction:', err);
+      console.error('Error skipping prediction:', err);
+    }
+  };
+
+  const handleDeletePrediction = async (prediction) => {
+    try {
+      await predictionsAPI.updateRecurringPayment(getPredictionKey(prediction), {
+        recipient: prediction.recipient,
+        category: prediction.category,
+        enabled: false
+      });
+      await reloadSelectedMonthPredictions();
+    } catch (err) {
+      console.error('Error deleting prediction:', err);
     }
   };
 
@@ -830,7 +848,9 @@ const ChartsPage = () => {
               includeLoanPayments={includeLoanPayments}
               predictions={predictions[selectedMonth.month] || []}
               averageEssentialSpending={averageEssentialSpending[selectedMonth.month] || 0}
-              onDismissPrediction={handleDismissPrediction}
+              onSkipPrediction={handleSkipPrediction}
+              onDeletePrediction={handleDeletePrediction}
+              onPredictionChanged={reloadSelectedMonthPredictions}
               availableCategories={availableCategories}
               onTransactionCategoryUpdated={loadSummary}
             />

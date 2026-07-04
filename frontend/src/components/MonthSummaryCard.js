@@ -8,6 +8,7 @@
 import React from 'react';
 import { formatCurrency, formatMonth, formatDate } from '../utils';
 import CategoryEditModal from './CategoryEditModal';
+import PredictionEditModal from './PredictionEditModal';
 
 const SAVINGS_CATEGORY_NAMES = new Set(['Transfer', 'Internal Transfer', 'Loan Payment', 'Investment Account Payment']);
 
@@ -56,11 +57,15 @@ const MonthSummaryCard = ({
   onExpenseSortChange = () => {},
   predictions = [],
   averageEssentialSpending = 0,
-  onDismissPrediction = () => {},
+  onSkipPrediction = () => {},
+  onDeletePrediction = () => {},
+  onPredictionChanged = () => {},
   availableCategories = { income: [], expense: [] },
   onTransactionCategoryUpdated = () => {}
 }) => {
   const [categoryModal, setCategoryModal] = React.useState(null);
+  const [predictionMenu, setPredictionMenu] = React.useState(null);
+  const [predictionModal, setPredictionModal] = React.useState(null);
   const income = month.income || 0;
   const baseExpenses = month.expenses || 0;
   
@@ -303,6 +308,8 @@ const MonthSummaryCard = ({
     const typeKey = txn?.type === 'income' ? 'income' : 'expense';
     const categoryOptions = Array.isArray(availableCategories?.[typeKey]) ? availableCategories[typeKey] : [];
     const canEditCategory = !isPredicted && txn?.transaction_hash && categoryOptions.length > 0;
+    const menuKey = `${month.month}-${txn.prediction_key || idx}`;
+    const menuOpen = predictionMenu === menuKey;
 
     return (
       <div
@@ -310,11 +317,8 @@ const MonthSummaryCard = ({
         className={`transaction-item ${isPredicted ? 'transaction-item-predicted' : ''}`}
         style={isPredicted ? {
           borderColor: '#6366f1',
-          backgroundColor: 'var(--color-bg-tertiary)',
-          cursor: dismissible ? 'pointer' : 'default'
+          backgroundColor: 'var(--color-bg-tertiary)'
         } : {}}
-        onClick={isPredicted && dismissible ? () => onDismissPrediction(txn) : undefined}
-        title={isPredicted && dismissible ? 'Click to dismiss prediction' : ''}
       >
         <div className="transaction-date">
           {formatDate(txn.date)}
@@ -342,6 +346,25 @@ const MonthSummaryCard = ({
             >
               {txn.category || 'Set category'}
             </button>
+          )}
+          {isPredicted && dismissible && (
+            <div className="prediction-menu">
+              <button
+                type="button"
+                className="prediction-menu-btn"
+                onClick={() => setPredictionMenu(menuOpen ? null : menuKey)}
+                title="Manage prediction"
+              >
+                ⋯
+              </button>
+              {menuOpen && (
+                <div className="prediction-menu-dropdown">
+                  <button type="button" onClick={() => { setPredictionMenu(null); onSkipPrediction(txn); }}>Skip this month</button>
+                  <button type="button" onClick={() => { setPredictionMenu(null); setPredictionModal(txn); }}>Customize</button>
+                  <button type="button" className="danger" onClick={() => { setPredictionMenu(null); onDeletePrediction(txn); }}>Delete permanently</button>
+                </div>
+              )}
+            </div>
           )}
         </div>
         <div className="transaction-amount">
@@ -388,6 +411,22 @@ const MonthSummaryCard = ({
         availableCategories={availableCategories}
         essentialCategories={essentialCategories}
       />
+      {predictionModal && (
+        <PredictionEditModal
+          payment={{
+            prediction_key: predictionModal.prediction_key || predictionModal.predictionKey,
+            recipient: predictionModal.recipient,
+            category: predictionModal.category,
+            recurrence_type: predictionModal.recurrence_type || predictionModal.recurrenceType || 'monthly',
+            amount: Math.abs(predictionModal.amount || 0),
+            day: predictionModal.date ? new Date(predictionModal.date).getDate() : '',
+            currency: predictionModal.currency || defaultCurrency,
+            enabled: true
+          }}
+          onClose={() => setPredictionModal(null)}
+          onSaved={onPredictionChanged}
+        />
+      )}
       {/* Header */}
       <div className="current-month-header">
         <div>

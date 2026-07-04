@@ -9,6 +9,12 @@ import React, { useState, useEffect } from 'react';
 import { transactionsAPI, categoriesAPI, predictionsAPI } from '../api';
 import { useAppContext } from '../context/AppContext';
 import MonthSummaryCard from '../components/MonthSummaryCard';
+import {
+  unwrapList,
+  getPredictionKey,
+  getPredictionMonth,
+  getLatestMonthKey
+} from '../utils/predictionHelpers';
 
 const MonthlyOverviewPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
@@ -64,12 +70,16 @@ const MonthlyOverviewPage = () => {
   }, []);
 
   useEffect(() => {
-    // Load predictions and averages for all months when summary changes
-    if (summary && summary.length > 0) {
-      summary.forEach(monthData => {
-        loadPredictionsForMonth(monthData.month);
-        loadAverageEssentialSpending(monthData.month);
-      });
+    const month = getLatestMonthKey(summary);
+    if (month) {
+      loadPredictionsForMonth(month);
+    }
+  }, [summary]);
+
+  useEffect(() => {
+    const month = getLatestMonthKey(summary);
+    if (month) {
+      loadAverageEssentialSpending(month);
     }
   }, [summary, essentialCategories]);
 
@@ -78,9 +88,7 @@ const MonthlyOverviewPage = () => {
       setLoading(true);
       setError(null);
       const response = await transactionsAPI.getSummary();
-      console.log('Summary API response:', response);
 
-      // Handle different response formats
       let summaryData = [];
       if (Array.isArray(response)) {
         summaryData = response;
@@ -90,7 +98,6 @@ const MonthlyOverviewPage = () => {
         summaryData = response.summary;
       }
 
-      console.log('Processed summary data:', summaryData.length, 'months');
       setSummary(summaryData);
     } catch (err) {
       console.error('Error loading summary:', err);
@@ -137,7 +144,7 @@ const MonthlyOverviewPage = () => {
       const predictionsData = await predictionsAPI.getPredictionsForMonth(month);
       setPredictions(prev => ({
         ...prev,
-        [month]: Array.isArray(predictionsData) ? predictionsData : (predictionsData?.data || [])
+        [month]: unwrapList(predictionsData)
       }));
     } catch (err) {
       console.error(`Error loading predictions for ${month}:`, err);
@@ -151,19 +158,7 @@ const MonthlyOverviewPage = () => {
   const loadAverageEssentialSpending = async (month) => {
     try {
       const avgData = await predictionsAPI.getAverageEssentialSpending(month);
-      console.log(`Average essential spending for ${month}:`, avgData);
-      // Handle different response formats
-      let average = 0;
-      if (typeof avgData === 'number') {
-        average = avgData;
-      } else if (avgData?.average !== undefined) {
-        average = avgData.average;
-      } else if (avgData?.data?.average !== undefined) {
-        average = avgData.data.average;
-      } else if (avgData?.data && typeof avgData.data === 'number') {
-        average = avgData.data;
-      }
-      console.log(`Extracted average: ${average} for month ${month}`);
+      const average = avgData?.average ?? avgData?.data?.average ?? 0;
       setAverageEssentialSpending(prev => ({
         ...prev,
         [month]: average
@@ -177,19 +172,41 @@ const MonthlyOverviewPage = () => {
     }
   };
 
-  const handleDismissPrediction = async (prediction) => {
+  const monthOf = (prediction) =>
+    getPredictionMonth(prediction, getLatestMonthKey(summary));
+
+  const handleSkipPrediction = async (prediction) => {
     try {
-      await predictionsAPI.dismissPrediction(
-        prediction.prediction_key || prediction.predictionKey,
-        prediction.recurrence_type || prediction.recurrenceType || 'monthly'
-      );
-      // Reload predictions for the month
-      const month = prediction.date ? prediction.date.substring(0, 7) : Object.keys(predictions)[0];
+      const month = monthOf(prediction);
+      await predictionsAPI.skipPredictionForMonth(getPredictionKey(prediction), month);
       if (month) {
         loadPredictionsForMonth(month);
       }
     } catch (err) {
-      console.error('Error dismissing prediction:', err);
+      console.error('Error skipping prediction:', err);
+    }
+  };
+
+  const handleDeletePrediction = async (prediction) => {
+    try {
+      await predictionsAPI.updateRecurringPayment(getPredictionKey(prediction), {
+        recipient: prediction.recipient,
+        category: prediction.category,
+        enabled: false
+      });
+      const month = monthOf(prediction);
+      if (month) {
+        loadPredictionsForMonth(month);
+      }
+    } catch (err) {
+      console.error('Error deleting prediction:', err);
+    }
+  };
+
+  const reloadCurrentMonthPredictions = () => {
+    const month = getLatestMonthKey(summary);
+    if (month) {
+      loadPredictionsForMonth(month);
     }
   };
 
@@ -289,7 +306,9 @@ const MonthlyOverviewPage = () => {
           onExpenseSortChange={handleExpenseSortChange}
           predictions={predictions[latestMonth.month] || []}
           averageEssentialSpending={averageEssentialSpending[latestMonth.month] || 0}
-          onDismissPrediction={handleDismissPrediction}
+          onSkipPrediction={handleSkipPrediction}
+          onDeletePrediction={handleDeletePrediction}
+          onPredictionChanged={reloadCurrentMonthPredictions}
           availableCategories={availableCategories}
           onTransactionCategoryUpdated={loadSummary}
         />
@@ -317,9 +336,6 @@ const MonthlyOverviewPage = () => {
                 includeLoanPayments={includeLoanPayments}
                 expenseSort={expenseSort}
                 onExpenseSortChange={handleExpenseSortChange}
-                predictions={predictions[month.month] || []}
-                averageEssentialSpending={averageEssentialSpending[month.month] || 0}
-                onDismissPrediction={handleDismissPrediction}
                 availableCategories={availableCategories}
                 onTransactionCategoryUpdated={loadSummary}
               />

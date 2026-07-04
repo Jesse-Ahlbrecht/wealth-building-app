@@ -22,7 +22,8 @@ fi
 # Start the Flask backend
 echo "🖥️  Starting Flask backend on http://localhost:5001"
 cd backend
-python app.py &
+export FLASK_ENV=development
+./venv/bin/python app.py &
 BACKEND_PID=$!
 
 # Wait a moment for backend to start

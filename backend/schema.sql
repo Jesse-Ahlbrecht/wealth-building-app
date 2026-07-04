@@ -378,6 +378,23 @@ CREATE TABLE prediction_dismissals (
 CREATE INDEX idx_prediction_dismissals_tenant ON prediction_dismissals(tenant_id, expires_at);
 CREATE INDEX idx_prediction_dismissals_key ON prediction_dismissals(prediction_key);
 
+-- Prediction overrides table for customizing/disabling recurring payment predictions
+CREATE TABLE prediction_overrides (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER REFERENCES tenants(id),
+    prediction_key VARCHAR(255) UNIQUE NOT NULL,
+    recipient VARCHAR(255),
+    category VARCHAR(100),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    custom_amount NUMERIC,
+    custom_day INTEGER,
+    custom_recurrence_type VARCHAR(20),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_prediction_overrides_tenant ON prediction_overrides(tenant_id);
+CREATE INDEX idx_prediction_overrides_key ON prediction_overrides(prediction_key);
+
 -- Insert default tenant for development
 INSERT INTO tenants (tenant_id, name) VALUES ('default', 'Default Tenant');
 

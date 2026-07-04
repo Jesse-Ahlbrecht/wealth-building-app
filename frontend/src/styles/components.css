@@ -355,30 +355,6 @@
   box-shadow: 0 2px 4px rgba(107, 126, 255, 0.2);
 }
 
-.dismiss-prediction-btn {
-  background: transparent;
-  border: 1px solid #dfe3e8;
-  color: #64748b;
-  padding: 6px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.dismiss-prediction-btn:hover {
-  background: #fee;
-  border-color: #fcc;
-  color: #dc2626;
-}
-
-.dismiss-prediction-btn:active {
-  transform: scale(0.95);
-}
-
 @keyframes transactionFlipOut {
   0% {
     transform: perspective(800px) rotateY(0deg);
@@ -681,4 +657,105 @@
   color: var(--color-text-tertiary);
   font-size: 16px;
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Prediction management menu (month view) */
+.prediction-menu {
+  position: relative;
+}
+
+.prediction-menu-btn {
+  background: transparent;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 8px;
+}
+
+.prediction-menu-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.prediction-menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.prediction-menu-dropdown button {
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.prediction-menu-dropdown button:hover {
+  background: var(--color-bg-hover);
+}
+
+.prediction-menu-dropdown button.danger {
+  color: var(--color-error);
+}
+
+/* Prediction edit modal form */
+.prediction-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.prediction-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.prediction-edit-field input,
+.prediction-edit-field select {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-tertiary);
+  border-radius: 6px;
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+
+.prediction-edit-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.prediction-edit-toggle input {
+  width: auto;
+}
+
+.prediction-edit-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24px;
+}
+
+.prediction-edit-actions-right {
+  display: flex;
+  gap: 8px;
 }

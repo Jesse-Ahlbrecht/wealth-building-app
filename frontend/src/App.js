@@ -19,6 +19,7 @@ import { AppProvider, useAppContext } from './context/AppContext';
 
 // Pages
 import MonthlyOverviewPage from './pages/MonthlyOverviewPage';
+import PredictedPaymentsPage from './pages/PredictedPaymentsPage';
 import ChartsPage from './pages/ChartsPage';
 import AccountsPage from './pages/AccountsPage';
 import BrokerPage from './pages/BrokerPage';
@@ -37,6 +38,7 @@ const labelToPath = (label) => {
 // Constants
 const TAB_ITEMS = [
   { key: 'monthly-overview', label: 'Monthly Overview' },
+  { key: 'predicted-payments', label: 'Predicted Payments' },
   { key: 'charts', label: 'Savings Statistics' },
   { key: 'accounts', label: 'Accounts' },
   { key: 'broker', label: 'Broker' },
@@ -60,6 +62,7 @@ const PATH_TO_TAB_KEY = Object.fromEntries(
 
 const TAB_DESCRIPTIONS = {
   'monthly-overview': 'Track current month progress and review historical spending patterns',
+  'predicted-payments': 'Review and manage recurring payment predictions',
   'charts': 'Track savings progress and rates over time',
   'accounts': 'Review balances across cash and savings accounts',
   'broker': 'Inspect performance of your investment accounts',
@@ -391,6 +394,15 @@ function AppContent() {
                   <p>{TAB_DESCRIPTIONS['monthly-overview']}</p>
                 </div>
                 <MonthlyOverviewPage />
+              </>
+            } />
+            <Route path="/predicted-payments" element={
+              <>
+                <div className="content-header">
+                  <h2>{TAB_ITEMS.find(item => item.key === 'predicted-payments')?.label}</h2>
+                  <p>{TAB_DESCRIPTIONS['predicted-payments']}</p>
+                </div>
+                <PredictedPaymentsPage />
               </>
             } />
             <Route path="/savings-statistics" element={

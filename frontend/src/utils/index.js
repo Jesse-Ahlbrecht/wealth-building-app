@@ -9,3 +9,4 @@ export * from './documentHelpers';
 export * from './apiHelpers';
 export * from './transactionHelpers';
 export * from './importParsers';
+export * from './predictionHelpers';

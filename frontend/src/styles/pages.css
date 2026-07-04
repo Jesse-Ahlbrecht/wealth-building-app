@@ -3799,3 +3799,129 @@ select option {
   font-size: 16px;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
+
+/* Predicted Payments section */
+.recurring-payment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recurring-payment-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.recurring-payment-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
+  border-left: 3px solid #6366f1;
+  border-radius: 8px;
+}
+
+.recurring-payment-disabled {
+  opacity: 0.6;
+  border-left-color: var(--color-border-tertiary);
+}
+
+.recurring-payment-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.recurring-payment-expandable {
+  cursor: pointer;
+}
+
+.recurring-payment-expandable:hover .recurring-payment-recipient {
+  color: #6366f1;
+}
+
+.recurring-payment-chevron {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.recurring-payment-recipient {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.recurring-payment-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.recurring-payment-tag-off {
+  background: var(--color-text-light);
+  color: #fff;
+}
+
+.recurring-payment-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  text-transform: capitalize;
+}
+
+.recurring-payment-amount {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.recurring-payment-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.recurring-payment-history {
+  margin-top: -4px;
+  padding: 10px 16px 12px 36px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+}
+
+.recurring-payment-history-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tertiary);
+  margin-bottom: 8px;
+}
+
+.recurring-payment-history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.recurring-payment-history-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.recurring-payment-history-date {
+  color: var(--color-text-secondary);
+}
+
+.recurring-payment-history-amount {
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
