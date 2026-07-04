@@ -1,0 +1,17 @@
+{
+  "names": [
+    "Transfer",
+    "Internal Transfer",
+    "Loan Payment",
+    "Investment Account Payment",
+    "Interactive Brokers Investments",
+    "Interactive Brokers Cash"
+  ],
+  "bank_savings_movements": [
+    "Investment Account Payment"
+  ],
+  "broker": {
+    "investments": "Interactive Brokers Investments",
+    "cash": "Interactive Brokers Cash"
+  }
+}

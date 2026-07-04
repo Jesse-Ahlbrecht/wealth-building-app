@@ -79,9 +79,8 @@ def _match_ibkr_deposits_to_bank_transfers(ibkr_transactions, bank_transactions)
             break
 
 
-def get_broker():
-    """Get broker holdings and transactions"""
-    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+def load_broker_data(tenant_id):
+    """Load broker holdings and transactions for a tenant."""
     parser = BankStatementParser()
 
     transactions = []
@@ -398,7 +397,13 @@ def get_broker():
     print(f"   Response summary: {response_data.get('summary')}")
     print(f"   Response keys: {list(response_data.keys())}")
     
-    return jsonify(response_data)
+    return response_data
+
+
+def get_broker():
+    """Get broker holdings and transactions"""
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+    return jsonify(load_broker_data(tenant_id))
 
 
 def get_broker_historical_valuation():

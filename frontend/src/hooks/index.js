@@ -12,5 +12,4 @@ export { useMonthPredictions } from './useMonthPredictions';
 export { usePreferenceState } from './usePreferenceState';
 export { useMonthDrilldownPanelProps } from './useMonthDrilldownPanelProps';
 export { useBrokerData } from './useBrokerData';
-export { useEnrichedTransactionSummary } from './useEnrichedTransactionSummary';
 

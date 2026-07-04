@@ -4,8 +4,8 @@
  * Global application state management
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { settingsApi } from '../api';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { settingsApi, brokerAPI } from '../api';
 import { useAuthContext } from './AuthContext';
 
 const AppContext = createContext(null);
@@ -23,6 +23,41 @@ export const AppProvider = ({ children }) => {
 
   const [documentsProcessing, setDocumentsProcessing] = useState(false);
   const [documentsProcessingCount, setDocumentsProcessingCount] = useState(0);
+
+  const [broker, setBroker] = useState(null);
+  const [brokerLoading, setBrokerLoading] = useState(false);
+  const [brokerError, setBrokerError] = useState(null);
+  const brokerPromiseRef = useRef(null);
+
+  const loadBroker = useCallback(async ({ force = false } = {}) => {
+    if (broker && !force) {
+      return broker;
+    }
+    if (brokerPromiseRef.current && !force) {
+      return brokerPromiseRef.current;
+    }
+
+    const promise = (async () => {
+      try {
+        setBrokerLoading(true);
+        setBrokerError(null);
+        const data = await brokerAPI.getBroker();
+        setBroker(data);
+        return data;
+      } catch (error) {
+        console.error('Failed to load broker data:', error);
+        setBrokerError(error.message || 'Failed to load broker data');
+        setBroker(null);
+        throw error;
+      } finally {
+        setBrokerLoading(false);
+        brokerPromiseRef.current = null;
+      }
+    })();
+
+    brokerPromiseRef.current = promise;
+    return promise;
+  }, [broker]);
 
   // Fetch settings when authenticated
   useEffect(() => {
@@ -45,6 +80,12 @@ export const AppProvider = ({ children }) => {
       fetchSettings();
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadBroker().catch(() => {});
+    }
+  }, [isAuthenticated, loadBroker]);
 
   // Helper to save settings to backend
   const saveSettings = useCallback(async (newSettings) => {
@@ -90,6 +131,10 @@ export const AppProvider = ({ children }) => {
     setDocumentsProcessing,
     documentsProcessingCount,
     setDocumentsProcessingCount,
+    broker,
+    brokerLoading,
+    brokerError,
+    loadBroker,
   };
 
   return (

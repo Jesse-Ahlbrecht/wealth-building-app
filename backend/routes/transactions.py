@@ -11,11 +11,14 @@ from flask import Blueprint, g, jsonify
 from database import get_wealth_database
 from middleware.auth_middleware import authenticate_request, require_auth
 from utils.response_helpers import error_response
+from category_config import get_bank_savings_movement_categories
+from services.broker_savings import merge_broker_savings_into_summary
+from services.broker_service import load_broker_data
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/api')
 wealth_db = get_wealth_database()
 
-SAVINGS_MOVEMENT_CATEGORIES = {'Investment Account Payment'}
+SAVINGS_MOVEMENT_CATEGORIES = get_bank_savings_movement_categories()
 
 
 @transactions_bp.route('/transactions')
@@ -221,6 +224,12 @@ def get_summary():
             'internalTransferTransactions': data['internal_transfer_transactions'],
             'currencyTotals': data['currency_totals']
         })
+
+    try:
+        broker_data = load_broker_data(tenant_id)
+        summary = merge_broker_savings_into_summary(summary, broker_data.get('transactions', []))
+    except Exception as broker_error:
+        print(f"Warning: failed to merge broker savings into summary: {broker_error}")
 
     print(f"Returning summary with {len(summary)} months")
     print(f"Sample month data: {summary[0] if summary else 'No months'}")

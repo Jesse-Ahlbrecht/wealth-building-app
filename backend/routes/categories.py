@@ -10,6 +10,7 @@ import traceback
 from flask import Blueprint, g, request, jsonify
 from database import get_wealth_database
 from middleware.auth_middleware import authenticate_request, require_auth
+from category_config import get_savings_category_names
 from utils.response_helpers import success_response, error_response
 
 categories_bp = Blueprint('categories', __name__, url_prefix='/api')
@@ -42,14 +43,7 @@ def get_categories():
         # Get tenant-specific custom categories from database
         db_categories = wealth_db.get_categories(tenant_id)
         
-        savings_categories = [
-            'Transfer',
-            'Internal Transfer',
-            'Loan Payment',
-            'Investment Account Payment',
-            'Interactive Brokers Investments',
-            'Interactive Brokers Cash',
-        ]
+        savings_categories = get_savings_category_names()
 
         # Combine default and custom categories (return just names)
         all_categories = {

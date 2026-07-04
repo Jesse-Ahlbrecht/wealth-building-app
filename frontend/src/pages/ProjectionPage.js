@@ -1,29 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { transactionsAPI, accountsAPI, brokerAPI } from '../api';
+import { transactionsAPI, accountsAPI } from '../api';
 import { formatCurrency, convertAmountToCurrency, EUR_TO_CHF_RATE } from '../utils';
 import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
 import { computeMonthExpenseBreakdown } from '../utils/categoryHelpers';
+import { useBrokerData } from '../hooks';
 import WealthProjectionCalculator from '../components/WealthProjectionCalculator';
 
 const ProjectionPage = () => {
+  const { broker } = useBrokerData();
   const [projectionData, setProjectionData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     loadProjectionData();
-  }, []);
+  }, [broker]);
 
   const loadProjectionData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Fetch all necessary data in parallel
-      const [summaryResponse, accountsResponse, brokerResponse] = await Promise.all([
+      const [summaryResponse, accountsResponse] = await Promise.all([
         transactionsAPI.getSummary().catch(() => null),
-        accountsAPI.getAccounts().catch(() => null),
-        brokerAPI.getBroker().catch(() => null)
+        accountsAPI.getAccounts().catch(() => null)
       ]);
 
       // Handle summary data
@@ -58,12 +58,16 @@ const ProjectionPage = () => {
         currentNetWorth = totalCHF + convertAmountToCurrency(totalEUR, 'CHF');
       }
 
-      // Add broker/investment value if available
-      if (brokerResponse && brokerResponse.summary) {
-        const summary = brokerResponse.summary;
-        const viacTotal = summary.viac ? summary.viac.total_invested : 0;
-        const ingDibaTotal = summary.ing_diba ? summary.ing_diba.total_current_value * EUR_TO_CHF_RATE : 0;
-        currentNetWorth += viacTotal + ingDibaTotal;
+      if (broker?.summary) {
+        const brokerSummary = broker.summary;
+        const viacTotal = brokerSummary.viac ? brokerSummary.viac.total_invested : 0;
+        const ingDibaTotal = brokerSummary.ing_diba
+          ? brokerSummary.ing_diba.total_current_value * EUR_TO_CHF_RATE
+          : 0;
+        const ibkrTotal = brokerSummary.interactive_brokers
+          ? brokerSummary.interactive_brokers.total_value_chf
+          : 0;
+        currentNetWorth += viacTotal + ingDibaTotal + ibkrTotal;
       }
 
       // Subtract loans if available (we'd need loansAPI, but for now we'll skip it)

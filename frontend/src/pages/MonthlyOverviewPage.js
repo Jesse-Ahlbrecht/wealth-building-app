@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { useCategoryData, useEnrichedTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
 import MonthSummaryCard from '../components/MonthSummaryCard';
 import ChartPageStates from '../components/ChartPageStates';
 import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
@@ -8,13 +8,14 @@ import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
 const MonthlyOverviewPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
   const { essentialCategories, availableCategories } = useCategoryData();
-  const { summary, bankSummary, loading, error, loadSummary, refreshSummary } = useEnrichedTransactionSummary();
+  const { summary, loading, error, loadSummary, refreshSummary } = useTransactionSummary();
   const [expenseSort, setExpenseSort] = usePreferenceState(
     'monthlyOverview_expenseSort',
     'amount_desc',
     preferences,
     updatePreferences
   );
+  const [showPreviousMonths, setShowPreviousMonths] = useState(false);
 
   const sortedMonths = useMemo(
     () => sortMonthsReverseChronologically(summary),
@@ -37,7 +38,7 @@ const MonthlyOverviewPage = () => {
     <ChartPageStates
       loading={loading}
       error={error}
-      isEmpty={!loading && !error && bankSummary.length === 0}
+      isEmpty={!loading && !error && summary.length === 0}
       onRetry={loadSummary}
       loadingMessage="Loading transaction data..."
       containerClassName="current-month-container"
@@ -70,10 +71,22 @@ const MonthlyOverviewPage = () => {
 
           {previousMonths.length > 0 && (
             <>
-              <div className="content-header" style={{ marginTop: '3rem', paddingTop: '2rem', borderTop: '2px solid var(--color-border-primary)' }}>
-                <h2>Previous Months</h2>
+              <div
+                className="content-header"
+                style={{
+                  marginTop: '3rem',
+                  paddingTop: '2rem',
+                  borderTop: '2px solid var(--color-border-primary)',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setShowPreviousMonths((open) => !open)}
+              >
+                <h2>
+                  <span style={{ marginRight: '8px' }}>{showPreviousMonths ? '▼' : '▶'}</span>
+                  Previous Months ({previousMonths.length})
+                </h2>
               </div>
-              {previousMonths.map((month) => (
+              {showPreviousMonths && previousMonths.map((month) => (
                 <div key={month.month} className="current-month-container" style={{ marginTop: '1.5rem' }}>
                   <MonthSummaryCard
                     month={month}

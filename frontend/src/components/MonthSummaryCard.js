@@ -16,6 +16,7 @@ import {
 import { getSavingsGoalForCurrency } from '../utils/finance';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
+import CollapsibleBreakdownSection from './CollapsibleBreakdownSection';
 
 /**
  * Metric Bar Component
@@ -683,145 +684,102 @@ const MonthSummaryCard = ({
           )}
 
           {internalTransferTotal > 0 && (
-            <div className="categories-section">
-              <div
-                className="category-item category-section-header"
-                onClick={() => {
-                  const sectionKey = `${month.month}-internal-transfers-section`;
-                  setExpandedSections(prev => ({
-                    ...prev,
-                    [sectionKey]: !prev[sectionKey]
-                  }));
-                }}
-                style={{
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  marginBottom: expandedSections[`${month.month}-internal-transfers-section`] ? '8px' : '0'
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <span className="category-name">
-                    <span className="expand-arrow" style={{ marginRight: '8px' }}>
-                      {expandedSections[`${month.month}-internal-transfers-section`] ? '▼' : '▶'}
-                    </span>
-                    Internal Transfers
-                  </span>
+            <CollapsibleBreakdownSection
+              monthKey={month.month}
+              sectionId="internal-transfers-section"
+              title="Internal Transfers"
+              total={internalTransferTotal}
+              defaultCurrency={defaultCurrency}
+              expandedSections={expandedSections}
+              setExpandedSections={setExpandedSections}
+            >
+              <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px' }}>
+                <div className="transaction-list">
+                  {sortTransactions(internalTransferTransactions, 'expense').map((txn, idx) =>
+                    renderTransactionItem(txn, idx)
+                  )}
                 </div>
-                <span className="stat-value" style={{ fontWeight: '700' }}>
-                  {formatCurrency(internalTransferTotal, defaultCurrency)}
-                </span>
               </div>
-
-              {expandedSections[`${month.month}-internal-transfers-section`] && (
-                <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px' }}>
-                  <div className="transaction-list">
-                    {sortTransactions(internalTransferTransactions, 'expense').map((txn, idx) =>
-                      renderTransactionItem(txn, idx)
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            </CollapsibleBreakdownSection>
           )}
 
-          {Object.keys(savingsCategories).length > 0 && (
-            <div className="categories-section">
-              <div
-                className="category-item category-section-header"
-                onClick={() => {
-                  const sectionKey = `${month.month}-savings-section`;
-                  setExpandedSections(prev => ({
-                    ...prev,
-                    [sectionKey]: !prev[sectionKey]
-                  }));
-                }}
-                style={{
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  marginBottom: expandedSections[`${month.month}-savings-section`] ? '8px' : '0'
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <span className="category-name">
-                    <span className="expand-arrow" style={{ marginRight: '8px' }}>
-                      {expandedSections[`${month.month}-savings-section`] ? '▼' : '▶'}
-                    </span>
-                    Savings Movements
-                  </span>
-                </div>
-                <span className="stat-value" style={{ fontWeight: '700' }}>
-                  {formatCurrency(savingsCategoryTotal, defaultCurrency)}
-                </span>
-              </div>
+          {Object.keys(savingsCategories).length > 0 && (() => {
+            const savingsEntries = Object.entries(savingsCategories);
+            const maxSavingsAmount = savingsEntries.length > 0
+              ? Math.max(...savingsEntries.map(([, amount]) => amount))
+              : 0;
 
-              {expandedSections[`${month.month}-savings-section`] && (() => {
-                const savingsEntries = Object.entries(savingsCategories);
-                const maxSavingsAmount = savingsEntries.length > 0
-                  ? Math.max(...savingsEntries.map(([, amount]) => amount))
-                  : 0;
-
-                return (
-                  <div className="category-list">
-                    {savingsEntries
-                      .sort(([, a], [, b]) => b - a)
-                      .map(([category, amount]) => {
-                        const categoryKey = `${month.month}-savings-${category}`;
-                        const isExpanded = expandedCategories[categoryKey];
-                        const transactionCount = getCategoryTransactionCount(category, 'savings');
-
-                        return (
-                          <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
-                            <div
-                              className="category-item category-subitem"
-                              onClick={() => toggleCategory(categoryKey)}
-                              style={{ cursor: 'pointer' }}
-                            >
-                              <div style={{ flex: 1 }}>
-                                <div className="category-name">
-                                  <span className="expand-arrow" style={{ marginRight: '8px' }}>
-                                    {isExpanded ? '▼' : '▶'}
-                                  </span>
-                                  {category}
-                                  {transactionCount > 0 && (
-                                    <span className="transaction-count">({transactionCount})</span>
-                                  )}
-                                </div>
-                                <div className="category-bar">
-                                  <div
-                                    className="category-bar-fill category-bar-income"
-                                    style={{ width: `${maxSavingsAmount > 0 ? (amount / maxSavingsAmount) * 100 : 0}%` }}
-                                  />
-                                </div>
-                              </div>
-                              <div className="category-amount">
-                                {formatCurrency(amount, defaultCurrency)}
-                              </div>
-                            </div>
-                            {isExpanded && transactionCount > 0 && (
-                              <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
-                                {renderExpenseSortControls()}
-                                <div className="transaction-list">
-                                  {getCategoryTransactions(category, 'savings').map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-
-                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)' }}>
-                      <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
-                        <span className="category-name">Total Savings Movements</span>
-                        <span className="stat-value" style={{ fontWeight: '700' }}>
-                          {formatCurrency(savingsCategoryTotal, defaultCurrency)}
-                        </span>
-                      </div>
+            return (
+              <CollapsibleBreakdownSection
+                monthKey={month.month}
+                sectionId="savings-section"
+                title="Savings Movements"
+                total={savingsCategoryTotal}
+                defaultCurrency={defaultCurrency}
+                expandedSections={expandedSections}
+                setExpandedSections={setExpandedSections}
+                footer={expandedSections[`${month.month}-savings-section`] && (
+                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--color-border-primary)', marginLeft: '24px' }}>
+                    <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
+                      <span className="category-name">Total Savings Movements</span>
+                      <span className="stat-value" style={{ fontWeight: '700' }}>
+                        {formatCurrency(savingsCategoryTotal, defaultCurrency)}
+                      </span>
                     </div>
                   </div>
-                );
-              })()}
-            </div>
-          )}
+                )}
+              >
+                <div className="category-list">
+                  {savingsEntries
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([category, amount]) => {
+                      const categoryKey = `${month.month}-savings-${category}`;
+                      const isExpanded = expandedCategories[categoryKey];
+                      const transactionCount = getCategoryTransactionCount(category, 'savings');
+
+                      return (
+                        <div key={category} style={{ marginLeft: '24px', marginTop: '4px' }}>
+                          <div
+                            className="category-item category-subitem"
+                            onClick={() => toggleCategory(categoryKey)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <div style={{ flex: 1 }}>
+                              <div className="category-name">
+                                <span className="expand-arrow" style={{ marginRight: '8px' }}>
+                                  {isExpanded ? '▼' : '▶'}
+                                </span>
+                                {category}
+                                {transactionCount > 0 && (
+                                  <span className="transaction-count">({transactionCount})</span>
+                                )}
+                              </div>
+                              <div className="category-bar">
+                                <div
+                                  className="category-bar-fill category-bar-income"
+                                  style={{ width: `${maxSavingsAmount > 0 ? (amount / maxSavingsAmount) * 100 : 0}%` }}
+                                />
+                              </div>
+                            </div>
+                            <div className="category-amount">
+                              {formatCurrency(amount, defaultCurrency)}
+                            </div>
+                          </div>
+                          {isExpanded && transactionCount > 0 && (
+                            <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
+                              {renderExpenseSortControls()}
+                              <div className="transaction-list">
+                                {getCategoryTransactions(category, 'savings').map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </CollapsibleBreakdownSection>
+            );
+          })()}
 
       {/* Income Categories */}
       {(month.incomeCategories && Object.keys(month.incomeCategories).length > 0) && (() => {
