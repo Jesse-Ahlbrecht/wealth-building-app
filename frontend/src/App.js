@@ -18,6 +18,7 @@ import { AuthProvider, useAuthContext } from './context/AuthContext';
 import { AppProvider, useAppContext } from './context/AppContext';
 
 // Pages
+import CockpitPage from './pages/CockpitPage';
 import MonthlyOverviewPage from './pages/MonthlyOverviewPage';
 import PredictedPaymentsPage from './pages/PredictedPaymentsPage';
 import ChartsPage from './pages/ChartsPage';
@@ -37,6 +38,7 @@ const labelToPath = (label) => {
 
 // Constants
 const TAB_ITEMS = [
+  { key: 'cockpit', label: 'Cockpit' },
   { key: 'monthly-overview', label: 'Monthly Overview' },
   { key: 'predicted-payments', label: 'Predicted Payments' },
   { key: 'charts', label: 'Savings Statistics' },
@@ -61,6 +63,7 @@ const PATH_TO_TAB_KEY = Object.fromEntries(
 );
 
 const TAB_DESCRIPTIONS = {
+  'cockpit': 'Your savings progress over the last year',
   'monthly-overview': 'Track current month progress and review historical spending patterns',
   'predicted-payments': 'Review and manage recurring payment predictions',
   'charts': 'Track savings progress and rates over time',
@@ -217,15 +220,14 @@ function AppContent() {
     if (PATH_TO_TAB_KEY[pathname]) {
       return PATH_TO_TAB_KEY[pathname];
     }
-    // Default to monthly-overview
-    return 'monthly-overview';
+    return 'cockpit';
   };
 
   const activeTab = getActiveTabFromPath(location.pathname);
 
   // Navigation handler that updates URL
   const handleTabChange = (tabKey) => {
-    const path = TAB_KEY_TO_PATH[tabKey] || '/monthly-overview';
+    const path = TAB_KEY_TO_PATH[tabKey] || '/cockpit';
     navigate(path);
   };
 
@@ -386,7 +388,16 @@ function AppContent() {
       <div className="app-layout">
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<Navigate to="/monthly-overview" replace />} />
+            <Route path="/" element={<Navigate to="/cockpit" replace />} />
+            <Route path="/cockpit" element={
+              <>
+                <div className="content-header">
+                  <h2>{TAB_ITEMS.find(item => item.key === 'cockpit')?.label}</h2>
+                  <p>{TAB_DESCRIPTIONS['cockpit']}</p>
+                </div>
+                <CockpitPage />
+              </>
+            } />
             <Route path="/monthly-overview" element={
               <>
                 <div className="content-header">

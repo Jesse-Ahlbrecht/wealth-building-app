@@ -22,70 +22,54 @@ import {
   ReferenceLine,
   Cell
 } from 'recharts';
-import { transactionsAPI, predictionsAPI } from '../api';
-import {
-  formatCurrency,
-  formatMonth
-} from '../utils';
-import { parseSummaryResponse } from '../utils/apiHelpers';
-import { getLoanPaymentFromExpenseCategories } from '../utils/categoryHelpers';
-import { useCategoryData } from '../hooks';
-import {
-  getPredictionKey,
-  getPredictionMonth,
-  fetchPredictionsForMonth,
-  fetchAverageEssentialSpending
-} from '../utils/predictionHelpers';
+import { formatCurrency } from '../utils';
+import { buildMonthlySavingsPoints } from '../utils/chartDataHelpers';
+import { scrollToDrilldown, selectMonthFromChart } from '../utils/domHelpers';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
   getColorForPercentage
 } from '../utils/finance';
-import MonthSummaryCard from '../components/MonthSummaryCard';
+import MonthDrilldownPanel from '../components/MonthDrilldownPanel';
+import ChartPageStates from '../components/ChartPageStates';
 import { useAppContext } from '../context/AppContext';
 
 const ChartsPage = () => {
-  // Context
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
-
-  // Data state
   const { essentialCategories, availableCategories } = useCategoryData();
-  const [summary, setSummary] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const {
+    summary,
+    loading,
+    error,
+    loadSummary,
+    refreshSummary,
+    selectedMonth,
+    setSelectedMonth
+  } = useTransactionSummary({ syncSelectedMonth: true });
 
-  // UI state
   const [timeRange, setTimeRange] = useState('1y');
-  const [chartView, setChartView] = useState('absolute');
-  const [includeLoanPayments, setIncludeLoanPayments] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [chartView, setChartView] = usePreferenceState(
+    'charts_chartView',
+    'absolute',
+    preferences,
+    updatePreferences
+  );
+  const [includeLoanPayments, setIncludeLoanPayments] = usePreferenceState(
+    'charts_includeLoanPayments',
+    false,
+    preferences,
+    updatePreferences
+  );
 
-  useEffect(() => {
-    if (preferences) {
-      if (preferences.charts_chartView) {
-        setChartView(preferences.charts_chartView);
-      }
-      if (preferences.charts_includeLoanPayments !== undefined) {
-        setIncludeLoanPayments(preferences.charts_includeLoanPayments);
-      }
-    }
-  }, [preferences]);
-
-  const handleChartViewChange = (view) => {
-    setChartView(view);
-    updatePreferences({ charts_chartView: view });
-  };
-
-  const handleIncludeLoanPaymentsChange = (value) => {
-    setIncludeLoanPayments(value);
-    updatePreferences({ charts_includeLoanPayments: value });
-  };
-
-  // Category management state
-  const [expandedCategories, setExpandedCategories] = useState({});
-  const [expandedSections, setExpandedSections] = useState({});
-  const [predictions, setPredictions] = useState({});
-  const [averageEssentialSpending, setAverageEssentialSpending] = useState({});
+  const selectedMonthKey = selectedMonth?.month;
+  const {
+    predictions,
+    averageEssentialSpending,
+    reloadPredictions,
+    handleSkipPrediction,
+    handleDeletePrediction
+  } = useMonthPredictions(selectedMonthKey);
 
   // Drag selection state
   const chartContainerRef = useRef(null);
@@ -100,115 +84,10 @@ const ChartsPage = () => {
   const [showCustomHelp, setShowCustomHelp] = useState(false);
   const plotMetricsRef = useRef(null);
 
-  const loadSummary = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await transactionsAPI.getSummary();
-      const summaryData = parseSummaryResponse(response);
-
-      setSummary(summaryData);
-      setSelectedMonth((currentSelectedMonth) => {
-        if (!currentSelectedMonth?.month) {
-          return currentSelectedMonth;
-        }
-        return summaryData.find((item) => item.month === currentSelectedMonth.month) || currentSelectedMonth;
-      });
-    } catch (err) {
-      console.error('Error loading summary:', err);
-      setError(err.message || 'Failed to load chart data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadSummary();
-  }, [loadSummary]);
-
-  const loadAverageEssentialSpending = useCallback(async (month) => {
-    try {
-      const average = await fetchAverageEssentialSpending(month);
-      setAverageEssentialSpending(prev => ({ ...prev, [month]: average }));
-    } catch (err) {
-      console.error(`Error loading average essential spending for ${month}:`, err);
-      setAverageEssentialSpending(prev => ({ ...prev, [month]: 0 }));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (selectedMonth) {
-      loadPredictionsForMonth(selectedMonth.month);
-      loadAverageEssentialSpending(selectedMonth.month);
-    }
-  }, [selectedMonth, loadAverageEssentialSpending]);
-
-  const loadPredictionsForMonth = async (month) => {
-    try {
-      const predictionsData = await fetchPredictionsForMonth(month);
-      setPredictions(prev => ({
-        ...prev,
-        [month]: predictionsData
-      }));
-    } catch (err) {
-      console.error(`Error loading predictions for ${month}:`, err);
-      setPredictions(prev => ({
-        ...prev,
-        [month]: []
-      }));
-    }
-  };
-
-  const chartData = useMemo(() => summary
-    .sort((a, b) => new Date(a.month + '-01') - new Date(b.month + '-01'))
-    .map((month) => {
-      const expenseCategories = month.expenseCategories || month.expense_categories || {};
-      const monthlyLoanPayment = getLoanPaymentFromExpenseCategories(expenseCategories);
-      const baseSavings = month.savings || 0;
-      const adjustedSavings = includeLoanPayments ? baseSavings + monthlyLoanPayment : baseSavings;
-      const income = month.income || 0;
-      const adjustedSavingsRate = income > 0 ? ((adjustedSavings / income) * 100) : 0;
-      const baseSavingsRate = month.saving_rate || month.savingRate || 0;
-
-      return {
-        month: formatMonth(month.month),
-        monthKey: month.month,
-        savings: adjustedSavings,
-        savingRate: includeLoanPayments ? adjustedSavingsRate : baseSavingsRate,
-        income,
-        expenses: month.expenses || 0,
-        loanPayment: monthlyLoanPayment
-      };
-    }), [summary, includeLoanPayments]);
-
-  const reloadSelectedMonthPredictions = async () => {
-    if (selectedMonth) {
-      await loadPredictionsForMonth(selectedMonth.month);
-    }
-  };
-
-  const handleSkipPrediction = async (prediction) => {
-    try {
-      const month = getPredictionMonth(prediction, selectedMonth?.month);
-      await predictionsAPI.skipPredictionForMonth(getPredictionKey(prediction), month);
-      await reloadSelectedMonthPredictions();
-    } catch (err) {
-      console.error('Error skipping prediction:', err);
-    }
-  };
-
-  const handleDeletePrediction = async (prediction) => {
-    try {
-      await predictionsAPI.updateRecurringPayment(getPredictionKey(prediction), {
-        recipient: prediction.recipient,
-        category: prediction.category,
-        enabled: false
-      });
-      await reloadSelectedMonthPredictions();
-    } catch (err) {
-      console.error('Error deleting prediction:', err);
-    }
-  };
+  const chartData = useMemo(
+    () => buildMonthlySavingsPoints(summary, includeLoanPayments),
+    [summary, includeLoanPayments]
+  );
 
   // Helper function to lighten a color
   const lightenColor = (color, amount) => {
@@ -406,12 +285,7 @@ const ChartsPage = () => {
           const fullMonthData = summary.find(m => m.month === monthData.monthKey);
           if (fullMonthData) {
             setSelectedMonth(fullMonthData);
-            setTimeout(() => {
-              document.getElementById('drilldown-details')?.scrollIntoView({
-                behavior: 'smooth',
-                block: 'start'
-              });
-            }, 100);
+            setTimeout(scrollToDrilldown, 100);
           }
         }
       }
@@ -421,12 +295,7 @@ const ChartsPage = () => {
         const fullMonthData = summary.find(m => m.month === monthData.monthKey);
         if (fullMonthData) {
           setSelectedMonth(fullMonthData);
-          setTimeout(() => {
-            document.getElementById('drilldown-details')?.scrollIntoView({
-              behavior: 'smooth',
-              block: 'start'
-            });
-          }, 100);
+          setTimeout(scrollToDrilldown, 100);
         }
       }
     }
@@ -434,7 +303,7 @@ const ChartsPage = () => {
     setSelectionStart(null);
     setSelectionEnd(null);
     setHasMoved(false);
-  }, [hasMoved, selectionStart, selectionEnd, filteredData, summary]);
+  }, [hasMoved, selectionStart, selectionEnd, filteredData, summary, setSelectedMonth]);
 
   // Attach event listeners for mouse move and up
   useEffect(() => {
@@ -463,39 +332,15 @@ const ChartsPage = () => {
   const totalSavingRate = filteredData.reduce((sum, month) => sum + month.savingRate, 0);
   const avgSavingRate = filteredData.length ? totalSavingRate / filteredData.length : 0;
 
-  if (loading) {
-    return (
-      <div className="charts-container">
-        <div className="loading">Loading chart data...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="charts-container">
-        <div className="error-message">
-          {error}
-          <button onClick={loadSummary} className="btn-secondary" style={{ marginTop: '16px' }}>
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (chartData.length === 0) {
-    return (
-      <div className="charts-container">
-        <div className="empty-state">
-          <h3>No Data Available</h3>
-          <p>Upload bank statements to see your savings statistics here.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
+    <ChartPageStates
+      loading={loading}
+      error={error}
+      isEmpty={!loading && !error && chartData.length === 0}
+      onRetry={loadSummary}
+      loadingMessage="Loading chart data..."
+      emptyMessage="Upload bank statements to see your savings statistics here."
+    >
     <div className="charts-container charts-layout">
       <div className="chart-section">
         <div className="chart-header-row">
@@ -617,13 +462,13 @@ const ChartsPage = () => {
             <div className="chart-toggle">
               <button
                 className={`chart-toggle-btn ${chartView === 'absolute' ? 'active' : ''}`}
-                onClick={() => handleChartViewChange('absolute')}
+                onClick={() => setChartView('absolute')}
               >
                 Absolute
               </button>
               <button
                 className={`chart-toggle-btn ${chartView === 'relative' ? 'active' : ''}`}
-                onClick={() => handleChartViewChange('relative')}
+                onClick={() => setChartView('relative')}
               >
                 Rate
               </button>
@@ -631,7 +476,7 @@ const ChartsPage = () => {
             <div className="loan-payment-toggle">
               <button
                 className={`chart-toggle-btn ${includeLoanPayments ? 'active' : ''}`}
-                onClick={() => handleIncludeLoanPaymentsChange(!includeLoanPayments)}
+                onClick={() => setIncludeLoanPayments(!includeLoanPayments)}
                 title="Include monthly loan payments in savings calculation"
               >
                 Include Loans
@@ -660,19 +505,13 @@ const ChartsPage = () => {
                 // Don't trigger month selection if we're dragging or just finished dragging
                 if (isSelecting || isDraggingRef.current || hasMoved) return;
 
-                if (data && data.activePayload && data.activePayload[0]) {
-                  const clickedData = data.activePayload[0].payload;
-                  // Find the full month data from summary
-                  const monthData = summary.find((m) => m.month === clickedData.monthKey);
-                  if (monthData) {
-                    setSelectedMonth(monthData);
-                    setTimeout(() => {
-                      const element = document.getElementById('drilldown-details');
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }
-                    }, 100);
-                  }
+                if (data?.activePayload?.[0]) {
+                  selectMonthFromChart(
+                    summary,
+                    data.activePayload[0].payload,
+                    selectedMonth,
+                    setSelectedMonth
+                  );
                 }
               }}
             >
@@ -770,39 +609,22 @@ const ChartsPage = () => {
         </div>
       </div>
 
-      {/* Drilldown Details */}
-      {selectedMonth && (
-        <div id="drilldown-details" className="drilldown-details">
-          <button
-            className="drilldown-close"
-            onClick={() => setSelectedMonth(null)}
-            title="Close details"
-          >
-            ✕
-          </button>
-          <div className="current-month-container">
-            <MonthSummaryCard
-              month={selectedMonth}
-              isCurrentMonth={false}
-              defaultCurrency={defaultCurrency}
-              essentialCategories={essentialCategories}
-              expandedCategories={expandedCategories}
-              setExpandedCategories={setExpandedCategories}
-              expandedSections={expandedSections}
-              setExpandedSections={setExpandedSections}
-              includeLoanPayments={includeLoanPayments}
-              predictions={predictions[selectedMonth.month] || []}
-              averageEssentialSpending={averageEssentialSpending[selectedMonth.month] || 0}
-              onSkipPrediction={handleSkipPrediction}
-              onDeletePrediction={handleDeletePrediction}
-              onPredictionChanged={reloadSelectedMonthPredictions}
-              availableCategories={availableCategories}
-              onTransactionCategoryUpdated={loadSummary}
-            />
-          </div>
-        </div>
-      )}
+      <MonthDrilldownPanel
+        selectedMonth={selectedMonth}
+        onClose={() => setSelectedMonth(null)}
+        defaultCurrency={defaultCurrency}
+        essentialCategories={essentialCategories}
+        availableCategories={availableCategories}
+        includeLoanPayments={includeLoanPayments}
+        predictions={predictions[selectedMonthKey] || []}
+        averageEssentialSpending={averageEssentialSpending[selectedMonthKey] || 0}
+        onSkipPrediction={handleSkipPrediction}
+        onDeletePrediction={handleDeletePrediction}
+        onPredictionChanged={reloadPredictions}
+        onTransactionCategoryUpdated={refreshSummary}
+      />
     </div>
+    </ChartPageStates>
   );
 };
 

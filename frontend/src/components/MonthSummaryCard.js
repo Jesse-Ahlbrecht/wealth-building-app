@@ -9,7 +9,9 @@ import React, { useMemo } from 'react';
 import { formatCurrency, formatMonth, formatDate } from '../utils';
 import {
   getLoanPaymentFromExpenseCategories,
-  splitExpenseCategoryAmounts
+  splitExpenseCategoryAmounts,
+  mergeSavingsCategories,
+  sumCategoryAmounts
 } from '../utils/categoryHelpers';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
@@ -48,10 +50,6 @@ const MonthSummaryCard = ({
   isCurrentMonth, 
   defaultCurrency = 'CHF', 
   essentialCategories = [],
-  expandedCategories = {},
-  setExpandedCategories = () => {},
-  expandedSections = {},
-  setExpandedSections = () => {},
   includeLoanPayments = false,
   expenseSort = 'amount_desc',
   onExpenseSortChange = () => {},
@@ -66,6 +64,8 @@ const MonthSummaryCard = ({
   const [categoryModal, setCategoryModal] = React.useState(null);
   const [predictionMenu, setPredictionMenu] = React.useState(null);
   const [predictionModal, setPredictionModal] = React.useState(null);
+  const [expandedCategories, setExpandedCategories] = React.useState({});
+  const [expandedSections, setExpandedSections] = React.useState({});
   const income = month.income || 0;
   const monthlyLoanPayment = getLoanPaymentFromExpenseCategories(month.expenseCategories);
 
@@ -78,17 +78,14 @@ const MonthSummaryCard = ({
     [month.expenseCategories, essentialCategories, includeLoanPayments]
   );
 
-  const savingsCategories = useMemo(() => {
-    const merged = { ...(month.savingsCategories || {}) };
-    Object.entries(expenseSavingsCategories).forEach(([category, amount]) => {
-      merged[category] = (merged[category] || 0) + amount;
-    });
-    return merged;
-  }, [month.savingsCategories, expenseSavingsCategories]);
-  
-  const essentialTotal = Object.values(essentialExpenses).reduce((sum, val) => sum + val, 0);
-  const nonEssentialTotal = Object.values(nonEssentialExpenses).reduce((sum, val) => sum + val, 0);
-  const savingsCategoryTotal = Object.values(savingsCategories).reduce((sum, val) => sum + val, 0);
+  const savingsCategories = useMemo(
+    () => mergeSavingsCategories(month, expenseSavingsCategories),
+    [month, expenseSavingsCategories]
+  );
+
+  const essentialTotal = sumCategoryAmounts(essentialExpenses);
+  const nonEssentialTotal = sumCategoryAmounts(nonEssentialExpenses);
+  const savingsCategoryTotal = sumCategoryAmounts(savingsCategories);
   const splitExpensesTotal = essentialTotal + nonEssentialTotal;
   const savingsForDisplay = income - splitExpensesTotal;
   

@@ -33,6 +33,11 @@ export const getColorForPercentage = (percentage) => {
   }
 };
 
+export const formatSavingRateGoalMeta = (rate, goal = SAVINGS_RATE_GOAL) => ({
+  color: getColorForPercentage((rate / goal) * 100),
+  percentOfGoal: ((rate / goal) * 100).toFixed(0)
+});
+
 // Format currency with proper symbol and locale
 export const formatCurrency = (amount, currency = 'CHF') => {
   if (!Number.isFinite(amount)) return `${currency} 0.00`;

@@ -77,3 +77,14 @@ export const getLoanPaymentFromExpenseCategories = (expenseCategories) => {
   const value = expenseCategories[loanCategory];
   return typeof value === 'number' ? value : (value?.total || 0);
 };
+
+export const sumCategoryAmounts = (categories) =>
+  Object.values(categories || {}).reduce((sum, value) => sum + (value || 0), 0);
+
+export const mergeSavingsCategories = (month, expenseSavingsCategories) => {
+  const merged = { ...(month.savingsCategories || {}) };
+  Object.entries(expenseSavingsCategories).forEach(([category, amount]) => {
+    merged[category] = (merged[category] || 0) + amount;
+  });
+  return merged;
+};
