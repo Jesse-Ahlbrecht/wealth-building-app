@@ -178,7 +178,7 @@ const AccountsPage = () => {
 
   // Categorize accounts into cash, broker, and loans
   const isBrokerAccount = (accountName) => {
-    const brokerKeywords = ['ing diba', 'viac', 'broker', 'depot'];
+    const brokerKeywords = ['ing diba', 'viac', 'broker', 'depot', 'interactive brokers', 'ibkr'];
     return brokerKeywords.some((keyword) => accountName.toLowerCase().includes(keyword));
   };
 

@@ -3,6 +3,7 @@
  */
 
 import apiClient from './client';
+import { createFileUpload } from '../fileUpload';
 
 export const documentsAPI = {
   async getDocuments() {
@@ -22,10 +23,12 @@ export const documentsAPI = {
     }).then(res => res.json());
   },
 
-  async uploadDocument(file, documentType, onProgress) {
-    // Complex upload with progress - kept in App.js for now
-    // TODO: Refactor upload logic
-    throw new Error('Use uploadBankStatementWithProgress from App.js for now');
+  async uploadDocument(file, documentType) {
+    const formData = createFileUpload(file, documentType);
+    return apiClient.request('/api/documents/upload', {
+      method: 'POST',
+      body: formData,
+    });
   },
 
   async deleteDocument(documentId) {

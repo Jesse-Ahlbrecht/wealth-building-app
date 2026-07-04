@@ -25,7 +25,7 @@ import {
 import { formatCurrency } from '../utils';
 import { buildMonthlySavingsPoint, sortMonthsChronologically } from '../utils/chartDataHelpers';
 import { scrollToDrilldown, selectMonthFromChart } from '../utils/domHelpers';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
+import { useCategoryData, useEnrichedTransactionSummary, useMonthPredictions, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
@@ -40,13 +40,14 @@ const ChartsPage = () => {
   const { essentialCategories, availableCategories } = useCategoryData();
   const {
     summary,
+    bankSummary,
     loading,
     error,
     loadSummary,
     refreshSummary,
     selectedMonth,
     setSelectedMonth
-  } = useTransactionSummary({ syncSelectedMonth: true });
+  } = useEnrichedTransactionSummary({ syncSelectedMonth: true });
 
   const [timeRange, setTimeRange] = useState('1y');
   const [chartView, setChartView] = usePreferenceState(
@@ -78,10 +79,10 @@ const ChartsPage = () => {
   const plotMetricsRef = useRef(null);
 
   const chartData = useMemo(
-    () => sortMonthsChronologically(summary).map((month) =>
+    () => sortMonthsChronologically(bankSummary).map((month) =>
       buildMonthlySavingsPoint(month, essentialCategories)
     ),
-    [summary, essentialCategories]
+    [bankSummary, essentialCategories]
   );
 
   const drilldownPanelProps = useMonthDrilldownPanelProps({

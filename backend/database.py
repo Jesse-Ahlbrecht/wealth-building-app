@@ -949,6 +949,61 @@ class WealthDatabase:
                 'updated_transactions': len(matching_hashes)
             }
 
+    def recategorize_by_counterparty_keywords(
+        self,
+        tenant_id: str,
+        keywords: List[str],
+        from_category: str,
+        to_category: str,
+        remove_learned_rules: bool = True,
+    ) -> Dict[str, int]:
+        tenant_db_id = self.set_tenant_context(tenant_id)
+        keyword_patterns = [k.lower() for k in keywords if k]
+        updated = 0
+        rules_removed = 0
+
+        with self.db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT transaction_hash,
+                       decrypt_tenant_data(encrypted_recipient, %s) as recipient,
+                       decrypt_tenant_data(encrypted_description, %s) as description,
+                       category
+                FROM transactions
+                WHERE tenant_id = %s
+            """, (tenant_db_id, tenant_db_id, tenant_db_id))
+
+            matching_hashes = []
+            rule_keys = set()
+            for transaction_hash, recipient, description, category in cursor.fetchall():
+                text = f"{recipient or ''} {description or ''}".lower()
+                if not any(keyword in text for keyword in keyword_patterns):
+                    continue
+                if from_category and category != from_category:
+                    continue
+                matching_hashes.append(transaction_hash)
+                rule_keys.add(self._category_rule_key(recipient, description))
+
+            if matching_hashes:
+                placeholders = ', '.join(['%s'] * len(matching_hashes))
+                cursor.execute(
+                    f"UPDATE transactions SET category = %s WHERE tenant_id = %s AND transaction_hash IN ({placeholders})",
+                    [to_category, tenant_db_id, *matching_hashes],
+                )
+                updated = len(matching_hashes)
+
+            if remove_learned_rules and rule_keys:
+                self._ensure_category_rules_table(cursor)
+                for rule_key in rule_keys:
+                    if len(rule_key) < 3:
+                        continue
+                    cursor.execute("""
+                        DELETE FROM category_rules
+                        WHERE tenant_id = %s AND rule_key = %s
+                    """, (tenant_db_id, rule_key))
+                    rules_removed += cursor.rowcount
+
+        return {'updated_transactions': updated, 'removed_rules': rules_removed}
+
     def create_file_attachment(self, tenant_id: str, file_data: Dict[str, Any],
                              encrypted_data: bytes, encryption_metadata: Dict[str, Any],
                              key_version: str = 'v1', uploaded_by: Optional[int] = None) -> Dict[str, Any]:

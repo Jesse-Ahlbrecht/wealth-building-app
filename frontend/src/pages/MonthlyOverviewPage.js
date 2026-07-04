@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
+import { useCategoryData, useEnrichedTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
 import MonthSummaryCard from '../components/MonthSummaryCard';
 import ChartPageStates from '../components/ChartPageStates';
 import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
@@ -8,7 +8,7 @@ import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
 const MonthlyOverviewPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
   const { essentialCategories, availableCategories } = useCategoryData();
-  const { summary, loading, error, loadSummary, refreshSummary } = useTransactionSummary();
+  const { summary, bankSummary, loading, error, loadSummary, refreshSummary } = useEnrichedTransactionSummary();
   const [expenseSort, setExpenseSort] = usePreferenceState(
     'monthlyOverview_expenseSort',
     'amount_desc',
@@ -37,7 +37,7 @@ const MonthlyOverviewPage = () => {
     <ChartPageStates
       loading={loading}
       error={error}
-      isEmpty={!loading && !error && summary.length === 0}
+      isEmpty={!loading && !error && bankSummary.length === 0}
       onRetry={loadSummary}
       loadingMessage="Loading transaction data..."
       containerClassName="current-month-container"

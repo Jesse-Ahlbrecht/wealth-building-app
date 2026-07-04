@@ -6,6 +6,7 @@ Business logic for document management, upload, download, and processing.
 
 from flask import g, request, jsonify
 from typing import Dict, Any, Optional
+import hashlib
 import json
 import base64
 import os
@@ -211,16 +212,36 @@ def upload_document():
         original_name = raw_file.filename
         original_size = len(file_data)
         original_type = raw_file.content_type or 'application/octet-stream'
+        content_checksum = hashlib.sha256(file_data).hexdigest()
+        extension = os.path.splitext(original_name)[1].lower()
+
+        tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+
+        if document_type == 'broker_ibkr_csv':
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=extension or '.csv') as tmp_file:
+                    tmp_path = tmp_file.name
+                    tmp_file.write(file_data)
+                from routes.imports import record_broker_import_coverage
+                record_broker_import_coverage(
+                    tenant_id,
+                    document_type,
+                    tmp_path,
+                    original_name,
+                    content_checksum,
+                )
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
         
         # Validate file extension
-        extension = os.path.splitext(original_name)[1].lower()
         allowed_extensions = document_config.get('extensions') or []
         if allowed_extensions and extension not in allowed_extensions:
             return jsonify({
                 'error': f"Expected file with extension {', '.join(allowed_extensions)} for {document_config['label']}"
             }), 400
         
-        tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
         uploaded_by = _get_authenticated_user_id()
         now_iso = datetime.now(timezone.utc).isoformat()
         
@@ -271,7 +292,7 @@ def upload_document():
         
         # Process document to extract transactions (async, don't wait)
         try:
-            _process_document_async(document_id, document_type, file_data, tenant_id)
+            _process_document_async(document_id, document_type, file_data, tenant_id, original_name, file_record.get('checksum'))
         except Exception as e:
             print(f"Warning: Failed to process document {document_id}: {e}")
             _update_progress(document_id, 100, f'Processing failed: {str(e)}')
@@ -431,7 +452,51 @@ def download_statement(file_id):
         return jsonify({'error': 'Failed to retrieve file'}), 500
 
 
-def _process_document_async(document_id, document_type, file_data, tenant_id):
+def decrypt_file_attachment_bytes(tenant_id, file_id):
+    document = wealth_db.get_file_attachment(tenant_id, file_id)
+    if not document:
+        return None, None
+
+    encryption_metadata = document.get('encryption_metadata') or document.get('metadata') or {}
+    if isinstance(encryption_metadata, str):
+        encryption_metadata = json.loads(encryption_metadata)
+
+    server_encryption = encryption_metadata.get('server_encryption', {})
+    nonce_b64 = server_encryption.get('nonce')
+    key_version = server_encryption.get('key_version')
+    if not nonce_b64 or not key_version:
+        return None, None
+
+    original_metadata = encryption_metadata.copy()
+    if 'server_encryption' in original_metadata:
+        server_encryption_copy = original_metadata['server_encryption'].copy()
+        server_encryption_copy.pop('nonce', None)
+        server_encryption_copy.pop('key_version', None)
+        original_metadata['server_encryption'] = server_encryption_copy
+    if 'file_info' in original_metadata:
+        file_info_copy = original_metadata['file_info'].copy()
+        file_info_copy.pop('checksum', None)
+        original_metadata['file_info'] = file_info_copy
+
+    normalized_key_version = None if key_version == 'default' else key_version
+    nonce = base64.b64decode(nonce_b64)
+    server_encrypted = EncryptedData(
+        ciphertext=document['encrypted_data'],
+        nonce=nonce,
+        key_version=normalized_key_version,
+        algorithm='AES-256-GCM',
+        encrypted_at=server_encryption.get('encrypted_at', '')
+    )
+    file_data = encryption_service.decrypt_data(
+        server_encrypted,
+        tenant_id,
+        json.dumps(original_metadata, sort_keys=True).encode(),
+    )
+    original_name = (encryption_metadata.get('file_info') or {}).get('original_name') or document.get('original_name')
+    return file_data, original_name
+
+
+def _process_document_async(document_id, document_type, file_data, tenant_id, original_name=None, checksum=None):
     """Process uploaded document to extract transactions (runs in background thread)"""
     def process():
         try:
@@ -440,7 +505,7 @@ def _process_document_async(document_id, document_type, file_data, tenant_id):
             
             # Save to temp file
             _update_progress(document_id, 10, 'Preparing file...')
-            extension = os.path.splitext(document_type)[1] if '.' in document_type else '.csv'
+            extension = os.path.splitext(original_name or document_type)[1] or '.csv'
             if 'pdf' in document_type.lower():
                 extension = '.pdf'
             
@@ -500,9 +565,7 @@ def _process_document_async(document_id, document_type, file_data, tenant_id):
                     
                     _update_progress(document_id, 100, f'Successfully stored {stored_loans} loan record(s)')
                     print(f"✅ Stored {stored_loans} loans in database")
-                elif document_type in ['broker_viac_pdf', 'broker_ing_diba_csv']:
-                    # Broker documents are processed on-demand when broker data is requested
-                    # They don't need to be processed here, just acknowledge the upload
+                elif document_type in ['broker_viac_pdf', 'broker_ing_diba_csv', 'broker_ibkr_csv']:
                     _update_progress(document_id, 100, 'Broker document ready (will be processed on-demand)')
                     print(f"✅ Broker document uploaded: {document_type} (will be processed when broker data is requested)")
                     return

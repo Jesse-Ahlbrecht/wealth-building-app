@@ -88,6 +88,8 @@ const MonthSummaryCard = ({
   );
 
   const savingsCategoryTotal = sumCategoryAmounts(savingsCategories);
+  const internalTransferTotal = month?.internalTransferTotal || 0;
+  const internalTransferTransactions = month?.internalTransferTransactions || [];
   
   // Calculate predicted essential spending (use average if higher than current)
   const predictedEssentialAverage = isCurrentMonth ? (averageEssentialSpending || 0) : 0;
@@ -222,6 +224,10 @@ const MonthSummaryCard = ({
 
     if (normalized.includes('kfw')) {
       return { label: accountName, className: 'account-badge account-badge-kfw' };
+    }
+
+    if (normalized.includes('interactive brokers') || normalized.includes('ibkr')) {
+      return { label: 'Interactive Brokers', className: 'account-badge account-badge-interactive-brokers' };
     }
 
     return { label: accountName, className: `account-badge account-badge-default account-badge-${baseClass}` };
@@ -673,6 +679,48 @@ const MonthSummaryCard = ({
                 </div>
                 );
               })()}
+            </div>
+          )}
+
+          {internalTransferTotal > 0 && (
+            <div className="categories-section">
+              <div
+                className="category-item category-section-header"
+                onClick={() => {
+                  const sectionKey = `${month.month}-internal-transfers-section`;
+                  setExpandedSections(prev => ({
+                    ...prev,
+                    [sectionKey]: !prev[sectionKey]
+                  }));
+                }}
+                style={{
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  marginBottom: expandedSections[`${month.month}-internal-transfers-section`] ? '8px' : '0'
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <span className="category-name">
+                    <span className="expand-arrow" style={{ marginRight: '8px' }}>
+                      {expandedSections[`${month.month}-internal-transfers-section`] ? '▼' : '▶'}
+                    </span>
+                    Internal Transfers
+                  </span>
+                </div>
+                <span className="stat-value" style={{ fontWeight: '700' }}>
+                  {formatCurrency(internalTransferTotal, defaultCurrency)}
+                </span>
+              </div>
+
+              {expandedSections[`${month.month}-internal-transfers-section`] && (
+                <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px' }}>
+                  <div className="transaction-list">
+                    {sortTransactions(internalTransferTransactions, 'expense').map((txn, idx) =>
+                      renderTransactionItem(txn, idx)
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

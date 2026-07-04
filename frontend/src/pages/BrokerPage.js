@@ -14,40 +14,16 @@ import {
 import { brokerAPI } from '../api';
 import { formatCurrency, formatDate, EUR_TO_CHF_RATE } from '../utils';
 import { useAppContext } from '../context/AppContext';
+import { useBrokerData } from '../hooks';
 
 const BrokerPage = () => {
   const { preferences, updatePreferences } = useAppContext();
-  const [broker, setBroker] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { broker, loading, error, reloadBroker } = useBrokerData();
   const [ingDibaPurchaseDate, setIngDibaPurchaseDate] = useState(null);
   const [showPurchaseDateModal, setShowPurchaseDateModal] = useState(false);
   const [purchaseDateInput, setPurchaseDateInput] = useState('');
   const [historicalValuation, setHistoricalValuation] = useState(null);
   const [loadingHistorical, setLoadingHistorical] = useState(false);
-
-  // Load broker data on mount
-  useEffect(() => {
-    loadBroker();
-  }, []);
-
-  const loadBroker = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await brokerAPI.getBroker();
-      console.log('Broker API response:', data);
-      console.log('Broker summary:', data?.summary);
-      console.log('Broker holdings:', data?.holdings);
-      console.log('Broker transactions:', data?.transactions);
-      setBroker(data);
-    } catch (err) {
-      console.error('Error loading broker data:', err);
-      setError(err.message || 'Failed to load broker data');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Load purchase date from preferences on mount/update
   useEffect(() => {
@@ -280,7 +256,7 @@ const BrokerPage = () => {
       <div className="accounts-container">
         <div className="error-message">
           {error}
-          <button onClick={loadBroker} className="btn-secondary" style={{ marginTop: '16px' }}>
+          <button onClick={reloadBroker} className="btn-secondary" style={{ marginTop: '16px' }}>
             Retry
           </button>
         </div>
@@ -318,6 +294,9 @@ const BrokerPage = () => {
   const ingDibaTotalCost = summary.ing_diba ? summary.ing_diba.total_invested : 0;
   const ingDibaCurrentValue = summary.ing_diba ? summary.ing_diba.total_current_value : 0;
   const viacTotal = summary.viac ? summary.viac.total_invested : 0;
+  const ibkrSummary = summary.interactive_brokers || null;
+  const ibkrTotalValue = ibkrSummary ? ibkrSummary.total_value_chf : 0;
+  const ibkrHoldings = holdings.filter((h) => h.account === 'Interactive Brokers');
 
   // Sort transactions by date
   const sortedTransactions = [...transactions].sort(
@@ -487,7 +466,7 @@ const BrokerPage = () => {
       <div className="accounts-summary">
         <h3 className="accounts-title">Broker Summary</h3>
         {/* Portfolio Total Card - Full width at top */}
-        {((summary.viac && summary.viac.total_invested > 0) || (summary.ing_diba && (summary.ing_diba.total_current_value > 0 || summary.ing_diba.total_invested > 0))) && (
+        {((summary.viac && summary.viac.total_invested > 0) || (summary.ing_diba && (summary.ing_diba.total_current_value > 0 || summary.ing_diba.total_invested > 0)) || ibkrTotalValue > 0) && (
           <div style={{ marginBottom: '24px' }}>
             <div className="total-card" style={{ maxWidth: '400px' }}>
               <div className="total-label">Portfolio Total</div>
@@ -495,14 +474,16 @@ const BrokerPage = () => {
                 {formatCurrency(
                   (summary.viac ? summary.viac.total_invested : 0) +
                   ((summary.ing_diba && summary.ing_diba.total_current_value) ? summary.ing_diba.total_current_value * EUR_TO_CHF_RATE :
-                    (summary.ing_diba && summary.ing_diba.total_invested) ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0),
+                    (summary.ing_diba && summary.ing_diba.total_invested) ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0) +
+                  ibkrTotalValue,
                   'CHF'
                 )}
               </div>
               <div style={{ fontSize: '12px', marginTop: '4px', color: '#666' }}>
                 Invested: {formatCurrency(
                   (summary.viac ? summary.viac.total_invested : 0) +
-                  (summary.ing_diba ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0),
+                  (summary.ing_diba ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0) +
+                  (ibkrSummary ? (ibkrSummary.total_invested_chf + ibkrSummary.total_invested_eur * EUR_TO_CHF_RATE) : 0),
                   'CHF'
                 )}
               </div>
@@ -540,6 +521,27 @@ const BrokerPage = () => {
                 ).toFixed(2)}
                 %)
               </div>
+            </div>
+          )}
+          {ibkrSummary && (
+            <div className="total-card">
+              <div className="total-label">Interactive Brokers</div>
+              <div className="total-amount positive">
+                {formatCurrency(ibkrSummary.total_value_chf, 'CHF')}
+              </div>
+              <div style={{ fontSize: '12px', marginTop: '4px', color: '#666' }}>
+                Holdings: {formatCurrency(ibkrSummary.total_invested_chf, 'CHF')}
+                {ibkrSummary.total_invested_eur > 0 && (
+                  <> + {formatCurrency(ibkrSummary.total_invested_eur, 'EUR')}</>
+                )}
+              </div>
+              {(ibkrSummary.cash_balances?.CHF || ibkrSummary.cash_balances?.EUR) && (
+                <div style={{ fontSize: '12px', marginTop: '4px', color: '#666' }}>
+                  Cash:
+                  {ibkrSummary.cash_balances.CHF ? ` ${formatCurrency(ibkrSummary.cash_balances.CHF, 'CHF')}` : ''}
+                  {ibkrSummary.cash_balances.EUR ? ` ${formatCurrency(ibkrSummary.cash_balances.EUR, 'EUR')}` : ''}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -898,6 +900,41 @@ const BrokerPage = () => {
         </div>
       </div>
 
+      {/* Interactive Brokers Holdings */}
+      {ibkrHoldings.length > 0 && (
+        <div className="accounts-list-section">
+          <h3 className="accounts-title">Interactive Brokers Holdings</h3>
+          <div className="accounts-grid">
+            {ibkrHoldings.map((holding) => (
+              <div key={`${holding.account}-${holding.isin || holding.symbol}`} className="account-card">
+                <div className="account-header">
+                  <div className="account-name">{holding.security}</div>
+                  <span className="account-badge account-badge-interactive-brokers">
+                    {holding.currency}
+                  </span>
+                </div>
+                <div className="account-balance positive">
+                  {formatCurrency(holding.total_cost, holding.currency)}
+                </div>
+                <div className="account-meta" style={{ marginTop: '8px' }}>
+                  <span className="account-meta-item">{holding.shares} shares</span>
+                  {holding.symbol && (
+                    <span className="account-meta-item">{holding.symbol}</span>
+                  )}
+                </div>
+                {holding.isin && (
+                  <div className="account-meta" style={{ marginTop: '4px' }}>
+                    <span className="account-meta-item" style={{ fontSize: '11px', color: '#666' }}>
+                      ISIN: {holding.isin}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ING DiBa Holdings */}
       {holdings.filter((h) => h.account === 'ING DiBa').length > 0 && (
         <div className="accounts-list-section">
@@ -1065,29 +1102,68 @@ const BrokerPage = () => {
       <div className="accounts-list-section">
         <h3 className="accounts-title">Transaction History</h3>
         <div className="transaction-list">
-          {transactions.map((transaction, idx) => (
-            <div key={idx} className="transaction-item">
-              <div className="transaction-date">
-                {formatDate(transaction.date)}
-                <span className="account-badge account-badge-viac">{transaction.type.toUpperCase()}</span>
-              </div>
-              <div className="transaction-details">
-                <div className="transaction-recipient">{transaction.security}</div>
-                <div className="transaction-description">
-                  {transaction.shares} shares @ ${transaction.price_usd.toFixed(2)} USD
+          {transactions.map((transaction, idx) => {
+            const isViacTrade = transaction.account === 'VIAC' && transaction.price_usd !== undefined;
+            const badgeClass = transaction.account === 'Interactive Brokers'
+              ? 'account-badge-interactive-brokers'
+              : 'account-badge-viac';
+
+            return (
+              <div key={idx} className="transaction-item">
+                <div className="transaction-date">
+                  {formatDate(transaction.date)}
+                  <span className={`account-badge ${badgeClass}`}>
+                    {(transaction.type || 'trade').toUpperCase()}
+                  </span>
                 </div>
-                <div
-                  className="transaction-description"
-                  style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}
-                >
-                  ISIN: {transaction.isin}
+                <div className="transaction-details">
+                  <div className="transaction-recipient">{transaction.security}</div>
+                  {isViacTrade ? (
+                    <>
+                      <div className="transaction-description">
+                        {transaction.shares} shares @ ${transaction.price_usd.toFixed(2)} USD
+                      </div>
+                      <div
+                        className="transaction-description"
+                        style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}
+                      >
+                        ISIN: {transaction.isin}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {transaction.shares ? (
+                        <div className="transaction-description">
+                          {transaction.shares} shares
+                          {transaction.symbol ? ` (${transaction.symbol})` : ''}
+                        </div>
+                      ) : null}
+                      {transaction.category && (
+                        <div className="transaction-description">{transaction.category}</div>
+                      )}
+                      {transaction.matched_bank_transfer && (
+                        <div className="transaction-description" style={{ fontSize: '11px', color: '#666' }}>
+                          Matched {transaction.matched_bank_transfer.account} transfer on{' '}
+                          {formatDate(transaction.matched_bank_transfer.date)}
+                        </div>
+                      )}
+                      {transaction.isin && (
+                        <div
+                          className="transaction-description"
+                          style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}
+                        >
+                          ISIN: {transaction.isin}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className={`transaction-amount ${transaction.amount < 0 ? 'transaction-amount-expense' : 'transaction-amount-income'}`}>
+                  {formatCurrency(Math.abs(transaction.amount), transaction.currency)}
                 </div>
               </div>
-              <div className="transaction-amount transaction-amount-income">
-                {formatCurrency(Math.abs(transaction.amount), transaction.currency)}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

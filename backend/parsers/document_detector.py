@@ -38,8 +38,13 @@ def detect_document_type_from_content(file_content: bytes, filename: str) -> Opt
             if text_content is None:
                 return None
             
+            lines = text_content.split('\n')
+            if lines and lines[0].split(',')[0].strip('"') == 'BOF':
+                print("Detected as Interactive Brokers activity statement (Flex BOS format)")
+                return 'broker_ibkr_csv'
+
             # Read first few lines to find header
-            lines = text_content.split('\n')[:50]
+            lines = lines[:50]
             
             # Find header row
             header_line = None
@@ -170,6 +175,10 @@ def detect_document_type(filename: str) -> Optional[str]:
     
     # Bank statements - CSV files
     if extension == '.csv':
+        if 'ibkr' in filename_lower or 'interactive brokers' in filename_lower or 'interactive_brokers' in filename_lower or 'wealth_app_activity' in filename_lower:
+            return 'broker_ibkr_csv'
+        if 'ing' in filename_lower or 'diba' in filename_lower or 'depot' in filename_lower:
+            return 'broker_ing_diba_csv'
         if 'yuh' in filename_lower or 'aktivit' in filename_lower:
             return 'bank_statement_yuh'
         elif 'swisscard' in filename_lower or filename_lower.startswith('sc-transactions'):
@@ -183,10 +192,6 @@ def detect_document_type(filename: str) -> Optional[str]:
         if 'viac' in filename_lower:
             return 'broker_viac_pdf'
         elif 'ing' in filename_lower or 'diba' in filename_lower or 'depot' in filename_lower:
-            return 'broker_ing_diba_csv'
-    
-    if extension == '.csv':
-        if 'ing' in filename_lower or 'diba' in filename_lower or 'depot' in filename_lower:
             return 'broker_ing_diba_csv'
     
     # Loan documents

@@ -58,7 +58,7 @@ def get_accounts():
 
         # Add broker accounts from broker holdings
         try:
-            broker_docs = wealth_db.list_file_attachments(tenant_id, file_types=['broker_viac_pdf', 'broker_ing_diba_csv'])
+            broker_docs = wealth_db.list_file_attachments(tenant_id, file_types=['broker_viac_pdf', 'broker_ing_diba_csv', 'broker_ibkr_csv'])
             
             # Aggregate holdings across all documents first
             all_holdings_dict = {}  # Key: ISIN, Value: {shares, total_cost}
@@ -153,6 +153,28 @@ def get_accounts():
                                         all_holdings_dict[key]['shares'] += holding.get('shares', 0)
                                         all_holdings_dict[key]['total_cost'] += holding.get('total_cost', 0)
                                         all_holdings_dict[key]['current_value'] += holding.get('current_value', holding.get('total_cost', 0))
+                        elif file_type == 'broker_ibkr_csv':
+                            parsed = parser.parse_ibkr(tmp_path)
+                            for holding in parsed.get('holdings', []):
+                                key = f"IBKR_{holding.get('isin') or holding.get('symbol')}"
+                                if key not in all_holdings_dict:
+                                    all_holdings_dict[key] = {
+                                        'shares': holding.get('shares', 0),
+                                        'total_cost': holding.get('total_cost', 0),
+                                        'current_value': holding.get('current_value', holding.get('total_cost', 0)),
+                                        'cash_balances': parsed.get('cash_balances', {}),
+                                    }
+                                else:
+                                    all_holdings_dict[key]['shares'] += holding.get('shares', 0)
+                                    all_holdings_dict[key]['total_cost'] += holding.get('total_cost', 0)
+                                    all_holdings_dict[key]['current_value'] += holding.get('current_value', holding.get('total_cost', 0))
+                            ibkr_cash = parsed.get('cash_balances', {})
+                            if ibkr_cash:
+                                all_holdings_dict.setdefault('IBKR_CASH', {'cash_balances': {}})
+                                for currency, amount in ibkr_cash.items():
+                                    all_holdings_dict['IBKR_CASH']['cash_balances'][currency] = (
+                                        all_holdings_dict['IBKR_CASH']['cash_balances'].get(currency, 0) + amount
+                                    )
                         
                         if tmp_path:
                             os.unlink(tmp_path)
@@ -168,6 +190,7 @@ def get_accounts():
                 # Calculate totals from aggregated holdings
                 viac_total_invested = 0
                 ing_diba_total_current = 0
+                ibkr_total_value = 0
                 
                 for key, holding in all_holdings_dict.items():
                     if key.startswith('VIAC_'):
@@ -176,6 +199,15 @@ def get_accounts():
                     elif key.startswith('ING_DIBA_'):
                         if holding['shares'] > 0:
                             ing_diba_total_current += holding.get('current_value', holding['total_cost'])
+                    elif key.startswith('IBKR_') and key != 'IBKR_CASH':
+                        if holding['shares'] > 0:
+                            ibkr_total_value += holding.get('current_value', holding['total_cost'])
+                    elif key == 'IBKR_CASH':
+                        for currency, amount in holding.get('cash_balances', {}).items():
+                            if currency == 'CHF':
+                                ibkr_total_value += amount
+                            elif currency == 'EUR':
+                                ibkr_total_value += amount * 1.08
                 
                 # Add VIAC account if there are holdings
                 if viac_total_invested > 0:
@@ -198,6 +230,16 @@ def get_accounts():
                         'last_transaction_date': None
                     })
                     totals['EUR'] += ing_diba_total_current
+
+                if ibkr_total_value > 0:
+                    accounts_list.append({
+                        'account': 'Interactive Brokers',
+                        'balance': ibkr_total_value,
+                        'currency': 'CHF',
+                        'transaction_count': 0,
+                        'last_transaction_date': None
+                    })
+                    totals['CHF'] += ibkr_total_value
         except Exception as e:
             print(f"Error adding broker accounts: {e}")
             traceback.print_exc()

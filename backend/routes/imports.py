@@ -4,6 +4,8 @@ Imports Routes
 Normalized client-side import ingestion and coverage overview.
 """
 
+import os
+import tempfile
 from datetime import datetime, timedelta
 from flask import Blueprint, g, request
 
@@ -102,6 +104,74 @@ def _calculate_gaps(segments):
     return gaps
 
 
+def record_broker_import_coverage(tenant_id, document_type, filepath, filename, checksum=None):
+    if document_type != 'broker_ibkr_csv':
+        return None
+
+    from parsers.broker_parser import IBKRParser, ACCOUNT_NAME
+
+    parsed = IBKRParser().parse(filepath)
+    transactions = parsed.get('transactions', [])
+    if not transactions:
+        return None
+
+    dates = sorted(transaction['date'] for transaction in transactions if transaction.get('date'))
+    if not dates:
+        return None
+
+    account = _get_or_create_account(tenant_id, ACCOUNT_NAME, 'CHF', document_type)
+    if checksum and wealth_db.import_batch_checksum_exists(tenant_id, account['id'], checksum):
+        return None
+
+    return wealth_db.create_import_batch(tenant_id, {
+        'account_id': account['id'],
+        'source_type': document_type,
+        'filename': filename,
+        'statement_start_date': dates[0],
+        'statement_end_date': dates[-1],
+        'transaction_count': len(transactions),
+        'imported_count': len(transactions),
+        'skipped_count': 0,
+        'checksum': checksum,
+        'metadata': {'brokerDocument': True},
+    })
+
+
+def _backfill_ibkr_import_coverage(tenant_id):
+    batches = wealth_db.list_import_batches(tenant_id)
+    if any(batch['source_type'] == 'broker_ibkr_csv' for batch in batches):
+        return
+
+    attachments = wealth_db.list_file_attachments(tenant_id, file_types=['broker_ibkr_csv'])
+    if not attachments:
+        return
+
+    from services.document_service import decrypt_file_attachment_bytes
+
+    for attachment in attachments:
+        try:
+            file_data, original_name = decrypt_file_attachment_bytes(tenant_id, attachment['id'])
+            if not file_data:
+                continue
+            suffix = os.path.splitext(original_name or 'export.csv')[1] or '.csv'
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                tmp_path = tmp_file.name
+                tmp_file.write(file_data)
+            try:
+                record_broker_import_coverage(
+                    tenant_id,
+                    'broker_ibkr_csv',
+                    tmp_path,
+                    original_name or attachment.get('original_name'),
+                    attachment.get('checksum'),
+                )
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+        except Exception as exc:
+            print(f"Warning: failed to backfill IBKR import coverage for attachment {attachment.get('id')}: {exc}")
+
+
 @imports_bp.route('', methods=['GET'])
 @authenticate_request
 @require_auth
@@ -109,6 +179,7 @@ def get_import_overview():
     tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
 
     try:
+        _backfill_ibkr_import_coverage(tenant_id)
         accounts = wealth_db.get_accounts(tenant_id)
         batches = wealth_db.list_import_batches(tenant_id)
 

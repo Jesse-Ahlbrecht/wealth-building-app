@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { importsAPI } from '../api';
+import { documentsAPI, importsAPI } from '../api';
 import { formatDate } from '../utils';
-import { parseImportFile } from '../utils/importParsers';
+import { classifyImportFile, parseImportFile } from '../utils/importParsers';
 
 const formatDateTime = (value) => {
   if (!value) return '—';
@@ -87,25 +87,38 @@ const DocumentsPage = () => {
 
     try {
       const allBatches = [];
+      const brokerUploads = [];
       const issues = [];
 
       for (const file of files) {
         try {
-          const parsedBatches = await parseImportFile(file);
-          allBatches.push(...parsedBatches);
+          const classification = await classifyImportFile(file);
+          if (classification.kind === 'broker') {
+            await documentsAPI.uploadDocument(file, classification.documentType);
+            brokerUploads.push({ name: file.name, documentType: classification.documentType });
+          } else {
+            const parsedBatches = await parseImportFile(file);
+            allBatches.push(...parsedBatches);
+          }
         } catch (fileError) {
           issues.push(`${file.name}: ${fileError.message}`);
         }
       }
 
-      if (allBatches.length === 0) {
+      if (allBatches.length === 0 && brokerUploads.length === 0) {
         throw new Error(issues[0] || 'No supported imports found');
       }
 
-      const response = await importsAPI.importBatches(allBatches);
+      let importedBatches = [];
+      if (allBatches.length > 0) {
+        const response = await importsAPI.importBatches(allBatches);
+        importedBatches = response?.data?.batches || response?.batches || [];
+      }
+
       await loadOverview();
       setResult({
-        importedBatches: response?.data?.batches || response?.batches || [],
+        importedBatches,
+        brokerUploads,
         issues
       });
     } catch (uploadError) {
@@ -147,7 +160,7 @@ const DocumentsPage = () => {
       <section className="imports-upload-card">
         <div>
           <h4>Supported imports</h4>
-          <p>DKB, YUH, Swisscard CSV exports, and Amazon Visa Excel exports are parsed client-side. The server stores only normalized transactions and import coverage metadata.</p>
+          <p>DKB, YUH, Swisscard CSV exports, Amazon Visa Excel exports, and Interactive Brokers Activity Flex CSVs. Bank files are parsed client-side; broker files are stored encrypted and processed on the Broker page.</p>
         </div>
         <button type="button" className="documents-refresh-button" onClick={loadOverview} disabled={loading || uploading}>
           {loading ? 'Refreshing…' : 'Refresh overview'}
@@ -164,6 +177,11 @@ const DocumentsPage = () => {
               <li key={`${batch.accountName}-${batch.statementStartDate}-${batch.statementEndDate}`}>
                 {batch.accountName}: {batch.importedCount} imported, {batch.skippedCount} skipped
                 ({formatDate(batch.statementStartDate)} to {formatDate(batch.statementEndDate)})
+              </li>
+            ))}
+            {result.brokerUploads?.map((upload) => (
+              <li key={upload.name}>
+                {upload.name}: broker document uploaded ({upload.documentType})
               </li>
             ))}
           </ul>

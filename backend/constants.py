@@ -51,6 +51,15 @@ DOCUMENT_TYPES = [
         'sample_data_path': 'data/depot_transactions/ing_diba'
     },
     {
+        'key': 'broker_ibkr_csv',
+        'label': 'Interactive Brokers Activity Statement',
+        'category': 'broker',
+        'description': 'Activity Flex Query CSV exports from Interactive Brokers. Enable Trades and Cash Transactions sections only.',
+        'extensions': ['.csv'],
+        'parser': 'parse_ibkr',
+        'sample_data_path': 'data/depot_transactions/ibkr'
+    },
+    {
         'key': 'loan_kfw_pdf',
         'label': 'KfW Loan Statement',
         'category': 'loan',

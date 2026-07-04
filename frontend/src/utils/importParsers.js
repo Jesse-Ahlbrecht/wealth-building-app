@@ -360,13 +360,32 @@ const parseAmazonVisaWorkbook = (arrayBuffer, filename, checksum) => {
   }));
 };
 
-const detectParser = (text) => {
+const stripBom = (text) => text.replace(/^\uFEFF/, '');
+
+const isIbkrFlexCsv = (text, filename = '') => {
+  const preview = stripBom(text.slice(0, 512));
+  const normalized = preview.replace(/"/g, '');
+  if (/^BOF[,;]/.test(normalized)) return true;
+  const lowerName = (filename || '').toLowerCase();
+  return lowerName.includes('wealth_app_activity') || lowerName.includes('ibkr');
+};
+
+const detectParser = (text, filename = '') => {
+  if (isIbkrFlexCsv(text, filename)) return null;
   const preview = text.slice(0, 2000);
   const normalizedPreview = preview.replace(/"/g, '').replace(/^\uFEFF/, '');
   if (/Transaktionsdatum,Beschreibung,Händler,Kartennummer/.test(normalizedPreview)) return parseSwisscard;
   if (/DATE;.*ACTIVITY/.test(normalizedPreview) || /DATE;.*DEBIT;.*CREDIT/.test(normalizedPreview)) return parseYuh;
   if (/(Buchungstag|Buchungsdatum|Buchung).*Betrag/.test(normalizedPreview)) return parseDkb;
-  throw new Error('Unsupported CSV format. Supported imports: DKB, YUH, Swisscard, Amazon Visa XLS.');
+  throw new Error('Unsupported CSV format. Supported imports: DKB, YUH, Swisscard, Amazon Visa XLS, Interactive Brokers Flex CSV.');
+};
+
+export const classifyImportFile = async (file) => {
+  const header = stripBom(await file.slice(0, 512).text());
+  if (isIbkrFlexCsv(header, file.name)) {
+    return { kind: 'broker', documentType: 'broker_ibkr_csv' };
+  }
+  return { kind: 'bank' };
 };
 
 const sha256 = async (input) => {
@@ -384,6 +403,9 @@ export const parseImportFile = async (file) => {
 
   const text = await file.text();
   const checksum = await sha256(text);
-  const parser = detectParser(text);
+  const parser = detectParser(text, file.name);
+  if (!parser) {
+    throw new Error('Interactive Brokers Flex CSV must be uploaded as a broker document.');
+  }
   return parser(text, file.name, checksum);
 };

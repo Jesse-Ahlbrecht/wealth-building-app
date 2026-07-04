@@ -1,8 +1,15 @@
+export const INTERNAL_TRANSFER_CATEGORY = 'Internal Transfer';
+
+export const BROKER_SAVINGS_INVESTMENTS = 'Interactive Brokers Investments';
+export const BROKER_SAVINGS_CASH = 'Interactive Brokers Cash';
+
 export const SAVINGS_CATEGORY_NAMES = new Set([
   'Transfer',
-  'Internal Transfer',
+  INTERNAL_TRANSFER_CATEGORY,
   'Loan Payment',
-  'Investment Account Payment'
+  'Investment Account Payment',
+  BROKER_SAVINGS_INVESTMENTS,
+  BROKER_SAVINGS_CASH
 ]);
 
 export const isLoanPaymentCategory = (category) => {
@@ -72,13 +79,103 @@ export const mergeSavingsCategories = (month, expenseSavingsCategories) => {
   return merged;
 };
 
+const normalizeBrokerSavingsTransaction = (txn, category) => {
+  const isBuy = txn.type === 'buy';
+  const amount = Math.abs(txn.amount || 0);
+  const shares = txn.shares ? `${txn.shares} shares · ` : '';
+
+  return {
+    date: txn.date,
+    amount: isBuy ? -amount : amount,
+    currency: txn.currency,
+    recipient: txn.security || txn.symbol || 'Interactive Brokers',
+    description: isBuy
+      ? `${shares}${txn.symbol || ''}`.trim()
+      : (txn.type === 'forex' ? 'FX conversion' : txn.type),
+    account: txn.account,
+    category,
+    type: 'expense'
+  };
+};
+
+export const buildBrokerMonthlySavings = (broker) => {
+  const byMonth = {};
+
+  const ensureMonth = (monthKey) => {
+    if (!byMonth[monthKey]) {
+      byMonth[monthKey] = { savingsCategories: {}, savingsTransactions: {} };
+    }
+    return byMonth[monthKey];
+  };
+
+  const addToCategory = (monthKey, category, txn, signedAmount) => {
+    if (!signedAmount) return;
+    const month = ensureMonth(monthKey);
+    month.savingsCategories[category] = (month.savingsCategories[category] || 0) + signedAmount;
+    month.savingsTransactions[category] = month.savingsTransactions[category] || [];
+    month.savingsTransactions[category].push(normalizeBrokerSavingsTransaction(txn, category));
+  };
+
+  (broker?.transactions || []).forEach((txn) => {
+    if (txn.account !== 'Interactive Brokers') return;
+    const monthKey = (txn.date || '').slice(0, 7);
+    if (!monthKey || monthKey.length !== 7) return;
+
+    const amount = Math.abs(txn.amount || 0);
+    if (!amount) return;
+
+    if (txn.type === 'buy') {
+      addToCategory(monthKey, BROKER_SAVINGS_INVESTMENTS, txn, amount);
+      return;
+    }
+
+    if (txn.type === 'deposit' || txn.type === 'sell') {
+      addToCategory(monthKey, BROKER_SAVINGS_CASH, txn, amount);
+      return;
+    }
+
+    if (txn.type === 'withdrawal') {
+      addToCategory(monthKey, BROKER_SAVINGS_CASH, txn, -amount);
+      return;
+    }
+
+    if (txn.type === 'forex') {
+      addToCategory(monthKey, BROKER_SAVINGS_CASH, txn, amount);
+    }
+  });
+
+  return byMonth;
+};
+
+export const enrichSummaryWithBrokerSavings = (summary, brokerByMonth) => {
+  if (!Array.isArray(summary) || summary.length === 0 || !brokerByMonth || Object.keys(brokerByMonth).length === 0) {
+    return summary;
+  }
+
+  return summary.map((month) => {
+    const brokerMonth = brokerByMonth[month.month];
+    if (!brokerMonth) return month;
+
+    const savingsCategories = { ...(month.savingsCategories || {}) };
+    const savingsTransactions = { ...(month.savingsTransactions || {}) };
+
+    Object.entries(brokerMonth.savingsCategories).forEach(([category, amount]) => {
+      if (!amount) return;
+      savingsCategories[category] = (savingsCategories[category] || 0) + amount;
+    });
+
+    Object.entries(brokerMonth.savingsTransactions).forEach(([category, txns]) => {
+      savingsTransactions[category] = [...(savingsTransactions[category] || []), ...txns];
+    });
+
+    return { ...month, savingsCategories, savingsTransactions };
+  });
+};
+
 export const getSavingsCategoryTransactions = (month, category) => {
   const fromSavings = month?.savingsTransactions?.[category] || [];
   if (fromSavings.length > 0) {
     return fromSavings;
-  }
-  if (category === 'Internal Transfer') {
-    return month?.internalTransferTransactions || [];
   }
   return month?.expenseTransactions?.[category] || [];
 };
