@@ -11,17 +11,28 @@ from flask import Blueprint, g, jsonify
 from database import get_wealth_database
 from middleware.auth_middleware import authenticate_request, require_auth
 from utils.response_helpers import error_response
-from category_config import get_bank_savings_movement_categories
-from services.broker_savings import merge_broker_savings_into_summary
-from services.broker_service import load_broker_data
+from constants import TRANSACTION_QUERY_LIMIT
 from services.transfer_pairing import get_transfer_pairs, INTERNAL_TRANSFER
-from services.refund_pairing import build_refund_lookup, get_refund_pairs
+from services.refund_pairing import build_refund_lookup
 from services.ibkr_deposit_pairing import get_ibkr_deposit_pairs
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/api')
 wealth_db = get_wealth_database()
 
 SAVINGS_MOVEMENT_CATEGORIES = get_bank_savings_movement_categories()
+
+
+def _tenant_id():
+    return g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+
+
+def _pair_response(handler, error_message):
+    try:
+        return jsonify(handler(wealth_db, _tenant_id()))
+    except Exception as e:
+        print(f"{error_message}: {e}")
+        print(traceback.format_exc())
+        return error_response(error_message, 500)
 
 
 @transactions_bp.route('/transactions')
@@ -46,39 +57,14 @@ def get_transactions():
 @authenticate_request
 @require_auth
 def list_transfer_pairs():
-    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
-    try:
-        return jsonify(get_transfer_pairs(wealth_db, tenant_id))
-    except Exception as e:
-        print(f"Error getting transfer pairs: {e}")
-        print(traceback.format_exc())
-        return error_response('Failed to retrieve transfer pairs', 500)
-
-
-@transactions_bp.route('/transactions/refund-pairs')
-@authenticate_request
-@require_auth
-def list_refund_pairs():
-    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
-    try:
-        return jsonify(get_refund_pairs(wealth_db, tenant_id))
-    except Exception as e:
-        print(f"Error getting refund pairs: {e}")
-        print(traceback.format_exc())
-        return error_response('Failed to retrieve refund pairs', 500)
+    return _pair_response(get_transfer_pairs, 'Failed to retrieve transfer pairs')
 
 
 @transactions_bp.route('/transactions/ibkr-deposit-pairs')
 @authenticate_request
 @require_auth
 def list_ibkr_deposit_pairs():
-    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
-    try:
-        return jsonify(get_ibkr_deposit_pairs(wealth_db, tenant_id))
-    except Exception as e:
-        print(f"Error getting IBKR deposit pairs: {e}")
-        print(traceback.format_exc())
-        return error_response('Failed to retrieve IBKR deposit pairs', 500)
+    return _pair_response(get_ibkr_deposit_pairs, 'Failed to retrieve IBKR deposit pairs')
 
 
 @transactions_bp.route('/summary')
@@ -91,7 +77,7 @@ def get_summary():
 
     try:
         # Get all transactions from database
-        db_transactions = wealth_db.get_transactions(tenant_id, limit=10000, offset=0)
+        db_transactions = wealth_db.get_transactions(tenant_id, limit=TRANSACTION_QUERY_LIMIT, offset=0)
 
         print(f"Total transactions from database: {len(db_transactions)}")
         if db_transactions:

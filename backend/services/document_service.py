@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from encryption import get_encryption_service, EncryptedData
 from database import get_wealth_database
 from constants import DOCUMENT_TYPE_LOOKUP
+from services.broker_service import invalidate_broker_data_cache
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -316,6 +317,8 @@ def delete_document(document_id):
         deleted = wealth_db.delete_file_attachment(tenant_id, document_id)
         if not deleted:
             return jsonify({'error': 'Document not found'}), 404
+        if deleted.get('file_type') in ['broker_viac_pdf', 'broker_ing_diba_csv', 'broker_ibkr_csv']:
+            invalidate_broker_data_cache(tenant_id)
         return jsonify({'success': True, 'message': 'Document deleted successfully'})
     except Exception as e:
         print(f"Error deleting document: {e}")
@@ -327,6 +330,8 @@ def delete_documents_by_type(document_type):
     tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
     try:
         deleted = wealth_db.delete_file_attachments_by_type(tenant_id, document_type)
+        if document_type in ['broker_viac_pdf', 'broker_ing_diba_csv', 'broker_ibkr_csv'] and deleted:
+            invalidate_broker_data_cache(tenant_id)
         return jsonify({'success': True, 'deleted_count': len(deleted)})
     except Exception as e:
         print(f"Error deleting documents by type: {e}")
@@ -566,6 +571,7 @@ def _process_document_async(document_id, document_type, file_data, tenant_id, or
                     _update_progress(document_id, 100, f'Successfully stored {stored_loans} loan record(s)')
                     print(f"✅ Stored {stored_loans} loans in database")
                 elif document_type in ['broker_viac_pdf', 'broker_ing_diba_csv', 'broker_ibkr_csv']:
+                    invalidate_broker_data_cache(tenant_id)
                     _update_progress(document_id, 100, 'Broker document ready (will be processed on-demand)')
                     print(f"✅ Broker document uploaded: {document_type} (will be processed when broker data is requested)")
                     return

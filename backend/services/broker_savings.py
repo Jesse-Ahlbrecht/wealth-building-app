@@ -57,7 +57,7 @@ def build_broker_monthly_savings(transactions):
             continue
 
         txn_type = txn.get('type')
-        if txn.get('category') == INTERNAL_TRANSFER and txn_type in ('deposit', 'withdrawal'):
+        if txn.get('category') == INTERNAL_TRANSFER and txn_type in ('deposit', 'withdrawal', 'forex'):
             continue
         if txn_type == 'buy':
             category = INVESTMENTS_CATEGORY

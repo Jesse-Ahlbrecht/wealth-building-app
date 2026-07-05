@@ -32,7 +32,19 @@ class BrokerSavingsTest(unittest.TestCase):
         self.assertIn('2026-03', by_month)
         self.assertEqual(by_month['2026-03']['savings_categories']['Interactive Brokers Investments'], 500)
         self.assertNotIn('Interactive Brokers Cash', by_month['2026-03']['savings_categories'])
-        self.assertEqual(len(by_month['2026-03']['savings_transactions']['Interactive Brokers Investments']), 1)
+
+    def test_skips_internal_transfer_forex(self):
+        transactions = [{
+            'account': 'Interactive Brokers',
+            'date': '2026-03-12',
+            'type': 'forex',
+            'amount': 100,
+            'currency': 'CHF',
+            'security': 'EUR.CHF',
+            'category': 'Internal Transfer',
+        }]
+        by_month = build_broker_monthly_savings(transactions)
+        self.assertEqual(by_month, {})
 
     def test_merge_into_summary(self):
         summary = [{

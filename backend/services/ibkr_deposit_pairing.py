@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from constants import TRANSACTION_QUERY_LIMIT
 from services.transfer_pairing import (
     INTERNAL_TRANSFER,
     _amounts_match,
@@ -147,7 +148,7 @@ def get_ibkr_deposit_pairs(
         from services.broker_service import load_broker_data
         ibkr_transactions = load_broker_data(tenant_id).get('transactions', [])
 
-    bank_transactions = wealth_db.get_transactions(tenant_id, limit=50000)
+    bank_transactions = wealth_db.get_transactions(tenant_id, limit=TRANSACTION_QUERY_LIMIT)
     pairs, unmatched_bank, unmatched_deposits = match_ibkr_deposits_to_bank_transfers(
         ibkr_transactions,
         bank_transactions,

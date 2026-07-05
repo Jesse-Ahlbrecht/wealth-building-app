@@ -160,31 +160,6 @@ def allocate_refunds(
     return allocations, dict(expense_refunded), dict(income_refunded)
 
 
-def get_refund_pairs(
-    wealth_db,
-    tenant_id: str,
-    *,
-    window_days: int = DEFAULT_REFUND_WINDOW_DAYS,
-    amount_tolerance: float = DEFAULT_AMOUNT_TOLERANCE,
-) -> Dict[str, Any]:
-    wealth_db.set_tenant_context(tenant_id)
-    transactions = wealth_db.get_transactions(tenant_id, limit=50000, offset=0)
-    skip_hashes = wealth_db.get_active_category_override_hashes(tenant_id)
-
-    allocations, expense_refunded, income_refunded = allocate_refunds(
-        transactions,
-        window_days=window_days,
-        amount_tolerance=amount_tolerance,
-        skip_hashes=skip_hashes,
-    )
-
-    return {
-        'pairs': allocations,
-        'expenseRefunded': expense_refunded,
-        'incomeRefunded': income_refunded,
-    }
-
-
 def build_refund_lookup(
     transactions: List[Dict[str, Any]],
     *,

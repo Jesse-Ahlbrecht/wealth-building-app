@@ -13,6 +13,7 @@ from datetime import datetime
 
 from encryption import get_encryption_service, EncryptedData
 from database import get_wealth_database
+from constants import TRANSACTION_QUERY_LIMIT
 from parsers.bank_statement_parser import BankStatementParser
 from services.ibkr_deposit_pairing import IBKR_ACCOUNT, match_ibkr_deposits_to_bank_transfers
 
@@ -20,9 +21,33 @@ encryption_service = get_encryption_service()
 wealth_db = get_wealth_database()
 
 BROKER_FILE_TYPES = ['broker_viac_pdf', 'broker_ing_diba_csv', 'broker_ibkr_csv']
+_broker_data_cache: dict[str, tuple[str, dict]] = {}
+
+
+def _broker_docs_fingerprint(tenant_id: str) -> str:
+    docs = wealth_db.list_file_attachments(tenant_id, file_types=BROKER_FILE_TYPES)
+    return '|'.join(f"{doc['id']}:{doc.get('uploaded_at', '')}" for doc in sorted(docs, key=lambda item: item['id']))
+
+
+def invalidate_broker_data_cache(tenant_id: str | None = None) -> None:
+    if tenant_id:
+        _broker_data_cache.pop(tenant_id, None)
+    else:
+        _broker_data_cache.clear()
 
 
 def load_broker_data(tenant_id):
+    fingerprint = _broker_docs_fingerprint(tenant_id)
+    cached = _broker_data_cache.get(tenant_id)
+    if cached and cached[0] == fingerprint:
+        return cached[1]
+
+    data = _load_broker_data_uncached(tenant_id)
+    _broker_data_cache[tenant_id] = (fingerprint, data)
+    return data
+
+
+def _load_broker_data_uncached(tenant_id):
     """Load broker holdings and transactions for a tenant."""
     parser = BankStatementParser()
 
@@ -232,7 +257,7 @@ def load_broker_data(tenant_id):
     ibkr_transactions = [t for t in transactions if t.get('account') == IBKR_ACCOUNT]
     if ibkr_transactions:
         try:
-            bank_transactions = wealth_db.get_transactions(tenant_id, limit=10000)
+            bank_transactions = wealth_db.get_transactions(tenant_id, limit=TRANSACTION_QUERY_LIMIT)
             match_ibkr_deposits_to_bank_transfers(ibkr_transactions, bank_transactions)
         except Exception as match_error:
             print(f"Error matching IBKR deposits to bank transfers: {match_error}")

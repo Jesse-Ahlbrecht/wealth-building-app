@@ -1,32 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { transactionsAPI } from '../api/transactions';
+import { useLazyPairData } from './useLazyPairData';
+
+const EMPTY = { pairs: [] };
+
+const parseIbkrDepositPairs = (raw) => ({
+  pairs: Array.isArray(raw?.pairs) ? raw.pairs : []
+});
 
 export function useIbkrDepositPairs() {
-  const [ibkrDepositPairData, setIbkrDepositPairData] = useState({ pairs: [] });
-  const loadedRef = useRef(false);
-
-  const loadIbkrDepositPairs = useCallback(async ({ force = false } = {}) => {
-    if (!force && loadedRef.current) return;
-    try {
-      const data = await transactionsAPI.getIbkrDepositPairs();
-      setIbkrDepositPairData({
-        pairs: Array.isArray(data?.pairs) ? data.pairs : []
-      });
-      loadedRef.current = true;
-    } catch (err) {
-      console.error('Error loading IBKR deposit pairs:', err);
-      setIbkrDepositPairData({ pairs: [] });
-    }
-  }, []);
-
-  useEffect(() => {
-    loadIbkrDepositPairs();
-  }, [loadIbkrDepositPairs]);
-
-  const reloadIbkrDepositPairs = useCallback(
-    () => loadIbkrDepositPairs({ force: true }),
-    [loadIbkrDepositPairs]
-  );
-
-  return { ibkrDepositPairData, reloadIbkrDepositPairs };
+  const parse = useMemo(() => parseIbkrDepositPairs, []);
+  const { data, reload } = useLazyPairData(transactionsAPI.getIbkrDepositPairs, parse, EMPTY);
+  return { ibkrDepositPairData: data, reloadIbkrDepositPairs: reload };
 }

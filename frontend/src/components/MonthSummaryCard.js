@@ -28,6 +28,7 @@ import { getSavingsGoalForCurrency } from '../utils/finance';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
 import CollapsibleBreakdownSection from './CollapsibleBreakdownSection';
+import TransferPairGroup from './TransferPairGroup';
 
 /**
  * Metric Bar Component
@@ -82,8 +83,7 @@ const MonthSummaryCard = ({
   const [predictionModal, setPredictionModal] = React.useState(null);
   const [expandedCategories, setExpandedCategories] = React.useState({});
   const [expandedSections, setExpandedSections] = React.useState({});
-  const [expandedTransferPairs, setExpandedTransferPairs] = React.useState({});
-  const [expandedIbkrDepositPairs, setExpandedIbkrDepositPairs] = React.useState({});
+  const [expandedPairs, setExpandedPairs] = React.useState({});
   const expenseBreakdown = useMemo(
     () => computeMonthExpenseBreakdown(month, essentialCategories),
     [month, essentialCategories]
@@ -342,8 +342,8 @@ const MonthSummaryCard = ({
     );
   };
 
-  const toggleIbkrDepositPair = (pairKey) => {
-    setExpandedIbkrDepositPairs((prev) => ({
+  const togglePair = (pairKey) => {
+    setExpandedPairs((prev) => ({
       ...prev,
       [pairKey]: !prev[pairKey]
     }));
@@ -371,8 +371,6 @@ const MonthSummaryCard = ({
 
   const renderIbkrDepositPair = (pair) => {
     const pairKey = `${month.month}-ibkr-pair-${pair.id}`;
-    const isExpanded = expandedIbkrDepositPairs[pairKey];
-    const dayDiffLabel = pair.dayDiff > 0 ? `${pair.dayDiff} day${pair.dayDiff === 1 ? '' : 's'} apart` : 'Same day';
     const bankTxn = {
       ...pair.bank,
       amount: -Math.abs(pair.bank.amount),
@@ -380,66 +378,41 @@ const MonthSummaryCard = ({
     };
 
     return (
-      <div key={pair.id} className="transfer-pair-group">
-        <button
-          type="button"
-          className="transfer-pair-header"
-          onClick={() => toggleIbkrDepositPair(pairKey)}
-        >
-          <span className="transfer-pair-header-main">
-            <span className="expand-arrow">{isExpanded ? '▼' : '▶'}</span>
-            <span>{pair.bank.account} → Interactive Brokers</span>
-            <span className="transfer-pair-meta">{dayDiffLabel}</span>
-          </span>
-          <span className="transfer-pair-amount">
-            {formatCurrency(Math.abs(pair.amount), pair.currency || defaultCurrency)}
-          </span>
-        </button>
-        {isExpanded && (
-          <div className="transfer-pair-legs">
-            {renderTransactionItem(bankTxn, `ibkr-bank-${pair.id}`)}
-            {renderIbkrDepositLeg(pair.deposit)}
-          </div>
-        )}
-      </div>
+      <TransferPairGroup
+        key={pair.id}
+        pairKey={pairKey}
+        isExpanded={expandedPairs[pairKey]}
+        onToggle={togglePair}
+        label={`${pair.bank.account} → Interactive Brokers`}
+        dayDiff={pair.dayDiff}
+        amount={pair.amount}
+        currency={pair.currency}
+        defaultCurrency={defaultCurrency}
+      >
+        {renderTransactionItem(bankTxn, `ibkr-bank-${pair.id}`)}
+        {renderIbkrDepositLeg(pair.deposit)}
+      </TransferPairGroup>
     );
-  };
-
-  const toggleTransferPair = (pairKey) => {
-    setExpandedTransferPairs((prev) => ({
-      ...prev,
-      [pairKey]: !prev[pairKey]
-    }));
   };
 
   const renderInternalTransferPair = (pair) => {
     const pairKey = `${month.month}-pair-${pair.id}`;
-    const isExpanded = expandedTransferPairs[pairKey];
-    const dayDiffLabel = pair.dayDiff > 0 ? `${pair.dayDiff} day${pair.dayDiff === 1 ? '' : 's'} apart` : 'Same day';
 
     return (
-      <div key={pair.id} className="transfer-pair-group">
-        <button
-          type="button"
-          className="transfer-pair-header"
-          onClick={() => toggleTransferPair(pairKey)}
-        >
-          <span className="transfer-pair-header-main">
-            <span className="expand-arrow">{isExpanded ? '▼' : '▶'}</span>
-            <span>{pair.outflow.account} → {pair.inflow.account}</span>
-            <span className="transfer-pair-meta">{dayDiffLabel}</span>
-          </span>
-          <span className="transfer-pair-amount">
-            {formatCurrency(Math.abs(pair.amount), pair.currency || defaultCurrency)}
-          </span>
-        </button>
-        {isExpanded && (
-          <div className="transfer-pair-legs">
-            {renderTransactionItem(pair.outflow, `out-${pair.id}`)}
-            {renderTransactionItem(pair.inflow, `in-${pair.id}`)}
-          </div>
-        )}
-      </div>
+      <TransferPairGroup
+        key={pair.id}
+        pairKey={pairKey}
+        isExpanded={expandedPairs[pairKey]}
+        onToggle={togglePair}
+        label={`${pair.outflow.account} → ${pair.inflow.account}`}
+        dayDiff={pair.dayDiff}
+        amount={pair.amount}
+        currency={pair.currency}
+        defaultCurrency={defaultCurrency}
+      >
+        {renderTransactionItem(pair.outflow, `out-${pair.id}`)}
+        {renderTransactionItem(pair.inflow, `in-${pair.id}`)}
+      </TransferPairGroup>
     );
   };
 

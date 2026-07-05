@@ -2,6 +2,8 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
+from constants import TRANSACTION_QUERY_LIMIT
+
 INTERNAL_TRANSFER = 'Internal Transfer'
 DEFAULT_WINDOW_DAYS = 5
 DEFAULT_AMOUNT_TOLERANCE = 0.01
@@ -213,7 +215,7 @@ def get_transfer_pairs(
     amount_tolerance: float = DEFAULT_AMOUNT_TOLERANCE,
 ) -> Dict[str, Any]:
     wealth_db.set_tenant_context(tenant_id)
-    transactions = wealth_db.get_transactions(tenant_id, limit=50000, offset=0)
+    transactions = wealth_db.get_transactions(tenant_id, limit=TRANSACTION_QUERY_LIMIT, offset=0)
     skip_hashes = wealth_db.get_active_category_override_hashes(tenant_id)
 
     pairs = build_transfer_pair_details(
@@ -244,7 +246,7 @@ def apply_transfer_pairs(
     amount_tolerance: float = DEFAULT_AMOUNT_TOLERANCE,
 ) -> Dict[str, int]:
     wealth_db.set_tenant_context(tenant_id)
-    transactions = wealth_db.get_transactions(tenant_id, limit=50000, offset=0)
+    transactions = wealth_db.get_transactions(tenant_id, limit=TRANSACTION_QUERY_LIMIT, offset=0)
     skip_hashes = wealth_db.get_active_category_override_hashes(tenant_id)
 
     pairs = find_transfer_pairs(

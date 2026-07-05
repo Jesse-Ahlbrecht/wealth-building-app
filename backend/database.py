@@ -1202,7 +1202,7 @@ class WealthDatabase:
                 """
                 DELETE FROM file_attachments
                 WHERE tenant_id = %s AND id = %s
-                RETURNING id, encryption_metadata
+                RETURNING id, file_type, encryption_metadata
                 """,
                 (tenant_db_id, file_id)
             )
@@ -1210,7 +1210,7 @@ class WealthDatabase:
             if not result:
                 return None
 
-            metadata = result[1]
+            metadata = result[2]
             if isinstance(metadata, str):
                 try:
                     metadata = json.loads(metadata)
@@ -1219,6 +1219,7 @@ class WealthDatabase:
 
             return {
                 'id': result[0],
+                'file_type': result[1],
                 'metadata': metadata or {}
             }
 
