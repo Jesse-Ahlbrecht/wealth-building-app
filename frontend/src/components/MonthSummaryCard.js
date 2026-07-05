@@ -7,12 +7,23 @@
 
 import React, { useMemo } from 'react';
 import { formatCurrency, formatMonth, formatDate } from '../utils';
+import { getCategoryNames } from '../utils/categoryHelpers';
 import {
   computeMonthExpenseBreakdown,
   getSavingsCategoryTransactions,
   mergeSavingsCategories,
   sumCategoryAmounts
 } from '../utils/categoryHelpers';
+import { buildRecurringMatchKeys, isRecurringTransaction } from '../utils/predictionHelpers';
+import {
+  filterTransferPairsForMonth,
+  getUnpairedInternalTransfersForMonth
+} from '../utils/transferPairHelpers';
+import {
+  filterIbkrDepositPairsForMonth,
+  getUnpairedIbkrBankTransfersForMonth,
+  isIbkrBankTransfer
+} from '../utils/ibkrDepositPairHelpers';
 import { getSavingsGoalForCurrency } from '../utils/finance';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
@@ -55,18 +66,24 @@ const MonthSummaryCard = ({
   expenseSort = 'amount_desc',
   onExpenseSortChange = () => {},
   predictions = [],
+  recurringPayments = [],
+  transferPairData = { pairs: [], unmatched: [] },
+  ibkrDepositPairData = { pairs: [], unmatchedBank: [], unmatchedDeposits: [] },
   averageEssentialSpending = 0,
   onSkipPrediction = () => {},
   onDeletePrediction = () => {},
   onPredictionChanged = () => {},
   availableCategories = { income: [], expense: [] },
-  onTransactionCategoryUpdated = () => {}
+  onTransactionCategoryUpdated = () => {},
+  onCategoriesChanged = () => {}
 }) => {
   const [categoryModal, setCategoryModal] = React.useState(null);
   const [predictionMenu, setPredictionMenu] = React.useState(null);
   const [predictionModal, setPredictionModal] = React.useState(null);
   const [expandedCategories, setExpandedCategories] = React.useState({});
   const [expandedSections, setExpandedSections] = React.useState({});
+  const [expandedTransferPairs, setExpandedTransferPairs] = React.useState({});
+  const [expandedIbkrDepositPairs, setExpandedIbkrDepositPairs] = React.useState({});
   const expenseBreakdown = useMemo(
     () => computeMonthExpenseBreakdown(month, essentialCategories),
     [month, essentialCategories]
@@ -89,8 +106,54 @@ const MonthSummaryCard = ({
   );
 
   const savingsCategoryTotal = sumCategoryAmounts(savingsCategories);
+  const otherExpenseAmount = month?.expenseCategories?.Other || 0;
+  const { nonEssentialWithoutOther, nonEssentialWithoutOtherTotal } = useMemo(() => {
+    const copy = { ...nonEssentialExpenses };
+    delete copy.Other;
+    return {
+      nonEssentialWithoutOther: copy,
+      nonEssentialWithoutOtherTotal: sumCategoryAmounts(copy)
+    };
+  }, [nonEssentialExpenses]);
+  const expenseCategoryNames = useMemo(
+    () => getCategoryNames(availableCategories?.expense),
+    [availableCategories?.expense]
+  );
+  const incomeCategoryNames = useMemo(
+    () => getCategoryNames(availableCategories?.income),
+    [availableCategories?.income]
+  );
+  const recurringMatchKeys = useMemo(
+    () => buildRecurringMatchKeys(recurringPayments),
+    [recurringPayments]
+  );
   const internalTransferTotal = month?.internalTransferTotal || 0;
   const internalTransferTransactions = month?.internalTransferTransactions || [];
+  const transferPairsInMonth = useMemo(
+    () => filterTransferPairsForMonth(transferPairData?.pairs, month?.month),
+    [transferPairData?.pairs, month?.month]
+  );
+  const unpairedInternalTransfers = useMemo(
+    () => getUnpairedInternalTransfersForMonth(internalTransferTransactions, transferPairsInMonth),
+    [internalTransferTransactions, transferPairsInMonth]
+  );
+  const ibkrDepositPairsInMonth = useMemo(
+    () => filterIbkrDepositPairsForMonth(ibkrDepositPairData?.pairs, month?.month),
+    [ibkrDepositPairData?.pairs, month?.month]
+  );
+  const ibkrMatchByBankHash = useMemo(() => {
+    const map = new Map();
+    ibkrDepositPairsInMonth.forEach((pair) => {
+      if (pair?.bank?.transaction_hash) {
+        map.set(pair.bank.transaction_hash, pair);
+      }
+    });
+    return map;
+  }, [ibkrDepositPairsInMonth]);
+  const unpairedIbkrBankTransfers = useMemo(
+    () => getUnpairedIbkrBankTransfersForMonth(internalTransferTransactions, ibkrDepositPairsInMonth),
+    [internalTransferTransactions, ibkrDepositPairsInMonth]
+  );
   
   // Calculate predicted essential spending (use average if higher than current)
   const predictedEssentialAverage = isCurrentMonth ? (averageEssentialSpending || 0) : 0;
@@ -236,11 +299,29 @@ const MonthSummaryCard = ({
 
   const renderTransactionDetails = (txn, isPredicted = false) => {
     const badge = getAccountBadgeConfig(txn.account);
+    const isRecurring = isRecurringTransaction(txn, recurringMatchKeys);
+    const refunded = txn.refundedAmount || 0;
+    const ibkrMatch = txn?.transaction_hash ? ibkrMatchByBankHash.get(txn.transaction_hash) : null;
 
     return (
       <div className="transaction-details">
         <div className="transaction-recipient-row">
           <div className="transaction-recipient">{txn.recipient || 'N/A'}</div>
+          {isRecurring && (
+            <span className="account-badge account-badge-recurring" title="Recognized recurring payment">
+              Recurring
+            </span>
+          )}
+          {refunded > 0 && (
+            <span className="account-badge account-badge-refund" title="Matched to a purchase or refund">
+              Refund
+            </span>
+          )}
+          {ibkrMatch && (
+            <span className="account-badge account-badge-ibkr-match" title="Matched to Interactive Brokers deposit">
+              IBKR
+            </span>
+          )}
           {badge && (
             <span className={badge.className} title={txn.account}>
               {badge.label}
@@ -252,14 +333,169 @@ const MonthSummaryCard = ({
             {txn.description}
           </div>
         )}
+        {ibkrMatch && (
+          <div className="transaction-description" style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+            Matched IBKR deposit on {formatDate(ibkrMatch.deposit.date)}
+          </div>
+        )}
       </div>
+    );
+  };
+
+  const toggleIbkrDepositPair = (pairKey) => {
+    setExpandedIbkrDepositPairs((prev) => ({
+      ...prev,
+      [pairKey]: !prev[pairKey]
+    }));
+  };
+
+  const renderIbkrDepositLeg = (deposit) => (
+    <div className="transaction-item">
+      <div className="transaction-date">
+        {formatDate(deposit.date)}
+        <span className="account-badge account-badge-interactive-brokers" style={{ marginLeft: '8px', fontSize: '11px', padding: '2px 6px' }}>
+          IBKR
+        </span>
+      </div>
+      <div className="transaction-details">
+        <div className="transaction-recipient">{deposit.security || 'Deposit'}</div>
+        <div className="transaction-description" style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+          Interactive Brokers Cash
+        </div>
+      </div>
+      <div className="transaction-amount">
+        {formatCurrency(Math.abs(deposit.amount), deposit.currency || defaultCurrency)}
+      </div>
+    </div>
+  );
+
+  const renderIbkrDepositPair = (pair) => {
+    const pairKey = `${month.month}-ibkr-pair-${pair.id}`;
+    const isExpanded = expandedIbkrDepositPairs[pairKey];
+    const dayDiffLabel = pair.dayDiff > 0 ? `${pair.dayDiff} day${pair.dayDiff === 1 ? '' : 's'} apart` : 'Same day';
+    const bankTxn = {
+      ...pair.bank,
+      amount: -Math.abs(pair.bank.amount),
+      type: pair.bank.type || 'expense'
+    };
+
+    return (
+      <div key={pair.id} className="transfer-pair-group">
+        <button
+          type="button"
+          className="transfer-pair-header"
+          onClick={() => toggleIbkrDepositPair(pairKey)}
+        >
+          <span className="transfer-pair-header-main">
+            <span className="expand-arrow">{isExpanded ? '▼' : '▶'}</span>
+            <span>{pair.bank.account} → Interactive Brokers</span>
+            <span className="transfer-pair-meta">{dayDiffLabel}</span>
+          </span>
+          <span className="transfer-pair-amount">
+            {formatCurrency(Math.abs(pair.amount), pair.currency || defaultCurrency)}
+          </span>
+        </button>
+        {isExpanded && (
+          <div className="transfer-pair-legs">
+            {renderTransactionItem(bankTxn, `ibkr-bank-${pair.id}`)}
+            {renderIbkrDepositLeg(pair.deposit)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const toggleTransferPair = (pairKey) => {
+    setExpandedTransferPairs((prev) => ({
+      ...prev,
+      [pairKey]: !prev[pairKey]
+    }));
+  };
+
+  const renderInternalTransferPair = (pair) => {
+    const pairKey = `${month.month}-pair-${pair.id}`;
+    const isExpanded = expandedTransferPairs[pairKey];
+    const dayDiffLabel = pair.dayDiff > 0 ? `${pair.dayDiff} day${pair.dayDiff === 1 ? '' : 's'} apart` : 'Same day';
+
+    return (
+      <div key={pair.id} className="transfer-pair-group">
+        <button
+          type="button"
+          className="transfer-pair-header"
+          onClick={() => toggleTransferPair(pairKey)}
+        >
+          <span className="transfer-pair-header-main">
+            <span className="expand-arrow">{isExpanded ? '▼' : '▶'}</span>
+            <span>{pair.outflow.account} → {pair.inflow.account}</span>
+            <span className="transfer-pair-meta">{dayDiffLabel}</span>
+          </span>
+          <span className="transfer-pair-amount">
+            {formatCurrency(Math.abs(pair.amount), pair.currency || defaultCurrency)}
+          </span>
+        </button>
+        {isExpanded && (
+          <div className="transfer-pair-legs">
+            {renderTransactionItem(pair.outflow, `out-${pair.id}`)}
+            {renderTransactionItem(pair.inflow, `in-${pair.id}`)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderInternalTransfersContent = () => {
+    const hasTransferPairs = transferPairsInMonth.length > 0;
+    const nonIbkrUnpaired = unpairedInternalTransfers.filter((txn) => !isIbkrBankTransfer(txn));
+    const showIbkrUnmatched = unpairedIbkrBankTransfers.length > 0;
+
+    return (
+      <>
+        {ibkrDepositPairsInMonth.length > 0 && (
+          <div className="transfer-pair-list" style={{ marginBottom: '12px' }}>
+            <div className="transfer-pair-unmatched-title">IBKR deposits</div>
+            {ibkrDepositPairsInMonth.map(renderIbkrDepositPair)}
+          </div>
+        )}
+        {hasTransferPairs ? (
+          <div className="transfer-pair-list">
+            {transferPairsInMonth.map(renderInternalTransferPair)}
+          </div>
+        ) : (
+          <div className="transaction-list">
+            {sortTransactions(
+              internalTransferTransactions.filter((txn) => !ibkrMatchByBankHash.has(txn?.transaction_hash)),
+              'expense'
+            ).map((txn, idx) => renderTransactionItem(txn, idx))}
+          </div>
+        )}
+        {hasTransferPairs && nonIbkrUnpaired.length > 0 && (
+          <div className="transfer-pair-unmatched">
+            <div className="transfer-pair-unmatched-title">Unmatched</div>
+            <div className="transaction-list">
+              {sortTransactions(nonIbkrUnpaired, 'expense').map((txn, idx) =>
+                renderTransactionItem(txn, `unpaired-${idx}`)
+              )}
+            </div>
+          </div>
+        )}
+        {showIbkrUnmatched && (
+          <div className="transfer-pair-unmatched">
+            <div className="transfer-pair-unmatched-title">Unmatched IBKR transfers</div>
+            <div className="transaction-list">
+              {sortTransactions(unpairedIbkrBankTransfers, 'expense').map((txn, idx) =>
+                renderTransactionItem(txn, `ibkr-unpaired-${idx}`)
+              )}
+            </div>
+          </div>
+        )}
+      </>
     );
   };
 
   const renderTransactionItem = (txn, idx, { dismissible = false } = {}) => {
     const isPredicted = txn.is_predicted || txn.isPredicted;
     const typeKey = txn?.type === 'income' ? 'income' : 'expense';
-    const categoryOptions = Array.isArray(availableCategories?.[typeKey]) ? availableCategories[typeKey] : [];
+    const categoryOptions = typeKey === 'income' ? incomeCategoryNames : expenseCategoryNames;
     const canEditCategory = !isPredicted && txn?.transaction_hash && categoryOptions.length > 0;
     const menuKey = `${month.month}-${txn.prediction_key || idx}`;
     const menuOpen = predictionMenu === menuKey;
@@ -321,7 +557,21 @@ const MonthSummaryCard = ({
           )}
         </div>
         <div className="transaction-amount">
-          {formatCurrency(Math.abs(txn.amount), txn.currency || defaultCurrency)}
+          {(() => {
+            const gross = Math.abs(txn.amount);
+            const refunded = txn.refundedAmount || 0;
+            const net = gross - refunded;
+            const currency = txn.currency || defaultCurrency;
+            if (refunded > 0.01) {
+              return (
+                <div className="transaction-amount-refund">
+                  <span className="transaction-amount-gross">{formatCurrency(gross, currency)}</span>
+                  <span className="transaction-amount-net">{formatCurrency(net, currency)}</span>
+                </div>
+              );
+            }
+            return formatCurrency(gross, currency);
+          })()}
         </div>
       </div>
     );
@@ -361,6 +611,7 @@ const MonthSummaryCard = ({
         modal={categoryModal}
         onClose={() => setCategoryModal(null)}
         onUpdated={onTransactionCategoryUpdated}
+        onCategoriesChanged={onCategoriesChanged}
         availableCategories={availableCategories}
         essentialCategories={essentialCategories}
       />
@@ -473,6 +724,72 @@ const MonthSummaryCard = ({
       </div>
 
       {/* Category Breakdown */}
+          {otherExpenseAmount > 0 && (
+            <div className="categories-section needs-review-section">
+              <div
+                className="category-item category-section-header"
+                onClick={() => {
+                  const sectionKey = `${month.month}-needs-review-section`;
+                  setExpandedSections(prev => ({
+                    ...prev,
+                    [sectionKey]: !prev[sectionKey]
+                  }));
+                }}
+                style={{
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  marginBottom: expandedSections[`${month.month}-needs-review-section`] ? '8px' : '0'
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <span className="category-name">
+                    <span className="expand-arrow" style={{ marginRight: '8px' }}>
+                      {expandedSections[`${month.month}-needs-review-section`] ? '▼' : '▶'}
+                    </span>
+                    Needs Review
+                  </span>
+                </div>
+                <span className="stat-value" style={{ fontWeight: '700' }}>
+                  {formatCurrency(otherExpenseAmount, defaultCurrency)}
+                </span>
+              </div>
+              {expandedSections[`${month.month}-needs-review-section`] && (
+                <div className="category-list">
+                  <div style={{ marginLeft: '24px', marginTop: '4px' }}>
+                    <div
+                      className="category-item category-subitem"
+                      onClick={() => toggleCategory(`${month.month}-needs-review-other`)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div className="category-name">
+                          <span className="expand-arrow" style={{ marginRight: '8px' }}>
+                            {expandedCategories[`${month.month}-needs-review-other`] ? '▼' : '▶'}
+                          </span>
+                          Other
+                          <span className="transaction-count">
+                            ({getCategoryTransactionCount('Other', 'expense')})
+                          </span>
+                        </div>
+                      </div>
+                      <div className="category-amount">
+                        {formatCurrency(otherExpenseAmount, defaultCurrency)}
+                      </div>
+                    </div>
+                    {expandedCategories[`${month.month}-needs-review-other`] && (
+                      <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px', marginBottom: '8px' }}>
+                        {renderExpenseSortControls()}
+                        <div className="transaction-list">
+                          {getCategoryTransactions('Other', 'expense').map((txn, idx) => renderTransactionItem(txn, idx, { dismissible: true }))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {Object.keys(essentialExpenses).length > 0 && (
             <div className="categories-section">
               <div 
@@ -582,7 +899,7 @@ const MonthSummaryCard = ({
           )}
 
           {/* Non-Essential Expenses */}
-          {Object.keys(nonEssentialExpenses).length > 0 && (
+          {Object.keys(nonEssentialWithoutOther).length > 0 && (
             <div className="categories-section">
               <div 
                 className="category-item category-section-header" 
@@ -608,13 +925,13 @@ const MonthSummaryCard = ({
                   </span>
                 </div>
                 <span className="stat-value" style={{ fontWeight: '700' }}>
-                  {formatCurrency(nonEssentialTotal, defaultCurrency)}
+                  {formatCurrency(nonEssentialWithoutOtherTotal, defaultCurrency)}
                 </span>
               </div>
               
               {/* Individual categories - shown when expanded */}
               {expandedSections[`${month.month}-nonessential-section`] && (() => {
-                const nonEssentialEntries = Object.entries(nonEssentialExpenses);
+                const nonEssentialEntries = Object.entries(nonEssentialWithoutOther);
                 const maxNonEssentialAmount = nonEssentialEntries.length > 0 
                   ? Math.max(...nonEssentialEntries.map(([, amount]) => amount))
                   : 0;
@@ -673,7 +990,7 @@ const MonthSummaryCard = ({
                     <div className="category-item category-subitem" style={{ fontWeight: '600' }}>
                       <span className="category-name">Total Non-Essential</span>
                       <span className="stat-value" style={{ fontWeight: '700' }}>
-                        {formatCurrency(nonEssentialTotal, defaultCurrency)}
+                        {formatCurrency(nonEssentialWithoutOtherTotal, defaultCurrency)}
                       </span>
                     </div>
                   </div>
@@ -694,11 +1011,7 @@ const MonthSummaryCard = ({
               setExpandedSections={setExpandedSections}
             >
               <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px' }}>
-                <div className="transaction-list">
-                  {sortTransactions(internalTransferTransactions, 'expense').map((txn, idx) =>
-                    renderTransactionItem(txn, idx)
-                  )}
-                </div>
+                {renderInternalTransfersContent()}
               </div>
             </CollapsibleBreakdownSection>
           )}

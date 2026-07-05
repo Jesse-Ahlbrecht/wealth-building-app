@@ -1,62 +1,59 @@
 {
-  "Groceries": [
-    "rewe",
-    "aldi",
-    "lidl",
-    "edeka",
-    "denner",
-    "coop",
-    "migros"
-  ],
-  "Cafeteria": [
-    "tavero"
-  ],
-  "Outsourced Cooking": [
-    "eat unique"
-  ],
-  "Dining": [
-    "cafe",
-    "restaurant",
-    "pizza",
-    "burger",
-    "vom fass"
-  ],
-  "Shopping": [
-    "amazon",
-    "amzn",
-    "digitec",
-    "galaxus",
-    "pixum"
-  ],
-  "Transport": [
-    "oepnv",
-    "logpay",
-    "swiss post",
-    "post"
-  ],
-  "Subscriptions": [
-    "spotify",
-    "netflix",
-    "apple services",
-    "fraenk"
-  ],
-  "Utilities": [
-  ],
-  "Loan Payment": [
-    "kreditanstalt",
-    "studienkredit",
-    "kredit"
-  ],
-  "Investment Account Payment": [
-    "viac",
-    "finpension"
-  ],
-  "Rent": [
-    "ubs fund mgt",
-    "credit suisse anlagestiftung"
-  ],
-  "Insurance": [
-    "css kranken-versicherung",
-    "suddeutsche krankenversicherung"
-  ]
+  "Groceries": {
+    "priority": 20,
+    "keywords": ["rewe", "aldi", "lidl", "edeka", "kaufland", "penny", "netto", "alnatura", "volg", "migros", "coop", "denner", "spar", "manor food", "bio company", "tegut"],
+    "patterns": ["^rewe\\s", "migros", "coop pronto"]
+  },
+  "Cafeteria": {
+    "priority": 15,
+    "keywords": ["tavero", "mensa", "kantine"]
+  },
+  "Food and Dining": {
+    "priority": 12,
+    "keywords": ["eat unique", "eatunique", "hellofresh", "gousto", "prepmymeal", "yfood", "foodspring", "factor75", "starbucks", "coffee", "coffeeshop", "cafe", "café", "backwerk", "bäckerei", "backerei", "bakery", "k kiosk", "kkiosk", "snack", "pret", "lunch", "takeaway", "to go", "togo", "boulangerie", "confiserie", "kaffeemacher", "selecta", "tibits", "restaurant", "pizza", "burger", "vom fass", "lieferando", "wolt", "uber eats", "kebab", "mcdonalds", "subway", "dominos", "sushi", "thai", "asia", "sumup", "bahnhoefli", "bahnhöfli", "läderach", "laderach", "bräu", "brau", "gastro", "pizzeria", "trattoria", "konditorei", "rathskeller"],
+    "patterns": ["\\bbar\\b", "\\bgrill\\b", "\\bkiosk\\b"]
+  },
+  "Shopping": {
+    "priority": 5,
+    "keywords": ["amazon", "amzn", "digitec", "galaxus", "pixum", "zalando", "ikea", "mediamarkt", "saturn", "h&m", "decathlon", "fnac", "dm drogerie", "müller", "mueller", "action", "tchibo", "aliexpress", "etsy", "la redoute", "connox", "bestsecret", "home24", "intimissimi", "drykorn", "bergfreunde", "dyson", "globus", "papeterie", "ticketcorner", "eventfrog", "blumen", "moulinex", "meermin", "jewellery", "modevertri"],
+    "exclude": ["amazon fresh"]
+  },
+  "Transport": {
+    "priority": 10,
+    "keywords": ["oepnv", "öpnv", "logpay", "swiss post", "post ch", "bvg", "mvv", "sbb", "zvv", "shell", "aral", "esso", "uber", "bolt", "tier", "flixbus", "deutsche bahn", "db vertrieb", "urban connect", "gotthard", "berner oberland", "autobus", "bahn", "parking", "parkhaus", "maut", "taxi"],
+    "patterns": ["\\bpost\\b"]
+  },
+  "Vacation": {
+    "priority": 13,
+    "keywords": ["airbnb", "booking.com", "booking com", "hotels.com", "expedia", "agoda", "trivago", "hostelworld", "trip.com", "hotelplan", "kuoni", "tui", "fti", "neckermann", "dertour", "alltours", "getyourguide", "viator", "tripadvisor", "hostel", "resort", "ferienwohnung", "ferienhaus", "urlaub", "ferien", "reise", "reisebüro", "reisebuero", "vacation", "holiday", "holidays", "cruise", "kreuzfahrt", "camping", "campsite", "motel", "pension", "guesthouse", "gästehaus", "marriott", "hilton", "ibis", "accor", "vrbo", "interhome", "e-domizil", "homeaway", "swissôtel", "swissotel", "mövenpick", "moevenpick", "radisson", "hyatt", "seehotel", "easyjet", "ryanair", "lufthansa", "swiss air", "swissair", "wizz air", "vueling", "eurowings", "transavia", "norwegian", "klm", "air france", "british airways", "flughafen", "airport", "mietwagen", "rent a car", "sixt", "europcar", "hertz", "avis"],
+    "patterns": ["\\bhotel\\b", "hotel\\.at\\.booking", "booking\\.com", "freizeit und reisen"]
+  },
+  "Subscriptions": {
+    "priority": 10,
+    "keywords": ["spotify", "netflix", "apple services", "fraenk", "openai", "chatgpt", "github", "google", "microsoft", "disney", "youtube premium", "icloud", "audible", "dropbox", "notion", "cursor", "mullvad", "digitalrepublic", "digital republic", "whoop"]
+  },
+  "Utilities": {
+    "priority": 10,
+    "keywords": ["telekom", "vodafone", "o2", "swisscom", "sunrise", "salt mobile", "ewz", "stadtwerke", "strom", "gasag", "vattenfall", "energie", "m-budget internet", "iwb industrielle werke"]
+  },
+  "Loan Payment": {
+    "priority": 15,
+    "keywords": ["kreditanstalt", "studienkredit", "kfw", "kredit"]
+  },
+  "Investment Account Payment": {
+    "priority": 15,
+    "keywords": ["viac", "finpension", "terzo vorsorgestiftung"]
+  },
+  "Rent": {
+    "priority": 15,
+    "keywords": ["ubs fund mgt", "credit suisse anlagestiftung", "miete", "verwaltung", "conseil immobilier", "immobilien"]
+  },
+  "Insurance": {
+    "priority": 15,
+    "keywords": ["css kranken-versicherung", "suddeutsche krankenversicherung", "süddeutsche krankenversicherung", "helsana", "swica", "sanitas", "allianz", "ergo", "axa"]
+  },
+  "Health": {
+    "priority": 12,
+    "keywords": ["apotheke", "pharmacy", "redcare", "docmorris", "shop-apotheke", "zahnarzt", "dental", "zima dental", "arzt", "praxis", "krankenhaus", "spital", "hospital", "optiker", "fielmann", "specsavers", "physio", "physiotherapie", "osteopath", "medizin", "mediherz", "labor", "diagnostik"]
+  }
 }

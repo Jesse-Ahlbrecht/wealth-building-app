@@ -23,6 +23,7 @@ class BrokerSavingsTest(unittest.TestCase):
                 'amount': 1000,
                 'currency': 'EUR',
                 'security': 'Deposit',
+                'category': 'Internal Transfer',
             },
         ]
 
@@ -30,7 +31,7 @@ class BrokerSavingsTest(unittest.TestCase):
 
         self.assertIn('2026-03', by_month)
         self.assertEqual(by_month['2026-03']['savings_categories']['Interactive Brokers Investments'], 500)
-        self.assertEqual(by_month['2026-03']['savings_categories']['Interactive Brokers Cash'], 1000)
+        self.assertNotIn('Interactive Brokers Cash', by_month['2026-03']['savings_categories'])
         self.assertEqual(len(by_month['2026-03']['savings_transactions']['Interactive Brokers Investments']), 1)
 
     def test_merge_into_summary(self):

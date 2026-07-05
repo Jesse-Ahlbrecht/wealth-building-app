@@ -1,6 +1,7 @@
-/**
- * Date Helper Functions
- */
+export const getMonthKeyFromDate = (dateValue) => {
+  if (!dateValue) return '';
+  return String(dateValue).slice(0, 7);
+};
 
 export const formatDate = (date) => {
   if (!date) return '';

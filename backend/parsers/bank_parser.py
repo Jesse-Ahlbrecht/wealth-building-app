@@ -119,9 +119,23 @@ class DKBParser(BaseParser):
                     description = (row.get('Verwendungszweck', '').strip() or 
                                   row.get('Buchungstext', '').strip() or
                                   row.get('"Verwendungszweck"', '').strip()).strip('"')
+
+                    bank_category = (row.get('Umsatzkategorie', '').strip() or
+                                       row.get('"Umsatzkategorie"', '').strip()).strip('"')
+                    bank_subcategory = (row.get('Unterkategorie', '').strip() or
+                                        row.get('"Unterkategorie"', '').strip()).strip('"')
                     
                     transaction_type = 'income' if amount > 0 else 'expense'
-                    category = self.categorize_transaction(recipient, description, date.strftime('%Y-%m-%d'), account_name)
+                    category = self.categorize_transaction(
+                        recipient,
+                        description,
+                        date.strftime('%Y-%m-%d'),
+                        account_name,
+                        transaction_type=transaction_type,
+                        bank_category=bank_category,
+                        bank_subcategory=bank_subcategory,
+                        bank_source='dkb',
+                    )
                     
                     transactions.append({
                         'date': date.isoformat(),

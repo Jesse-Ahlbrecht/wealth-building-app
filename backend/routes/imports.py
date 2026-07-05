@@ -11,7 +11,8 @@ from flask import Blueprint, g, request
 
 from database import get_wealth_database
 from middleware.auth_middleware import authenticate_request, require_auth
-from parsers.base_parser import BaseParser
+from services.categorizer import get_categorizer
+from services.transfer_pairing import apply_transfer_pairs
 from utils.response_helpers import success_response, error_response
 
 imports_bp = Blueprint('imports_bp', __name__, url_prefix='/api/imports')
@@ -321,7 +322,8 @@ def import_transactions():
     if not isinstance(batches, list) or not batches:
         return error_response('Missing batches', 400)
 
-    categorizer = BaseParser()
+    categorizer = get_categorizer()
+    owned_accounts = wealth_db.get_accounts(tenant_id)
     imported_batches = []
 
     try:
@@ -361,12 +363,10 @@ def import_transactions():
                 transaction_type = transaction.get('type') or ('income' if float(transaction.get('amount', 0)) > 0 else 'expense')
                 recipient = transaction.get('recipient', '')
                 description = transaction.get('description', '')
-                category = transaction.get('category') or categorizer.categorize_transaction(
-                    recipient,
-                    description,
-                    date_value,
-                    account_name
-                )
+                category = transaction.get('category') or categorizer.categorize_from_transaction(
+                    {**transaction, 'type': transaction_type, 'account': account_name},
+                    owned_accounts=owned_accounts,
+                ).category
 
                 transaction_data = {
                     'date': date_value,
@@ -397,6 +397,12 @@ def import_transactions():
                 imported_count, skipped_count, imported_batches
             )
 
-        return success_response({'batches': imported_batches}, message='Import completed', status_code=201)
+        pairing_result = apply_transfer_pairs(wealth_db, tenant_id)
+
+        return success_response(
+            {'batches': imported_batches, 'transferPairs': pairing_result},
+            message='Import completed',
+            status_code=201,
+        )
     except Exception as exc:
         return error_response(f'Import failed: {exc}', 500)

@@ -4,13 +4,12 @@ Category Routes
 Handles category retrieval, creation, and transaction category updates.
 """
 
-import os
-import json
 import traceback
 from flask import Blueprint, g, request, jsonify
 from database import get_wealth_database
 from middleware.auth_middleware import authenticate_request, require_auth
 from category_config import get_savings_category_names
+from services.categorizer import get_categorizer, _load_json
 from utils.response_helpers import success_response, error_response
 
 categories_bp = Blueprint('categories', __name__, url_prefix='/api')
@@ -18,14 +17,7 @@ wealth_db = get_wealth_database()
 
 
 def _load_categories(filename):
-    """Load category definitions from JSON file"""
-    filepath = os.path.join(os.path.dirname(os.path.dirname(__file__)), filename)
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"Warning: {filename} not found. Using default categories.")
-        return {}
+    return _load_json(filename)
 
 
 @categories_bp.route('/categories', methods=['GET'])
@@ -44,11 +36,19 @@ def get_categories():
         db_categories = wealth_db.get_categories(tenant_id)
         
         savings_categories = get_savings_category_names()
+        spending_names = list(spending_categories.keys())
+        savings_only = [name for name in savings_categories if name not in spending_categories]
 
-        # Combine default and custom categories (return just names)
         all_categories = {
-            'income': list(income_categories.keys()) + [c['category_name'] for c in db_categories.get('income', [])],
-            'expense': list(spending_categories.keys()) + savings_categories + [c['category_name'] for c in db_categories.get('expense', [])]
+            'income': (
+                [{'name': name, 'source': 'system'} for name in income_categories.keys()]
+                + [{'name': c['category_name'], 'source': 'custom'} for c in db_categories.get('income', [])]
+            ),
+            'expense': (
+                [{'name': name, 'source': 'system'} for name in spending_names]
+                + [{'name': name, 'source': 'system'} for name in savings_only]
+                + [{'name': c['category_name'], 'source': 'custom'} for c in db_categories.get('expense', [])]
+            ),
         }
         
         return jsonify(all_categories)
@@ -83,7 +83,7 @@ def create_custom_category():
         else:
             default_categories = _load_categories('categories_income.json')
         
-        if category_name in default_categories:
+        if category_name in default_categories or category_name in get_savings_category_names():
             return error_response('Category already exists as a default category', 400)
         
         # Create category in database
@@ -153,6 +153,25 @@ def update_category():
         print(f"Error updating category: {e}")
         traceback.print_exc()
         return error_response(f'Failed to update category: {str(e)}', 500)
+
+
+@categories_bp.route('/suggest-category', methods=['POST'])
+@authenticate_request
+@require_auth
+def suggest_category():
+    try:
+        data = request.get_json() or {}
+        transaction = data.get('transaction') or {}
+        tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+        owned_accounts = wealth_db.get_accounts(tenant_id)
+        result = get_categorizer().categorize_from_transaction(transaction, owned_accounts=owned_accounts)
+        if result.category == 'Other':
+            return jsonify({'suggested': None, 'stage': result.stage})
+        return jsonify({'suggested': result.category, 'stage': result.stage})
+    except Exception as e:
+        print(f"Error suggesting category: {e}")
+        traceback.print_exc()
+        return error_response('Failed to suggest category', 500)
 
 
 @categories_bp.route('/essential-categories', methods=['GET'])

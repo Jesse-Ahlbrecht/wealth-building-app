@@ -21,5 +21,40 @@ export const getPredictionKey = (prediction) =>
 export const getPredictionMonth = (prediction, fallback) =>
   prediction.date ? prediction.date.substring(0, 7) : fallback;
 
+const RECIPIENT_PREFIXES = ['überweisung von ', 'uberweisung von ', 'twint von '];
+
+export const normalizeRecurringRecipient = (recipient = '') => {
+  let value = recipient.trim().replace(/^["']|["']$/g, '');
+  value = value.replace(/\s+/g, ' ');
+  const lower = value.toLowerCase();
+  for (const prefix of RECIPIENT_PREFIXES) {
+    if (lower.startsWith(prefix)) {
+      value = value.slice(prefix.length).trim();
+      break;
+    }
+  }
+  return value;
+};
+
+export const getRecurringMatchKey = (recipient, category, type = 'expense') =>
+  `${normalizeRecurringRecipient(recipient).toLowerCase()}|${category}|${type}`;
+
+export const buildRecurringMatchKeys = (recurringPayments = []) => {
+  const keys = new Set();
+  recurringPayments.forEach((payment) => {
+    if (payment?.enabled === false) return;
+    keys.add(getRecurringMatchKey(payment.recipient, payment.category, payment.type || 'expense'));
+  });
+  return keys;
+};
+
+export const isRecurringTransaction = (transaction, recurringMatchKeys) => {
+  if (!transaction || transaction.is_predicted || transaction.isPredicted) return false;
+  if (!recurringMatchKeys?.size) return false;
+  const type = transaction.type === 'income' ? 'income' : 'expense';
+  const key = getRecurringMatchKey(transaction.recipient, transaction.category, type);
+  return recurringMatchKeys.has(key);
+};
+
 export const getLatestMonthKey = (months) =>
   sortMonthsReverseChronologically(months)[0]?.month ?? null;

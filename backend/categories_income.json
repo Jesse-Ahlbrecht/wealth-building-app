@@ -1,11 +1,10 @@
 {
-  "Salary": [
-    "datalynx"
-  ],
-  "Income": [
-    "gehalt",
-    "salary",
-    "lohn",
-    "eingang"
-  ]
+  "Salary": {
+    "priority": 20,
+    "keywords": ["datalynx", "gehalt", "lohn", "salary", "payroll"]
+  },
+  "Income": {
+    "priority": 10,
+    "keywords": ["eingang", "gutschrift", "erstattung", "rückerstattung", "zinsen", "dividende", "bonus"]
+  }
 }

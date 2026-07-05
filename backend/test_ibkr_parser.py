@@ -31,6 +31,13 @@ class IBKRParserTests(unittest.TestCase):
         self.assertEqual(deposit['currency'], 'CHF')
         self.assertEqual(deposit['category'], 'Internal Transfer')
 
+        disbursement = next(
+            t for t in transactions
+            if t.get('amount') == 7000.0 and 'disbursement initiated by' in (t.get('security') or '').lower()
+        )
+        self.assertEqual(disbursement['type'], 'deposit')
+        self.assertEqual(disbursement['currency'], 'EUR')
+
         goog = next(h for h in holdings if h['symbol'] == 'GOOG')
         self.assertGreater(goog['shares'], 0)
 

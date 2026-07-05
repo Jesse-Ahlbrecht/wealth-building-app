@@ -479,6 +479,15 @@ class WealthDatabase:
                 }
             return None
 
+    def get_active_category_override_hashes(self, tenant_id: str) -> set:
+        tenant_db_id = self.set_tenant_context(tenant_id)
+        with self.db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT transaction_hash FROM category_overrides
+                WHERE tenant_id = %s AND active = TRUE
+            """, (tenant_db_id,))
+            return {row[0] for row in cursor.fetchall()}
+
     def get_transactions(self, tenant_id: str, limit: int = 1000, offset: int = 0, source_document_id: int = None) -> List[Dict[str, Any]]:
         """Get paginated transactions for a tenant, optionally filtered by source document ID"""
         tenant_db_id = self.set_tenant_context(tenant_id)

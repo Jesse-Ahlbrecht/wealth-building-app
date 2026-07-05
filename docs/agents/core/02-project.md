@@ -18,6 +18,8 @@ Personal wealth tracker: ingest bank statements, categorize transactions, show s
 - Backend routes: `backend/routes/`
 - DB access: `backend/database.py`
 - Auth: `backend/auth.py`, `backend/middleware/`
+- Categorizer: `backend/services/categorizer.py`, rules in `backend/categories_*.json`
+- Backfill scripts: `scripts/recategorize_*.py`
 - React components: `frontend/src/components/`
 - Pages: `frontend/src/pages/`
 - API client: `frontend/src/api/`
@@ -28,6 +30,25 @@ Personal wealth tracker: ingest bank statements, categorize transactions, show s
 - **Frontend-first shaping**: API returns authenticated user data; filtering and aggregation happen in the React SPA
 - **Flask routes** orchestrate parsers and DB access; keep parsing helpers pure where possible
 - Session auth uses encrypted tokens in httpOnly cookies (see security section)
+
+## Categorization backfill
+
+Category/merchant/bank-map edits do **not** update existing transactions automatically.
+
+After changing categorization rules, run the appropriate script (default tenant: `local-dev`):
+
+| Script | When |
+| ------ | ---- |
+| `scripts/recategorize_other_transactions.py` | New keywords for `Other` / legacy `Transfer` |
+| `scripts/recategorize_transport_transactions.py` | Re-evaluate `Transport` (e.g. new Vacation category) |
+| `scripts/recategorize_ibkr_transactions.py` | IBKR counterparty keyword fixes |
+
+```bash
+./backend/venv/bin/python scripts/recategorize_transport_transactions.py --tenant local-dev --dry-run
+./backend/venv/bin/python scripts/recategorize_transport_transactions.py --tenant local-dev
+```
+
+Add a new `scripts/recategorize_*.py` when no existing script covers the source category. Then restart the backend.
 
 ## Agent docs source
 

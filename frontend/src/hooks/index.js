@@ -11,5 +11,8 @@ export { useTransactionSummary } from './useTransactionSummary';
 export { useMonthPredictions } from './useMonthPredictions';
 export { usePreferenceState } from './usePreferenceState';
 export { useMonthDrilldownPanelProps } from './useMonthDrilldownPanelProps';
+export { useRecurringPayments } from './useRecurringPayments';
+export { useTransferPairs } from './useTransferPairs';
+export { useIbkrDepositPairs } from './useIbkrDepositPairs';
 export { useBrokerData } from './useBrokerData';
 

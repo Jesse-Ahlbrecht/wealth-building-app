@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { documentsAPI, importsAPI } from '../api';
 import { formatDate } from '../utils';
 import { classifyImportFile, parseImportFile } from '../utils/importParsers';
+import { useAppContext } from '../context/AppContext';
+import { useIbkrDepositPairs } from '../hooks';
 
 const formatDateTime = (value) => {
   if (!value) return '—';
@@ -53,6 +55,8 @@ const TimelineBar = ({ segments }) => {
 };
 
 const DocumentsPage = () => {
+  const { loadBroker } = useAppContext();
+  const { reloadIbkrDepositPairs } = useIbkrDepositPairs();
   const [overview, setOverview] = useState({ accounts: [], recentImports: [] });
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -116,6 +120,10 @@ const DocumentsPage = () => {
       }
 
       await loadOverview();
+      if (brokerUploads.length > 0) {
+        await loadBroker({ force: true });
+        await reloadIbkrDepositPairs();
+      }
       setResult({
         importedBatches,
         brokerUploads,

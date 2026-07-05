@@ -163,6 +163,9 @@ const parseDkb = (text, filename, checksum) => {
         type: amount > 0 ? 'income' : 'expense',
         recipient: row['Empfänger/Auftraggeber'] || row.Empfänger || row['Zahlungsempfänger*in'] || row['Zahlungspflichtige*r'] || '',
         description: row.Verwendungszweck || row.Buchungstext || '',
+        bankCategory: row.Umsatzkategorie || row['"Umsatzkategorie"'] || '',
+        bankSubcategory: row.Unterkategorie || row['"Unterkategorie"'] || '',
+        bankSource: 'dkb',
         reference: ''
       };
     })
@@ -346,6 +349,9 @@ const parseAmazonVisaWorkbook = (arrayBuffer, filename, checksum) => {
       type: amount > 0 ? 'income' : 'expense',
       recipient: description,
       description: [category, subcategory].filter(Boolean).join(' - '),
+      bankCategory: category,
+      bankSubcategory: subcategory,
+      bankSource: 'amazon_visa',
       reference: ''
     });
   });

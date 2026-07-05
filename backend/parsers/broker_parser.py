@@ -165,12 +165,18 @@ class IBKRParser(BaseParser):
             if amount == 0:
                 continue
             currency = row.get('CurrencyPrimary') or 'CHF'
+            description = row.get('Description') or ''
+            description_lower = description.lower()
+            is_incoming_wire = 'disbursement initiated by' in description_lower or 'cash receipts' in description_lower
+            if is_incoming_wire:
+                amount = abs(amount)
+            txn_type = 'deposit' if amount > 0 else 'withdrawal'
             transactions.append({
                 'date': _parse_flex_date(row.get('Date/Time')),
-                'security': row.get('Description') or 'Deposit/Withdrawal',
+                'security': description or 'Deposit/Withdrawal',
                 'amount': amount,
                 'currency': currency,
-                'type': 'deposit' if amount > 0 else 'withdrawal',
+                'type': txn_type,
                 'activity_type': 'cash',
                 'account': ACCOUNT_NAME,
                 'category': 'Internal Transfer',

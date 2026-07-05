@@ -11,3 +11,4 @@ paths:
 - Keep parsers and ingestion helpers pure; routes orchestrate only
 - Avoid logging PII
 - Match existing patterns in neighboring route files before adding new abstractions
+- After changing categorizer rules (`categories_*.json`, `merchants.de_ch.json`, `bank_category_map.json`), run the matching `scripts/recategorize_*.py` backfill (dry-run, then apply) — see `docs/agents/core/02-project.md`

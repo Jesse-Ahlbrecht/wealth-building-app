@@ -49,6 +49,10 @@ Transform tasks into verifiable goals. For multi-step tasks, state a brief plan:
 
 "Fix the bug" → write a test that reproduces it, then make it pass. Loop until verified.
 
+**Changes must be visible in the running app.** After backend or frontend edits, restart the affected service so the user can review in the browser — do not assume hot reload picked up the change. Use the `run-app` skill: backend `./run_backend.sh` (port 5001), frontend `npm start` in `frontend/` (port 3000). If unsure which service changed, restart both.
+
+**Rule and category changes need a backfill.** Editing `categories_*.json`, `merchants.de_ch.json`, or `bank_category_map.json` only affects new imports. Always run the matching backfill script on the tenant (dry-run first, then apply) and restart the backend so the user sees updated categories in the app.
+
 ## 5. Code Style
 
 - No comments unless the WHY is non-obvious (hidden constraint, workaround, subtle invariant)
@@ -76,6 +80,8 @@ Personal wealth tracker: ingest bank statements, categorize transactions, show s
 - Backend routes: `backend/routes/`
 - DB access: `backend/database.py`
 - Auth: `backend/auth.py`, `backend/middleware/`
+- Categorizer: `backend/services/categorizer.py`, rules in `backend/categories_*.json`
+- Backfill scripts: `scripts/recategorize_*.py`
 - React components: `frontend/src/components/`
 - Pages: `frontend/src/pages/`
 - API client: `frontend/src/api/`
@@ -86,6 +92,25 @@ Personal wealth tracker: ingest bank statements, categorize transactions, show s
 - **Frontend-first shaping**: API returns authenticated user data; filtering and aggregation happen in the React SPA
 - **Flask routes** orchestrate parsers and DB access; keep parsing helpers pure where possible
 - Session auth uses encrypted tokens in httpOnly cookies (see security section)
+
+## Categorization backfill
+
+Category/merchant/bank-map edits do **not** update existing transactions automatically.
+
+After changing categorization rules, run the appropriate script (default tenant: `local-dev`):
+
+| Script | When |
+| ------ | ---- |
+| `scripts/recategorize_other_transactions.py` | New keywords for `Other` / legacy `Transfer` |
+| `scripts/recategorize_transport_transactions.py` | Re-evaluate `Transport` (e.g. new Vacation category) |
+| `scripts/recategorize_ibkr_transactions.py` | IBKR counterparty keyword fixes |
+
+```bash
+./backend/venv/bin/python scripts/recategorize_transport_transactions.py --tenant local-dev --dry-run
+./backend/venv/bin/python scripts/recategorize_transport_transactions.py --tenant local-dev
+```
+
+Add a new `scripts/recategorize_*.py` when no existing script covers the source category. Then restart the backend.
 
 ## Agent docs source
 

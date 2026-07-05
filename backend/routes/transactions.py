@@ -14,6 +14,9 @@ from utils.response_helpers import error_response
 from category_config import get_bank_savings_movement_categories
 from services.broker_savings import merge_broker_savings_into_summary
 from services.broker_service import load_broker_data
+from services.transfer_pairing import get_transfer_pairs, INTERNAL_TRANSFER
+from services.refund_pairing import build_refund_lookup, get_refund_pairs
+from services.ibkr_deposit_pairing import get_ibkr_deposit_pairs
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/api')
 wealth_db = get_wealth_database()
@@ -37,6 +40,45 @@ def get_transactions():
         print(f"Error getting transactions: {e}")
         print(traceback.format_exc())
         return jsonify({'error': 'Failed to retrieve transactions'}), 500
+
+
+@transactions_bp.route('/transactions/transfer-pairs')
+@authenticate_request
+@require_auth
+def list_transfer_pairs():
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+    try:
+        return jsonify(get_transfer_pairs(wealth_db, tenant_id))
+    except Exception as e:
+        print(f"Error getting transfer pairs: {e}")
+        print(traceback.format_exc())
+        return error_response('Failed to retrieve transfer pairs', 500)
+
+
+@transactions_bp.route('/transactions/refund-pairs')
+@authenticate_request
+@require_auth
+def list_refund_pairs():
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+    try:
+        return jsonify(get_refund_pairs(wealth_db, tenant_id))
+    except Exception as e:
+        print(f"Error getting refund pairs: {e}")
+        print(traceback.format_exc())
+        return error_response('Failed to retrieve refund pairs', 500)
+
+
+@transactions_bp.route('/transactions/ibkr-deposit-pairs')
+@authenticate_request
+@require_auth
+def list_ibkr_deposit_pairs():
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+    try:
+        return jsonify(get_ibkr_deposit_pairs(wealth_db, tenant_id))
+    except Exception as e:
+        print(f"Error getting IBKR deposit pairs: {e}")
+        print(traceback.format_exc())
+        return error_response('Failed to retrieve IBKR deposit pairs', 500)
 
 
 @transactions_bp.route('/summary')
@@ -76,6 +118,13 @@ def get_summary():
             })
 
         print(f"Formatted {len(transactions)} transactions for frontend")
+
+        skip_refund_hashes = wealth_db.get_active_category_override_hashes(tenant_id)
+
+        expense_refunded, income_refunded = build_refund_lookup(
+            db_transactions,
+            skip_hashes=skip_refund_hashes,
+        )
         
     except Exception as e:
         print(f"Error fetching transactions from database: {e}")
@@ -96,7 +145,7 @@ def get_summary():
         'savings_movement_total': 0,
         'internal_transfer_total': 0,
         'internal_transfer_transactions': [],
-        'currency_totals': {'EUR': 0, 'CHF': 0}
+        'currency_totals': defaultdict(float)
     })
 
     print(f"Processing {len(transactions)} transactions for grouping...")
@@ -125,7 +174,7 @@ def get_summary():
             month_key = date.strftime('%Y-%m')
 
             # Track internal transfers separately (don't include in income/expense calculations)
-            if t['category'] == 'Internal Transfer':
+            if t['category'] == INTERNAL_TRANSFER:
                 monthly_data[month_key]['internal_transfer_total'] += abs(t['amount'])
                 monthly_data[month_key]['internal_transfer_transactions'].append({
                     'date': t['date'],
@@ -142,10 +191,11 @@ def get_summary():
                 continue
 
             if t['type'] == 'income':
-                monthly_data[month_key]['income'] += abs(t['amount'])
-                monthly_data[month_key]['income_categories'][t['category']] += abs(t['amount'])
-                # Store individual income transactions for each category
-                monthly_data[month_key]['income_transactions'][t['category']].append({
+                txn_hash = t.get('transaction_hash', '')
+                gross = abs(t['amount'])
+                refunded = income_refunded.get(txn_hash, 0)
+                net = gross - refunded
+                income_txn = {
                     'date': t['date'],
                     'amount': t['amount'],
                     'currency': t['currency'],
@@ -154,8 +204,14 @@ def get_summary():
                     'account': t['account'],
                     'category': t['category'],
                     'type': t['type'],
-                    'transaction_hash': t.get('transaction_hash', '')
-                })
+                    'transaction_hash': txn_hash,
+                    'refundedAmount': refunded,
+                }
+                if net > 0.01:
+                    monthly_data[month_key]['income'] += net
+                    monthly_data[month_key]['income_categories'][t['category']] += net
+                if net > 0.01 or refunded > 0:
+                    monthly_data[month_key]['income_transactions'][t['category']].append(income_txn)
             elif t['category'] in SAVINGS_MOVEMENT_CATEGORIES:
                 amount = abs(t['amount'])
                 monthly_data[month_key]['savings_movement_total'] += amount
@@ -172,9 +228,13 @@ def get_summary():
                     'transaction_hash': t.get('transaction_hash', '')
                 })
             else:
-                monthly_data[month_key]['expenses'] += abs(t['amount'])
-                monthly_data[month_key]['expense_categories'][t['category']] += abs(t['amount'])
-                # Store individual expense transactions for each category
+                txn_hash = t.get('transaction_hash', '')
+                gross = abs(t['amount'])
+                refunded = expense_refunded.get(txn_hash, 0)
+                net = gross - refunded
+                if net > 0.01:
+                    monthly_data[month_key]['expenses'] += net
+                    monthly_data[month_key]['expense_categories'][t['category']] += net
                 monthly_data[month_key]['expense_transactions'][t['category']].append({
                     'date': t['date'],
                     'amount': t['amount'],
@@ -184,7 +244,8 @@ def get_summary():
                     'account': t['account'],
                     'category': t['category'],
                     'type': t['type'],
-                    'transaction_hash': t.get('transaction_hash', '')
+                    'transaction_hash': txn_hash,
+                    'refundedAmount': refunded,
                 })
 
             monthly_data[month_key]['currency_totals'][t['currency']] += t['amount']
@@ -222,7 +283,7 @@ def get_summary():
             'savingsMovementTotal': data['savings_movement_total'],
             'internalTransferTotal': data['internal_transfer_total'],
             'internalTransferTransactions': data['internal_transfer_transactions'],
-            'currencyTotals': data['currency_totals']
+            'currencyTotals': dict(data['currency_totals'])
         })
 
     try:

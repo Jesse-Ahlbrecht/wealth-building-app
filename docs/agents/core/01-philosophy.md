@@ -48,6 +48,10 @@ Transform tasks into verifiable goals. For multi-step tasks, state a brief plan:
 
 "Fix the bug" → write a test that reproduces it, then make it pass. Loop until verified.
 
+**Changes must be visible in the running app.** After backend or frontend edits, restart the affected service so the user can review in the browser — do not assume hot reload picked up the change. Use the `run-app` skill: backend `./run_backend.sh` (port 5001), frontend `npm start` in `frontend/` (port 3000). If unsure which service changed, restart both.
+
+**Rule and category changes need a backfill.** Editing `categories_*.json`, `merchants.de_ch.json`, or `bank_category_map.json` only affects new imports. Always run the matching backfill script on the tenant (dry-run first, then apply) and restart the backend so the user sees updated categories in the app.
+
 ## 5. Code Style
 
 - No comments unless the WHY is non-obvious (hidden constraint, workaround, subtle invariant)

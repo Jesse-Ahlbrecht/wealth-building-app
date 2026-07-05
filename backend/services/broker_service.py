@@ -14,69 +14,12 @@ from datetime import datetime
 from encryption import get_encryption_service, EncryptedData
 from database import get_wealth_database
 from parsers.bank_statement_parser import BankStatementParser
+from services.ibkr_deposit_pairing import IBKR_ACCOUNT, match_ibkr_deposits_to_bank_transfers
 
 encryption_service = get_encryption_service()
 wealth_db = get_wealth_database()
 
 BROKER_FILE_TYPES = ['broker_viac_pdf', 'broker_ing_diba_csv', 'broker_ibkr_csv']
-IBKR_ACCOUNT = 'Interactive Brokers'
-IBKR_KEYWORDS = ('interactive brokers', 'ibkr')
-
-
-def _parse_transaction_date(value):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    text = str(value).split('T')[0]
-    try:
-        return datetime.strptime(text, '%Y-%m-%d').date()
-    except ValueError:
-        return None
-
-
-def _match_ibkr_deposits_to_bank_transfers(ibkr_transactions, bank_transactions):
-    bank_outflows = []
-    for transaction in bank_transactions:
-        if transaction.get('category') != 'Internal Transfer':
-            continue
-        text = f"{transaction.get('recipient', '')} {transaction.get('description', '')}".lower()
-        if not any(keyword in text for keyword in IBKR_KEYWORDS):
-            continue
-        txn_date = _parse_transaction_date(transaction.get('date') or transaction.get('transaction_date'))
-        if not txn_date:
-            continue
-        bank_outflows.append({
-            'date': txn_date,
-            'amount': abs(float(transaction.get('amount', 0))),
-            'currency': transaction.get('currency'),
-            'transaction_hash': transaction.get('transaction_hash'),
-            'account': transaction.get('account') or transaction.get('account_name'),
-        })
-
-    for transaction in ibkr_transactions:
-        if transaction.get('type') != 'deposit':
-            continue
-        deposit_date = _parse_transaction_date(transaction.get('date'))
-        if not deposit_date:
-            continue
-        deposit_amount = abs(float(transaction.get('amount', 0)))
-        deposit_currency = transaction.get('currency')
-        for bank_outflow in bank_outflows:
-            if bank_outflow['currency'] != deposit_currency:
-                continue
-            if abs(bank_outflow['amount'] - deposit_amount) > 0.01:
-                continue
-            if abs((bank_outflow['date'] - deposit_date).days) > 3:
-                continue
-            transaction['matched_bank_transfer'] = {
-                'date': bank_outflow['date'].isoformat(),
-                'amount': bank_outflow['amount'],
-                'currency': bank_outflow['currency'],
-                'account': bank_outflow['account'],
-                'transaction_hash': bank_outflow['transaction_hash'],
-            }
-            break
 
 
 def load_broker_data(tenant_id):
@@ -290,7 +233,7 @@ def load_broker_data(tenant_id):
     if ibkr_transactions:
         try:
             bank_transactions = wealth_db.get_transactions(tenant_id, limit=10000)
-            _match_ibkr_deposits_to_bank_transfers(ibkr_transactions, bank_transactions)
+            match_ibkr_deposits_to_bank_transfers(ibkr_transactions, bank_transactions)
         except Exception as match_error:
             print(f"Error matching IBKR deposits to bank transfers: {match_error}")
     

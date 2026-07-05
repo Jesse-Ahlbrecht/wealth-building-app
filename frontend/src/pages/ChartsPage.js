@@ -25,7 +25,7 @@ import {
 import { formatCurrency } from '../utils';
 import { buildMonthlySavingsPoint, sortMonthsChronologically } from '../utils/chartDataHelpers';
 import { scrollToDrilldown, selectMonthFromChart } from '../utils/domHelpers';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments, useTransferPairs, useIbkrDepositPairs, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
@@ -37,7 +37,7 @@ import { useAppContext } from '../context/AppContext';
 
 const ChartsPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
-  const { essentialCategories, availableCategories } = useCategoryData();
+  const { essentialCategories, availableCategories, refreshCategories } = useCategoryData();
   const {
     summary,
     loading,
@@ -63,6 +63,9 @@ const ChartsPage = () => {
     handleSkipPrediction,
     handleDeletePrediction
   } = useMonthPredictions(selectedMonthKey);
+  const { recurringPayments } = useRecurringPayments();
+  const { transferPairData } = useTransferPairs();
+  const { ibkrDepositPairData } = useIbkrDepositPairs();
 
   // Drag selection state
   const chartContainerRef = useRef(null);
@@ -91,11 +94,15 @@ const ChartsPage = () => {
     essentialCategories,
     availableCategories,
     predictions,
+    recurringPayments,
+    transferPairData,
+    ibkrDepositPairData,
     averageEssentialSpending,
     handleSkipPrediction,
     handleDeletePrediction,
     reloadPredictions,
-    refreshSummary
+    refreshSummary,
+    refreshCategories
   });
 
   // Helper function to lighten a color

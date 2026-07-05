@@ -7,11 +7,15 @@ export function useMonthDrilldownPanelProps({
   essentialCategories,
   availableCategories,
   predictions,
+  recurringPayments,
+  transferPairData,
+  ibkrDepositPairData,
   averageEssentialSpending,
   handleSkipPrediction,
   handleDeletePrediction,
   reloadPredictions,
-  refreshSummary
+  refreshSummary,
+  refreshCategories
 }) {
   const selectedMonthKey = selectedMonth?.month;
   const onClose = useCallback(() => setSelectedMonth(null), [setSelectedMonth]);
@@ -23,10 +27,14 @@ export function useMonthDrilldownPanelProps({
     essentialCategories,
     availableCategories,
     predictions: predictions[selectedMonthKey] || [],
+    recurringPayments,
+    transferPairData,
+    ibkrDepositPairData,
     averageEssentialSpending: averageEssentialSpending[selectedMonthKey] || 0,
     onSkipPrediction: handleSkipPrediction,
     onDeletePrediction: handleDeletePrediction,
     onPredictionChanged: reloadPredictions,
-    onTransactionCategoryUpdated: refreshSummary
+    onTransactionCategoryUpdated: refreshSummary,
+    onCategoriesChanged: refreshCategories
   };
 }

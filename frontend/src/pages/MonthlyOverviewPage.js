@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState } from '../hooks';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments, useTransferPairs, useIbkrDepositPairs, usePreferenceState } from '../hooks';
 import MonthSummaryCard from '../components/MonthSummaryCard';
 import ChartPageStates from '../components/ChartPageStates';
 import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
 
 const MonthlyOverviewPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
-  const { essentialCategories, availableCategories } = useCategoryData();
+  const { essentialCategories, availableCategories, refreshCategories } = useCategoryData();
   const { summary, loading, error, loadSummary, refreshSummary } = useTransactionSummary();
   const [expenseSort, setExpenseSort] = usePreferenceState(
     'monthlyOverview_expenseSort',
@@ -30,6 +30,9 @@ const MonthlyOverviewPage = () => {
     handleSkipPrediction,
     handleDeletePrediction
   } = useMonthPredictions(latestMonthKey);
+  const { recurringPayments } = useRecurringPayments();
+  const { transferPairData } = useTransferPairs();
+  const { ibkrDepositPairData } = useIbkrDepositPairs();
 
   const latestMonth = sortedMonths[0];
   const previousMonths = sortedMonths.slice(1);
@@ -60,12 +63,16 @@ const MonthlyOverviewPage = () => {
               expenseSort={expenseSort}
               onExpenseSortChange={setExpenseSort}
               predictions={predictions[latestMonthKey] || []}
+              recurringPayments={recurringPayments}
+              transferPairData={transferPairData}
+              ibkrDepositPairData={ibkrDepositPairData}
               averageEssentialSpending={averageEssentialSpending[latestMonthKey] || 0}
               onSkipPrediction={handleSkipPrediction}
               onDeletePrediction={handleDeletePrediction}
               onPredictionChanged={reloadPredictions}
               availableCategories={availableCategories}
               onTransactionCategoryUpdated={refreshSummary}
+              onCategoriesChanged={refreshCategories}
             />
           </div>
 
@@ -95,8 +102,12 @@ const MonthlyOverviewPage = () => {
                     essentialCategories={essentialCategories}
                     expenseSort={expenseSort}
                     onExpenseSortChange={setExpenseSort}
+                    recurringPayments={recurringPayments}
+                    transferPairData={transferPairData}
+              ibkrDepositPairData={ibkrDepositPairData}
                     availableCategories={availableCategories}
                     onTransactionCategoryUpdated={refreshSummary}
+                    onCategoriesChanged={refreshCategories}
                   />
                 </div>
               ))}

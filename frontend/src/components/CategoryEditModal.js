@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { transactionsAPI } from '../api';
+import { categoriesAPI } from '../api/categories';
 import { formatCurrency, formatDate } from '../utils';
-import { groupExpenseCategoryNames } from '../utils/categoryHelpers';
+import { groupExpenseCategoryNames, groupIncomeCategoryNames } from '../utils/categoryHelpers';
 
 const CategorySection = ({
   title,
@@ -43,10 +44,14 @@ const CategoryEditModal = ({
   modal,
   onClose,
   onUpdated,
+  onCategoriesChanged = () => {},
   availableCategories = { income: [], expense: [] },
   essentialCategories = []
 }) => {
   const [loading, setLoading] = useState(false);
+  const [suggestion, setSuggestion] = useState(null);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [creatingCategory, setCreatingCategory] = useState(false);
 
   const transaction = modal?.transaction;
   const currentCategory = modal?.currentCategory || transaction?.category || '';
@@ -54,16 +59,34 @@ const CategoryEditModal = ({
 
   const groupedCategories = useMemo(() => {
     if (isIncome) {
-      return {
-        income: Array.isArray(availableCategories?.income) ? availableCategories.income : []
-      };
+      return groupIncomeCategoryNames(availableCategories?.income);
     }
 
-    return groupExpenseCategoryNames(
-      Array.isArray(availableCategories?.expense) ? availableCategories.expense : [],
-      essentialCategories
-    );
+    return groupExpenseCategoryNames(availableCategories?.expense, essentialCategories);
   }, [availableCategories, essentialCategories, isIncome]);
+
+  const suggestTransactionKey = transaction?.transaction_hash;
+
+  useEffect(() => {
+    let cancelled = false;
+    setSuggestion(null);
+    if (!transaction || (currentCategory && currentCategory !== 'Other')) {
+      return undefined;
+    }
+    categoriesAPI.suggestCategory(transaction)
+      .then((payload) => {
+        if (cancelled) return;
+        if (payload?.suggested) {
+          setSuggestion(payload);
+        }
+      })
+      .catch((error) => {
+        console.error('Category suggestion failed:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [suggestTransactionKey, currentCategory, transaction]);
 
   const handleCategorySelect = async (newCategory) => {
     if (!transaction || !newCategory || newCategory === currentCategory) {
@@ -74,17 +97,30 @@ const CategoryEditModal = ({
     try {
       const result = await transactionsAPI.updateCategory(transaction, newCategory);
       onClose();
-      try {
-        await onUpdated(transaction, newCategory, result);
-      } catch (refreshError) {
-        console.error('Category saved, but refresh failed:', refreshError);
-        alert(`Category saved, but the list did not refresh: ${refreshError.message}`);
-      }
+      await onUpdated(transaction, newCategory, result);
     } catch (error) {
       console.error('Category update failed:', error);
       alert(`Failed to update category: ${error.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateCategory = async () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+
+    setCreatingCategory(true);
+    try {
+      await categoriesAPI.createCategory(trimmed, isIncome ? 'income' : 'expense');
+      setNewCategoryName('');
+      await onCategoriesChanged();
+      await handleCategorySelect(trimmed);
+    } catch (error) {
+      console.error('Create category failed:', error);
+      alert(`Failed to create category: ${error.message}`);
+    } finally {
+      setCreatingCategory(false);
     }
   };
 
@@ -114,18 +150,41 @@ const CategoryEditModal = ({
             <div className="transaction-preview-item">
               <strong>Current Category:</strong> <span className="category-badge">{currentCategory || 'Uncategorized'}</span>
             </div>
+            {suggestion?.suggested && (
+              <div className="transaction-preview-item">
+                <strong>Suggested:</strong>{' '}
+                <button
+                  type="button"
+                  className="category-suggestion-button"
+                  onClick={() => handleCategorySelect(suggestion.suggested)}
+                  disabled={loading}
+                >
+                  {suggestion.suggested}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="category-selection">
             {isIncome ? (
-              <CategorySection
-                title="Income Categories"
-                description="Pick the category that best describes this incoming transaction."
-                categories={groupedCategories.income}
-                currentCategory={currentCategory}
-                loading={loading}
-                onSelect={handleCategorySelect}
-              />
+              <>
+                <CategorySection
+                  title="Income Categories"
+                  description="Pick the category that best describes this incoming transaction."
+                  categories={groupedCategories.income}
+                  currentCategory={currentCategory}
+                  loading={loading}
+                  onSelect={handleCategorySelect}
+                />
+                <CategorySection
+                  title="Your Categories"
+                  description="Custom categories use simple counterparty matching only."
+                  categories={groupedCategories.custom}
+                  currentCategory={currentCategory}
+                  loading={loading}
+                  onSelect={handleCategorySelect}
+                />
+              </>
             ) : (
               <>
                 <CategorySection
@@ -152,8 +211,40 @@ const CategoryEditModal = ({
                   loading={loading}
                   onSelect={handleCategorySelect}
                 />
+                <CategorySection
+                  title="Your Categories"
+                  description="Custom categories use simple counterparty matching only."
+                  categories={groupedCategories.custom}
+                  currentCategory={currentCategory}
+                  loading={loading}
+                  onSelect={handleCategorySelect}
+                />
               </>
             )}
+
+            <div className="category-modal-section">
+              <div className="category-modal-section-header">
+                <h4>Create Custom Category</h4>
+                <p>Add a personal category. Future matches use counterparty rules only.</p>
+              </div>
+              <div className="category-create-row">
+                <input
+                  type="text"
+                  value={newCategoryName}
+                  onChange={(event) => setNewCategoryName(event.target.value)}
+                  placeholder="Category name"
+                  disabled={loading || creatingCategory}
+                />
+                <button
+                  type="button"
+                  className="documents-primary-button"
+                  onClick={handleCreateCategory}
+                  disabled={loading || creatingCategory || !newCategoryName.trim()}
+                >
+                  {creatingCategory ? 'Creating…' : 'Create & Apply'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

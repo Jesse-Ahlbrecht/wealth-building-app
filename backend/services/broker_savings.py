@@ -1,5 +1,6 @@
 from category_config import get_broker_savings_category_names
 from services.broker_service import IBKR_ACCOUNT
+from services.transfer_pairing import INTERNAL_TRANSFER
 
 INVESTMENTS_CATEGORY, CASH_CATEGORY = get_broker_savings_category_names()
 
@@ -56,6 +57,8 @@ def build_broker_monthly_savings(transactions):
             continue
 
         txn_type = txn.get('type')
+        if txn.get('category') == INTERNAL_TRANSFER and txn_type in ('deposit', 'withdrawal'):
+            continue
         if txn_type == 'buy':
             category = INVESTMENTS_CATEGORY
             signed_amount = amount

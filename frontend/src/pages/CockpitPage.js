@@ -18,7 +18,7 @@ import {
   CockpitTooltip
 } from '../utils/cockpitChartConfig';
 import CockpitViewToggle from '../components/CockpitViewToggle';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments, useTransferPairs, useIbkrDepositPairs, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
 import ChartPageStates from '../components/ChartPageStates';
 import MonthDrilldownPanel from '../components/MonthDrilldownPanel';
 import { useAppContext } from '../context/AppContext';
@@ -54,7 +54,7 @@ const MonthDot = ({ cx, cy, payload, selectedMonthKey, color, selectedColor }) =
 
 const CockpitPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
-  const { essentialCategories, availableCategories } = useCategoryData();
+  const { essentialCategories, availableCategories, refreshCategories } = useCategoryData();
   const {
     summary,
     loading,
@@ -79,6 +79,9 @@ const CockpitPage = () => {
     handleSkipPrediction,
     handleDeletePrediction
   } = useMonthPredictions(selectedMonthKey);
+  const { recurringPayments } = useRecurringPayments();
+  const { transferPairData } = useTransferPairs();
+  const { ibkrDepositPairData } = useIbkrDepositPairs();
 
   const stats = useMemo(
     () => buildCockpitChartData(summary, essentialCategories, 12),
@@ -145,11 +148,15 @@ const CockpitPage = () => {
     essentialCategories,
     availableCategories,
     predictions,
+    recurringPayments,
+    transferPairData,
+    ibkrDepositPairData,
     averageEssentialSpending,
     handleSkipPrediction,
     handleDeletePrediction,
     reloadPredictions,
-    refreshSummary
+    refreshSummary,
+    refreshCategories
   });
 
   return (

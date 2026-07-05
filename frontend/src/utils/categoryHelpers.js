@@ -4,7 +4,6 @@ export const BROKER_SAVINGS_INVESTMENTS = 'Interactive Brokers Investments';
 export const BROKER_SAVINGS_CASH = 'Interactive Brokers Cash';
 
 export const SAVINGS_CATEGORY_NAMES = new Set([
-  'Transfer',
   INTERNAL_TRANSFER_CATEGORY,
   'Loan Payment',
   'Investment Account Payment',
@@ -53,16 +52,52 @@ export const splitExpenseCategoryAmounts = (expenseCategories, essentialCategori
   return { essential, nonEssential, savingsCategories };
 };
 
+export const normalizeCategoryEntry = (entry) => {
+  if (typeof entry === 'string') {
+    return { name: entry, source: 'system' };
+  }
+  return {
+    name: entry?.name || '',
+    source: entry?.source || 'system'
+  };
+};
+
+export const normalizeCategoryList = (entries) =>
+  (Array.isArray(entries) ? entries : []).map(normalizeCategoryEntry).filter((entry) => entry.name);
+
+export const getCategoryNames = (entries) => normalizeCategoryList(entries).map((entry) => entry.name);
+
+export const groupIncomeCategoryNames = (categories) => {
+  const groups = { income: [], custom: [] };
+  const seen = { income: new Set(), custom: new Set() };
+
+  normalizeCategoryList(categories).forEach(({ name, source }) => {
+    const bucket = source === 'custom' ? 'custom' : 'income';
+    if (seen[bucket].has(name)) return;
+    seen[bucket].add(name);
+    groups[bucket].push(name);
+  });
+
+  return groups;
+};
+
 export const groupExpenseCategoryNames = (categories, essentialCategories) => {
   const essentialSet = buildEssentialCategorySet(essentialCategories);
-  const groups = { essential: [], nonEssential: [], savings: [] };
+  const groups = { essential: [], nonEssential: [], savings: [], custom: [] };
+  const seen = { essential: new Set(), nonEssential: new Set(), savings: new Set(), custom: new Set() };
 
-  (categories || []).forEach((category) => {
-    const bucket = classifyExpenseCategory(category, essentialSet);
+  normalizeCategoryList(categories).forEach(({ name, source }) => {
+    if (source === 'custom') {
+      if (seen.custom.has(name)) return;
+      seen.custom.add(name);
+      groups.custom.push(name);
+      return;
+    }
+    const bucket = classifyExpenseCategory(name, essentialSet);
     if (bucket === 'skip') return;
-    if (bucket === 'savings') groups.savings.push(category);
-    else if (bucket === 'essential') groups.essential.push(category);
-    else groups.nonEssential.push(category);
+    if (seen[bucket]?.has(name)) return;
+    seen[bucket].add(name);
+    groups[bucket].push(name);
   });
 
   return groups;
