@@ -64,10 +64,6 @@ def detect_document_type_from_content(file_content: bytes, filename: str) -> Opt
                       ('BUCHUNG' in line_upper and 'BETRAG' in line_upper)):
                     header_line = line
                     break
-                # ING DiBa detection
-                elif 'ISIN' in line_upper and ('WERTPAPIERNAME' in line_upper or 'WERTPAPIER' in line_upper):
-                    header_line = line
-                    break
             
             if not header_line:
                 # Fallback
@@ -111,11 +107,6 @@ def detect_document_type_from_content(file_content: bytes, filename: str) -> Opt
                 print("Detected as Swisscard credit card statement")
                 return 'bank_statement_swisscard'
             
-            # ING DiBa Broker detection
-            if 'ISIN' in columns and ('WERTPAPIERNAME' in columns or 'WERTPAPIER' in columns):
-                print(f"Detected as ING DiBa broker")
-                return 'broker_ing_diba_csv'
-            
         except Exception as e:
             print(f"Error detecting CSV document type: {e}")
             return None
@@ -143,10 +134,6 @@ def detect_document_type_from_content(file_content: bytes, filename: str) -> Opt
                 # KfW Loan detection
                 if ('KFW' in text_upper or 'KFW' in text) and 'KONTOAUSZUG PER' in text_upper and 'DARLEHENSKONTO' in text_upper:
                     return 'loan_kfw_pdf'
-                
-                # VIAC Broker detection
-                if 'VIAC' in text_upper and 'ISIN' in text_upper and ('VALUTA' in text_upper or 'VERRECHNETER BETRAG' in text_upper):
-                    return 'broker_viac_pdf'
                 
             finally:
                 # Clean up temp file
@@ -177,8 +164,6 @@ def detect_document_type(filename: str) -> Optional[str]:
     if extension == '.csv':
         if 'ibkr' in filename_lower or 'interactive brokers' in filename_lower or 'interactive_brokers' in filename_lower or 'wealth_app_activity' in filename_lower:
             return 'broker_ibkr_csv'
-        if 'ing' in filename_lower or 'diba' in filename_lower or 'depot' in filename_lower:
-            return 'broker_ing_diba_csv'
         if 'yuh' in filename_lower or 'aktivit' in filename_lower:
             return 'bank_statement_yuh'
         elif 'swisscard' in filename_lower or filename_lower.startswith('sc-transactions'):
@@ -186,13 +171,6 @@ def detect_document_type(filename: str) -> Optional[str]:
         elif 'umsatzliste' in filename_lower or 'girokonto' in filename_lower or 'tagesgeld' in filename_lower or 'dkb' in filename_lower:
             return 'bank_statement_dkb'
         return 'bank_statement_dkb'
-    
-    # Broker reports
-    if extension == '.pdf':
-        if 'viac' in filename_lower:
-            return 'broker_viac_pdf'
-        elif 'ing' in filename_lower or 'diba' in filename_lower or 'depot' in filename_lower:
-            return 'broker_ing_diba_csv'
     
     # Loan documents
     if extension == '.pdf':

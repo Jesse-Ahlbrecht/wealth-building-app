@@ -6,13 +6,13 @@ It delegates to the specialized parser classes (DKBParser, YUHParser, etc.).
 
 For new code, prefer importing the specific parsers directly:
     from parsers.bank_parser import DKBParser, YUHParser
-    from parsers.broker_parser import VIACParser, INGDiBaParser
+    from parsers.broker_parser import IBKRParser
     from parsers.loan_parser import KfWParser
 """
 
 from parsers.base_parser import BaseParser
 from parsers.bank_parser import DKBParser, YUHParser, SwisscardParser
-from parsers.broker_parser import VIACParser, INGDiBaParser, IBKRParser
+from parsers.broker_parser import IBKRParser
 from parsers.loan_parser import KfWParser
 
 
@@ -46,16 +46,6 @@ class BankStatementParser(BaseParser):
         self.account_balances.update(parser.account_balances)
         return transactions
     
-    def parse_viac(self, filepath):
-        """Parse VIAC broker statements"""
-        parser = VIACParser()
-        return parser.parse(filepath)
-    
-    def parse_ing_diba(self, filepath):
-        """Parse ING DiBa broker depot overview"""
-        parser = INGDiBaParser()
-        return parser.parse(filepath)
-
     def parse_ibkr(self, filepath):
         """Parse Interactive Brokers Activity Flex Query CSV"""
         parser = IBKRParser()

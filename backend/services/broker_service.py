@@ -13,14 +13,13 @@ from datetime import datetime
 
 from encryption import get_encryption_service, EncryptedData
 from database import get_wealth_database
-from constants import TRANSACTION_QUERY_LIMIT
+from constants import TRANSACTION_QUERY_LIMIT, BROKER_FILE_TYPES
 from parsers.bank_statement_parser import BankStatementParser
 from services.ibkr_deposit_pairing import IBKR_ACCOUNT, match_ibkr_deposits_to_bank_transfers
 
 encryption_service = get_encryption_service()
 wealth_db = get_wealth_database()
 
-BROKER_FILE_TYPES = ['broker_viac_pdf', 'broker_ing_diba_csv', 'broker_ibkr_csv']
 _broker_data_cache: dict[str, tuple[str, dict]] = {}
 
 
@@ -54,9 +53,6 @@ def _load_broker_data_uncached(tenant_id):
     transactions = []
     holdings_dict = {}
     ibkr_cash_balances = {}
-    total_invested_chf = 0
-    total_invested_eur = 0
-    total_current_value_eur = 0
 
     try:
         broker_docs = wealth_db.list_file_attachments(tenant_id, file_types=BROKER_FILE_TYPES)
@@ -202,25 +198,7 @@ def _load_broker_data_uncached(tenant_id):
                     
                     # Parse based on document type
                     doc_type = doc.get('file_type', '')
-                    if doc_type == 'broker_viac_pdf':
-                        parsed_transactions = parser.parse_viac(tmp_path)
-                        transactions.extend(parsed_transactions)
-                    elif doc_type == 'broker_ing_diba_csv':
-                        parsed_holdings = parser.parse_ing_diba(tmp_path)
-                        print(f"   Parsed {len(parsed_holdings)} ING DiBa holdings")
-                        for holding in parsed_holdings:
-                            isin = holding.get('isin', '')
-                            if not isin:
-                                print(f"   Warning: Holding missing ISIN: {holding}")
-                                continue
-                            key = f"ING_DIBA_{isin}"
-                            if key not in holdings_dict:
-                                holdings_dict[key] = holding.copy()
-                            else:
-                                holdings_dict[key]['shares'] += holding.get('shares', 0)
-                                holdings_dict[key]['total_cost'] += holding.get('total_cost', 0)
-                                holdings_dict[key]['current_value'] += holding.get('current_value', 0)
-                    elif doc_type == 'broker_ibkr_csv':
+                    if doc_type == 'broker_ibkr_csv':
                         parsed = parser.parse_ibkr(tmp_path)
                         ibkr_transactions = parsed.get('transactions', [])
                         transactions.extend(ibkr_transactions)
@@ -262,41 +240,16 @@ def _load_broker_data_uncached(tenant_id):
         except Exception as match_error:
             print(f"Error matching IBKR deposits to bank transfers: {match_error}")
     
-    print(f"📊 Broker data summary:")
-    print(f"   Transactions: {len(transactions)}")
-    print(f"   Holdings: {len(holdings)}")
-    for i, holding in enumerate(holdings):
-        print(f"   Holding {i}: account={holding.get('account')}, currency={holding.get('currency')}, total_cost={holding.get('total_cost')}, current_value={holding.get('current_value')}")
-    
     # Calculate totals by account type
-    viac_total_invested = 0
-    ing_diba_total_invested = 0
-    ing_diba_total_current_value = 0
     ibkr_total_invested_chf = 0
     ibkr_total_invested_eur = 0
-    
-    for transaction in transactions:
-        if transaction.get('account') != 'VIAC':
-            continue
-        if transaction.get('type') in ('buy', 'sell') and transaction.get('currency') == 'CHF':
-            viac_total_invested += abs(transaction.get('amount', 0))
-    
-    print(f"   VIAC total from transactions: {viac_total_invested}")
-    
+
     for holding in holdings:
         account = holding.get('account', '')
         currency = holding.get('currency', 'EUR')
         total_cost = holding.get('total_cost', 0)
-        current_value = holding.get('current_value', 0)
-        
-        print(f"   Processing holding: account='{account}', currency='{currency}', total_cost={total_cost}, current_value={current_value}")
-        
-        if account == 'ING DiBa':
-            ing_diba_total_invested += total_cost
-            ing_diba_total_current_value += current_value
-        elif account == 'VIAC' and currency == 'CHF':
-            viac_total_invested += total_cost
-        elif account == IBKR_ACCOUNT:
+
+        if account == IBKR_ACCOUNT:
             if currency == 'CHF':
                 ibkr_total_invested_chf += total_cost
             else:
@@ -305,35 +258,15 @@ def _load_broker_data_uncached(tenant_id):
     ibkr_cash_chf = ibkr_cash_balances.get('CHF', 0)
     ibkr_cash_eur = ibkr_cash_balances.get('EUR', 0)
     ibkr_total_value_chf = ibkr_total_invested_chf + ibkr_cash_chf + (ibkr_total_invested_eur + ibkr_cash_eur) * 1.08
-    
-    print(f"   Final totals: VIAC={viac_total_invested}, ING DiBa invested={ing_diba_total_invested}, IBKR CHF={ibkr_total_invested_chf}")
-    
+
     total_invested_chf = (
-        viac_total_invested
-        + ing_diba_total_invested * 1.08
-        + ibkr_total_invested_chf
+        ibkr_total_invested_chf
         + ibkr_total_invested_eur * 1.08
         + ibkr_cash_chf
         + ibkr_cash_eur * 1.08
     )
-    total_current_value_chf = (
-        viac_total_invested
-        + ing_diba_total_current_value * 1.08
-        + ibkr_total_value_chf
-    )
     
     summary = {}
-    if viac_total_invested > 0:
-        summary['viac'] = {
-            'total_invested': round(viac_total_invested, 2),
-            'currency': 'CHF'
-        }
-    if ing_diba_total_invested > 0 or ing_diba_total_current_value > 0:
-        summary['ing_diba'] = {
-            'total_invested': round(ing_diba_total_invested, 2),
-            'total_current_value': round(ing_diba_total_current_value, 2),
-            'currency': 'EUR'
-        }
     if ibkr_total_invested_chf > 0 or ibkr_total_invested_eur > 0 or ibkr_cash_chf or ibkr_cash_eur:
         summary['interactive_brokers'] = {
             'total_invested_chf': round(ibkr_total_invested_chf, 2),
@@ -346,26 +279,12 @@ def _load_broker_data_uncached(tenant_id):
             'currency': 'CHF'
         }
     
-    print(f"   Summary object: {summary}")
-    
-    # Always include summary, even if empty
-    if not summary:
-        summary = {}
-    
-    response_data = {
+    return {
         'transactions': transactions,
         'holdings': holdings,
         'summary': summary,
-        'total_invested_chf': round(total_invested_chf, 2),
-        'total_invested_eur': round(ing_diba_total_invested, 2),
-        'total_current_value_eur': round(ing_diba_total_current_value, 2),
-        'profit_loss_eur': round(ing_diba_total_current_value - ing_diba_total_invested, 2)
+        'total_invested_chf': round(total_invested_chf, 2)
     }
-    
-    print(f"   Response summary: {response_data.get('summary')}")
-    print(f"   Response keys: {list(response_data.keys())}")
-    
-    return response_data
 
 
 def get_broker():

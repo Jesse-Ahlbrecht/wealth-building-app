@@ -13,70 +13,12 @@ import {
 } from 'recharts';
 import { brokerAPI } from '../api';
 import { formatCurrency, formatDate, EUR_TO_CHF_RATE } from '../utils';
-import { useAppContext } from '../context/AppContext';
 import { useBrokerData } from '../hooks';
 
 const BrokerPage = () => {
-  const { preferences, updatePreferences } = useAppContext();
   const { broker, loading, error, reloadBroker } = useBrokerData();
-  const [ingDibaPurchaseDate, setIngDibaPurchaseDate] = useState(null);
-  const [showPurchaseDateModal, setShowPurchaseDateModal] = useState(false);
-  const [purchaseDateInput, setPurchaseDateInput] = useState('');
   const [historicalValuation, setHistoricalValuation] = useState(null);
   const [loadingHistorical, setLoadingHistorical] = useState(false);
-
-  // Load purchase date from preferences on mount/update
-  useEffect(() => {
-    if (preferences && preferences.broker_ingDibaPurchaseDate) {
-      setIngDibaPurchaseDate(new Date(preferences.broker_ingDibaPurchaseDate));
-    } else {
-      // Fallback to localStorage for migration (optional, but good for UX)
-      const storedDate = localStorage.getItem('ingDibaPurchaseDate');
-      if (storedDate) {
-        setIngDibaPurchaseDate(new Date(storedDate));
-        // Migrate to backend
-        updatePreferences({ broker_ingDibaPurchaseDate: storedDate });
-      }
-    }
-  }, [preferences, updatePreferences]);
-
-  // Check if purchase date is needed when broker data loads
-  useEffect(() => {
-    if (!broker) return;
-
-    const holdings = broker.holdings || [];
-    const ingDibaHoldings = holdings.filter((h) => h.account === 'ING DiBa');
-
-    // Check if we have ING DiBa holdings but no purchase date
-    if (ingDibaHoldings.length > 0) {
-      const holdingDate = ingDibaHoldings[0].purchase_date;
-
-      // If we already have a purchase date set, don't do anything
-      if (ingDibaPurchaseDate) return;
-
-      // If no date in holdings and no stored date, show modal
-      if (!holdingDate && !preferences?.broker_ingDibaPurchaseDate) {
-        setShowPurchaseDateModal(true);
-      } else if (holdingDate) {
-        // Use date from holdings if available
-        setIngDibaPurchaseDate(new Date(holdingDate));
-      }
-    }
-  }, [broker, ingDibaPurchaseDate, preferences]);
-
-  const handlePurchaseDateSubmit = () => {
-    if (purchaseDateInput) {
-      const date = new Date(purchaseDateInput);
-      if (!isNaN(date.getTime())) {
-        setIngDibaPurchaseDate(date);
-        const isoDate = date.toISOString();
-        updatePreferences({ broker_ingDibaPurchaseDate: isoDate });
-        localStorage.setItem('ingDibaPurchaseDate', isoDate); // Keep local copy just in case
-        setShowPurchaseDateModal(false);
-        setPurchaseDateInput('');
-      }
-    }
-  };
 
   // Fetch historical valuation data
   useEffect(() => {
@@ -280,20 +222,10 @@ const BrokerPage = () => {
   const transactions = broker.transactions || [];
   const summary = broker.summary || {};
 
-  // Get ING DiBa purchase date - prefer stored date over holdings date
-  const ingDibaHoldings = holdings.filter((h) => h.account === 'ING DiBa');
-  const finalPurchaseDate = ingDibaPurchaseDate ||
-    (ingDibaHoldings.length > 0 && ingDibaHoldings[0].purchase_date
-      ? new Date(ingDibaHoldings[0].purchase_date)
-      : null);
-
   // Prepare chart data for total portfolio value over time
   const portfolioChartData = [];
   let cumulativeInvestedCHF = 0;
   let cumulativeInvestedEUR = 0;
-  const ingDibaTotalCost = summary.ing_diba ? summary.ing_diba.total_invested : 0;
-  const ingDibaCurrentValue = summary.ing_diba ? summary.ing_diba.total_current_value : 0;
-  const viacTotal = summary.viac ? summary.viac.total_invested : 0;
   const ibkrSummary = summary.interactive_brokers || null;
   const ibkrTotalValue = ibkrSummary ? ibkrSummary.total_value_chf : 0;
   const ibkrHoldings = holdings.filter((h) => h.account === 'Interactive Brokers');
@@ -303,28 +235,13 @@ const BrokerPage = () => {
     (a, b) => new Date(a.date) - new Date(b.date)
   );
 
-  // Start from ING DiBa purchase date if available
-  if (finalPurchaseDate) {
-    // Day before ING DiBa purchase
-    portfolioChartData.push({
-      date: formatDate(new Date(finalPurchaseDate.getTime() - 24 * 60 * 60 * 1000)),
-      totalInvested: 0
-    });
-
-    // ING DiBa purchase date
-    cumulativeInvestedEUR = ingDibaTotalCost;
-    portfolioChartData.push({
-      date: formatDate(finalPurchaseDate),
-      totalInvested: ingDibaTotalCost * EUR_TO_CHF_RATE
-    });
-  } else if (sortedTransactions.length > 0) {
-    // Fallback to first transaction if no ING DiBa date
+  if (sortedTransactions.length > 0) {
     const firstDate = new Date(sortedTransactions[0].date);
     portfolioChartData.push({
       date: formatDate(new Date(firstDate.getTime() - 24 * 60 * 60 * 1000)),
       totalInvested: 0
     });
-  } else if (ingDibaTotalCost > 0 || viacTotal > 0) {
+  } else if (ibkrTotalValue > 0) {
     // If we have holdings but no transactions, start from 30 days ago
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 30);
@@ -334,7 +251,6 @@ const BrokerPage = () => {
     });
   }
 
-  // Build cumulative investment data from VIAC transactions
   sortedTransactions.forEach((transaction) => {
     if (transaction.currency === 'CHF') {
       cumulativeInvestedCHF += Math.abs(transaction.amount);
@@ -352,177 +268,27 @@ const BrokerPage = () => {
   });
 
   // Add current value as final point (today)
-  // If no transactions, use the summary totals directly
-  if (sortedTransactions.length === 0 && (ingDibaTotalCost > 0 || viacTotal > 0)) {
-    const totalInvestedCHF = viacTotal + ingDibaTotalCost * EUR_TO_CHF_RATE;
-    const totalCurrentValueInCHF = viacTotal + (ingDibaCurrentValue || ingDibaTotalCost) * EUR_TO_CHF_RATE;
-
+  if (sortedTransactions.length === 0 && ibkrTotalValue > 0) {
     portfolioChartData.push({
       date: formatDate(new Date()),
-      totalInvested: totalInvestedCHF,
-      currentValue: totalCurrentValueInCHF
+      totalInvested: 0,
+      currentValue: ibkrTotalValue
     });
   } else if (sortedTransactions.length > 0) {
-    // Add final point with current values
-    const totalInvestedCHF = viacTotal + ingDibaTotalCost * EUR_TO_CHF_RATE;
-    const totalCurrentValueInCHF = viacTotal + ingDibaCurrentValue * EUR_TO_CHF_RATE;
+    const totalInvestedCHF = cumulativeInvestedCHF + cumulativeInvestedEUR * EUR_TO_CHF_RATE;
 
     portfolioChartData.push({
       date: formatDate(new Date()),
       totalInvested: totalInvestedCHF,
-      currentValue: totalCurrentValueInCHF
+      currentValue: ibkrTotalValue
     });
   }
 
   return (
     <div className="accounts-container">
-      {/* Purchase Date Modal */}
-      {showPurchaseDateModal && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
-          }}
-          onClick={() => setShowPurchaseDateModal(false)}
-        >
-          <div
-            style={{
-              backgroundColor: 'white',
-              padding: '24px',
-              borderRadius: '8px',
-              maxWidth: '400px',
-              width: '90%',
-              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: '600' }}>
-              {finalPurchaseDate ? 'Edit ING DiBa Purchase Date' : 'ING DiBa Purchase Date Required'}
-            </h3>
-            <p style={{ margin: '0 0 16px 0', color: '#666', fontSize: '14px' }}>
-              {finalPurchaseDate
-                ? 'Update the purchase date for your ING DiBa holdings to accurately display the portfolio value over time.'
-                : 'Please specify the purchase date for your ING DiBa holdings to accurately display the portfolio value over time.'}
-            </p>
-            <input
-              type="date"
-              value={purchaseDateInput}
-              onChange={(e) => setPurchaseDateInput(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: '1px solid #e5e5e5',
-                borderRadius: '4px',
-                fontSize: '14px',
-                marginBottom: '16px'
-              }}
-            />
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => {
-                  setShowPurchaseDateModal(false);
-                  setPurchaseDateInput('');
-                }}
-                style={{
-                  padding: '8px 16px',
-                  border: '1px solid #e5e5e5',
-                  borderRadius: '4px',
-                  backgroundColor: 'white',
-                  cursor: 'pointer',
-                  fontSize: '14px'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handlePurchaseDateSubmit}
-                disabled={!purchaseDateInput}
-                style={{
-                  padding: '8px 16px',
-                  border: 'none',
-                  borderRadius: '4px',
-                  backgroundColor: purchaseDateInput ? '#1a1a1a' : '#d1d5db',
-                  color: 'white',
-                  cursor: purchaseDateInput ? 'pointer' : 'not-allowed',
-                  fontSize: '14px',
-                  fontWeight: '600'
-                }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="accounts-summary">
         <h3 className="accounts-title">Broker Summary</h3>
-        {/* Portfolio Total Card - Full width at top */}
-        {((summary.viac && summary.viac.total_invested > 0) || (summary.ing_diba && (summary.ing_diba.total_current_value > 0 || summary.ing_diba.total_invested > 0)) || ibkrTotalValue > 0) && (
-          <div style={{ marginBottom: '24px' }}>
-            <div className="total-card" style={{ maxWidth: '400px' }}>
-              <div className="total-label">Portfolio Total</div>
-              <div className="total-amount positive">
-                {formatCurrency(
-                  (summary.viac ? summary.viac.total_invested : 0) +
-                  ((summary.ing_diba && summary.ing_diba.total_current_value) ? summary.ing_diba.total_current_value * EUR_TO_CHF_RATE :
-                    (summary.ing_diba && summary.ing_diba.total_invested) ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0) +
-                  ibkrTotalValue,
-                  'CHF'
-                )}
-              </div>
-              <div style={{ fontSize: '12px', marginTop: '4px', color: '#666' }}>
-                Invested: {formatCurrency(
-                  (summary.viac ? summary.viac.total_invested : 0) +
-                  (summary.ing_diba ? summary.ing_diba.total_invested * EUR_TO_CHF_RATE : 0) +
-                  (ibkrSummary ? (ibkrSummary.total_invested_chf + ibkrSummary.total_invested_eur * EUR_TO_CHF_RATE) : 0),
-                  'CHF'
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        {/* Account Cards - Below total */}
         <div className="totals-grid">
-          {summary.viac && (
-            <div className="total-card">
-              <div className="total-label">VIAC</div>
-              <div className="total-amount positive">
-                {formatCurrency(summary.viac.total_invested, summary.viac.currency)}
-              </div>
-              <div style={{ fontSize: '12px', marginTop: '4px', color: '#666' }}>Cost Basis</div>
-            </div>
-          )}
-          {summary.ing_diba && (
-            <div className="total-card">
-              <div className="total-label">ING DiBa</div>
-              <div className="total-amount positive">
-                {formatCurrency(summary.ing_diba.total_current_value, summary.ing_diba.currency)}
-              </div>
-              <div style={{ fontSize: '14px', marginTop: '4px', color: '#34c759' }}>
-                +
-                {formatCurrency(
-                  summary.ing_diba.total_current_value - summary.ing_diba.total_invested,
-                  summary.ing_diba.currency
-                )}{' '}
-                (
-                {(
-                  ((summary.ing_diba.total_current_value - summary.ing_diba.total_invested) /
-                    summary.ing_diba.total_invested) *
-                  100
-                ).toFixed(2)}
-                %)
-              </div>
-            </div>
-          )}
           {ibkrSummary && (
             <div className="total-card">
               <div className="total-label">Interactive Brokers</div>
@@ -935,235 +701,48 @@ const BrokerPage = () => {
         </div>
       )}
 
-      {/* ING DiBa Holdings */}
-      {holdings.filter((h) => h.account === 'ING DiBa').length > 0 && (
-        <div className="accounts-list-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 className="accounts-title" style={{ margin: 0 }}>ING DiBa Holdings</h3>
-            {finalPurchaseDate && (
-              <button
-                onClick={() => {
-                  setPurchaseDateInput(finalPurchaseDate.toISOString().split('T')[0]);
-                  setShowPurchaseDateModal(true);
-                }}
-                style={{
-                  padding: '4px 12px',
-                  border: '1px solid #e5e5e5',
-                  borderRadius: '4px',
-                  backgroundColor: 'white',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  color: '#666'
-                }}
-                title="Edit purchase date"
-              >
-                Edit Purchase Date
-              </button>
-            )}
-          </div>
-          <div className="accounts-grid">
-            {holdings
-              .filter((h) => h.account === 'ING DiBa')
-              .map((holding) => {
-                const hasCurrentValue =
-                  holding.current_value !== null && holding.current_value !== undefined;
-                const profitLoss = hasCurrentValue ? holding.current_value - holding.total_cost : 0;
-                const profitLossPercent = hasCurrentValue ? (profitLoss / holding.total_cost) * 100 : 0;
-
-                return (
-                  <div key={`${holding.account}-${holding.isin}`} className="account-card">
-                    <div className="account-header">
-                      <div className="account-name">{holding.security}</div>
-                      <span
-                        className={`account-badge account-badge-${holding.account
-                          .toLowerCase()
-                          .replace(/ /g, '-')}`}
-                      >
-                        {holding.currency}
-                      </span>
-                    </div>
-                    {hasCurrentValue ? (
-                      <>
-                        <div className="account-balance positive">
-                          {formatCurrency(holding.current_value, holding.currency)}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: '14px',
-                            marginTop: '4px',
-                            color: profitLoss >= 0 ? '#34c759' : '#ff3b30'
-                          }}
-                        >
-                          {profitLoss >= 0 ? '+' : ''}
-                          {formatCurrency(profitLoss, holding.currency)} ({profitLossPercent.toFixed(2)}%)
-                        </div>
-                      </>
-                    ) : (
-                      <div className="account-balance positive">
-                        {formatCurrency(holding.total_cost, holding.currency)}
-                      </div>
-                    )}
-                    <div className="account-meta" style={{ marginTop: '8px' }}>
-                      <span className="account-meta-item">{holding.shares} shares</span>
-                      <span className="account-meta-item">
-                        Avg: {formatCurrency(holding.average_cost, holding.currency)}
-                      </span>
-                    </div>
-                    {hasCurrentValue && (
-                      <div className="account-meta">
-                        <span className="account-meta-item">
-                          Cost: {formatCurrency(holding.total_cost, holding.currency)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="account-meta" style={{ marginTop: '4px' }}>
-                      <span className="account-meta-item" style={{ fontSize: '11px', color: '#666' }}>
-                        ISIN: {holding.isin}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-      )}
-
-      {/* Säule 3a Holdings */}
-      {holdings.filter((h) => h.account === 'VIAC').length > 0 && (
-        <div className="accounts-list-section">
-          <h3 className="accounts-title">Säule 3a Holdings</h3>
-          <div className="accounts-grid">
-            {holdings
-              .filter((h) => h.account === 'VIAC')
-              .map((holding) => {
-                const hasCurrentValue =
-                  holding.current_value !== null && holding.current_value !== undefined;
-                const profitLoss = hasCurrentValue ? holding.current_value - holding.total_cost : 0;
-                const profitLossPercent = hasCurrentValue ? (profitLoss / holding.total_cost) * 100 : 0;
-
-                return (
-                  <div key={`${holding.account}-${holding.isin}`} className="account-card">
-                    <div className="account-header">
-                      <div className="account-name">{holding.security}</div>
-                      <span
-                        className={`account-badge account-badge-${holding.account
-                          .toLowerCase()
-                          .replace(/ /g, '-')}`}
-                      >
-                        {holding.currency}
-                      </span>
-                    </div>
-                    {hasCurrentValue ? (
-                      <>
-                        <div className="account-balance positive">
-                          {formatCurrency(holding.current_value, holding.currency)}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: '14px',
-                            marginTop: '4px',
-                            color: profitLoss >= 0 ? '#34c759' : '#ff3b30'
-                          }}
-                        >
-                          {profitLoss >= 0 ? '+' : ''}
-                          {formatCurrency(profitLoss, holding.currency)} ({profitLossPercent.toFixed(2)}%)
-                        </div>
-                      </>
-                    ) : (
-                      <div className="account-balance positive">
-                        {formatCurrency(holding.total_cost, holding.currency)}
-                      </div>
-                    )}
-                    <div className="account-meta" style={{ marginTop: '8px' }}>
-                      <span className="account-meta-item">{holding.shares} shares</span>
-                      <span className="account-meta-item">
-                        Avg: {formatCurrency(holding.average_cost, holding.currency)}
-                      </span>
-                    </div>
-                    {hasCurrentValue && (
-                      <div className="account-meta">
-                        <span className="account-meta-item">
-                          Cost: {formatCurrency(holding.total_cost, holding.currency)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="account-meta" style={{ marginTop: '4px' }}>
-                      <span className="account-meta-item" style={{ fontSize: '11px', color: '#666' }}>
-                        ISIN: {holding.isin}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-      )}
-
       <div className="accounts-list-section">
         <h3 className="accounts-title">Transaction History</h3>
         <div className="transaction-list">
-          {transactions.map((transaction, idx) => {
-            const isViacTrade = transaction.account === 'VIAC' && transaction.price_usd !== undefined;
-            const badgeClass = transaction.account === 'Interactive Brokers'
-              ? 'account-badge-interactive-brokers'
-              : 'account-badge-viac';
-
-            return (
-              <div key={idx} className="transaction-item">
-                <div className="transaction-date">
-                  {formatDate(transaction.date)}
-                  <span className={`account-badge ${badgeClass}`}>
-                    {(transaction.type || 'trade').toUpperCase()}
-                  </span>
-                </div>
-                <div className="transaction-details">
-                  <div className="transaction-recipient">{transaction.security}</div>
-                  {isViacTrade ? (
-                    <>
-                      <div className="transaction-description">
-                        {transaction.shares} shares @ ${transaction.price_usd.toFixed(2)} USD
-                      </div>
-                      <div
-                        className="transaction-description"
-                        style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}
-                      >
-                        ISIN: {transaction.isin}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {transaction.shares ? (
-                        <div className="transaction-description">
-                          {transaction.shares} shares
-                          {transaction.symbol ? ` (${transaction.symbol})` : ''}
-                        </div>
-                      ) : null}
-                      {transaction.category && (
-                        <div className="transaction-description">{transaction.category}</div>
-                      )}
-                      {transaction.matched_bank_transfer && (
-                        <div className="transaction-description" style={{ fontSize: '11px', color: '#666' }}>
-                          Matched {transaction.matched_bank_transfer.account} transfer on{' '}
-                          {formatDate(transaction.matched_bank_transfer.date)}
-                        </div>
-                      )}
-                      {transaction.isin && (
-                        <div
-                          className="transaction-description"
-                          style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}
-                        >
-                          ISIN: {transaction.isin}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className={`transaction-amount ${transaction.amount < 0 ? 'transaction-amount-expense' : 'transaction-amount-income'}`}>
-                  {formatCurrency(Math.abs(transaction.amount), transaction.currency)}
-                </div>
+          {transactions.map((transaction, idx) => (
+            <div key={idx} className="transaction-item">
+              <div className="transaction-date">
+                {formatDate(transaction.date)}
+                <span className="account-badge account-badge-interactive-brokers">
+                  {(transaction.type || 'trade').toUpperCase()}
+                </span>
               </div>
-            );
-          })}
+              <div className="transaction-details">
+                <div className="transaction-recipient">{transaction.security}</div>
+                {transaction.shares ? (
+                  <div className="transaction-description">
+                    {transaction.shares} shares
+                    {transaction.symbol ? ` (${transaction.symbol})` : ''}
+                  </div>
+                ) : null}
+                {transaction.category && (
+                  <div className="transaction-description">{transaction.category}</div>
+                )}
+                {transaction.matched_bank_transfer && (
+                  <div className="transaction-description" style={{ fontSize: '11px', color: '#666' }}>
+                    Matched {transaction.matched_bank_transfer.account} transfer on{' '}
+                    {formatDate(transaction.matched_bank_transfer.date)}
+                  </div>
+                )}
+                {transaction.isin && (
+                  <div
+                    className="transaction-description"
+                    style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}
+                  >
+                    ISIN: {transaction.isin}
+                  </div>
+                )}
+              </div>
+              <div className={`transaction-amount ${transaction.amount < 0 ? 'transaction-amount-expense' : 'transaction-amount-income'}`}>
+                {formatCurrency(Math.abs(transaction.amount), transaction.currency)}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

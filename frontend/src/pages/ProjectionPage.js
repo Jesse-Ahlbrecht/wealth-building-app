@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { transactionsAPI, accountsAPI } from '../api';
-import { formatCurrency, convertAmountToCurrency, EUR_TO_CHF_RATE } from '../utils';
+import { formatCurrency, convertAmountToCurrency } from '../utils';
 import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
 import { computeMonthExpenseBreakdown } from '../utils/categoryHelpers';
 import { useBrokerData } from '../hooks';
@@ -58,16 +58,8 @@ const ProjectionPage = () => {
         currentNetWorth = totalCHF + convertAmountToCurrency(totalEUR, 'CHF');
       }
 
-      if (broker?.summary) {
-        const brokerSummary = broker.summary;
-        const viacTotal = brokerSummary.viac ? brokerSummary.viac.total_invested : 0;
-        const ingDibaTotal = brokerSummary.ing_diba
-          ? brokerSummary.ing_diba.total_current_value * EUR_TO_CHF_RATE
-          : 0;
-        const ibkrTotal = brokerSummary.interactive_brokers
-          ? brokerSummary.interactive_brokers.total_value_chf
-          : 0;
-        currentNetWorth += viacTotal + ingDibaTotal + ibkrTotal;
+      if (broker?.summary?.interactive_brokers) {
+        currentNetWorth += broker.summary.interactive_brokers.total_value_chf;
       }
 
       // Subtract loans if available (we'd need loansAPI, but for now we'll skip it)

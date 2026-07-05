@@ -29,7 +29,7 @@ def _infer_account_type(account_name: str, source_type: str = '') -> str:
     name = (account_name or '').lower()
     source = (source_type or '').lower()
 
-    if any(keyword in name for keyword in ['broker', 'viac', 'depot', 'interactive brokers', 'ibkr']) or 'broker' in source:
+    if any(keyword in name for keyword in ['broker', 'depot', 'interactive brokers', 'ibkr']) or 'broker' in source:
         return 'brokerage'
     if any(keyword in name for keyword in ['loan', 'kfw']):
         return 'loan'
