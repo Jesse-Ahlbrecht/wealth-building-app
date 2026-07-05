@@ -58,3 +58,39 @@ export const isRecurringTransaction = (transaction, recurringMatchKeys) => {
 
 export const getLatestMonthKey = (months) =>
   sortMonthsReverseChronologically(months)[0]?.month ?? null;
+
+export const computeAllocationPredictions = ({
+  isCurrentMonth,
+  averageEssentialSpending,
+  essentialTotal,
+  nonEssentialTotal,
+  splitExpensesTotal,
+  income,
+  savingsForDisplay
+}) => {
+  const predictedEssentialAverage = isCurrentMonth ? (averageEssentialSpending || 0) : 0;
+  const predictedEssentialDifference = Math.max(predictedEssentialAverage - essentialTotal, 0);
+  const showPredictedGap = isCurrentMonth && predictedEssentialDifference > 0;
+  const barEffectiveEssential = showPredictedGap
+    ? essentialTotal + predictedEssentialDifference
+    : essentialTotal;
+  const expenseBarTotal = showPredictedGap
+    ? barEffectiveEssential + nonEssentialTotal
+    : splitExpensesTotal;
+  const effectiveEssentialForSavings = predictedEssentialAverage > 0
+    ? Math.max(essentialTotal, predictedEssentialAverage)
+    : essentialTotal;
+  const predictedSavings = income - (effectiveEssentialForSavings + nonEssentialTotal);
+  const savingsMetricValue = isCurrentMonth && predictedSavings !== savingsForDisplay
+    ? predictedSavings
+    : savingsForDisplay;
+
+  return {
+    predictedEssentialAverage,
+    predictedEssentialDifference,
+    showPredictedGap,
+    barEffectiveEssential,
+    expenseBarTotal,
+    savingsMetricValue
+  };
+};

@@ -2,6 +2,7 @@ import React from 'react';
 import { formatCurrency, formatDate } from '../utils';
 import { getAccountBadgeConfig } from '../utils/accountBadgeHelpers';
 import { isRecurringTransaction } from '../utils/predictionHelpers';
+import { usePredictionMenu } from '../context/PredictionMenuContext';
 
 const TransactionListItem = ({
   txn,
@@ -14,18 +15,19 @@ const TransactionListItem = ({
   expenseCategoryNames,
   dismissible = false,
   onCategoryEdit,
-  predictionMenu,
-  onPredictionMenuChange,
   onSkipPrediction,
   onCustomizePrediction,
   onDeletePrediction
 }) => {
+  const predictionMenu = usePredictionMenu();
+  const menuOpenKey = predictionMenu?.openKey ?? null;
+  const setMenuOpenKey = predictionMenu?.setOpenKey ?? (() => {});
   const isPredicted = txn.is_predicted || txn.isPredicted;
   const typeKey = txn?.type === 'income' ? 'income' : 'expense';
   const categoryOptions = typeKey === 'income' ? incomeCategoryNames : expenseCategoryNames;
   const canEditCategory = !isPredicted && txn?.transaction_hash && categoryOptions.length > 0;
   const menuKey = `${monthKey}-${txn.prediction_key || idx}`;
-  const menuOpen = predictionMenu === menuKey;
+  const menuOpen = menuOpenKey === menuKey;
   const badge = getAccountBadgeConfig(txn.account);
   const isRecurring = isRecurringTransaction(txn, recurringMatchKeys);
   const refunded = txn.refundedAmount || 0;
@@ -104,16 +106,16 @@ const TransactionListItem = ({
             <button
               type="button"
               className="prediction-menu-btn"
-              onClick={() => onPredictionMenuChange(menuOpen ? null : menuKey)}
+              onClick={() => setMenuOpenKey(menuOpen ? null : menuKey)}
               title="Manage prediction"
             >
               ⋯
             </button>
             {menuOpen && (
               <div className="prediction-menu-dropdown">
-                <button type="button" onClick={() => { onPredictionMenuChange(null); onSkipPrediction(txn); }}>Skip this month</button>
-                <button type="button" onClick={() => { onPredictionMenuChange(null); onCustomizePrediction(txn); }}>Customize</button>
-                <button type="button" className="danger" onClick={() => { onPredictionMenuChange(null); onDeletePrediction(txn); }}>Delete permanently</button>
+                <button type="button" onClick={() => { setMenuOpenKey(null); onSkipPrediction(txn); }}>Skip this month</button>
+                <button type="button" onClick={() => { setMenuOpenKey(null); onCustomizePrediction(txn); }}>Customize</button>
+                <button type="button" className="danger" onClick={() => { setMenuOpenKey(null); onDeletePrediction(txn); }}>Delete permanently</button>
               </div>
             )}
           </div>

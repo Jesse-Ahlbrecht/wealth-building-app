@@ -14,6 +14,23 @@ export const COCKPIT_COLORS = {
   dotSelected: '#48484a'
 };
 
+const hexToRgb = (hex) => {
+  const normalized = hex.replace('#', '');
+  const value = normalized.length === 3
+    ? normalized.split('').map((char) => char + char).join('')
+    : normalized;
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16)
+  };
+};
+
+export const cockpitColorWithOpacity = (hex, opacity) => {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+};
+
 const renderIncomeMeta = (stats, currency) => (
   <>
     <div>

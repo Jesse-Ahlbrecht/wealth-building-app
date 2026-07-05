@@ -29,6 +29,8 @@ import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurri
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
+  formatSavingsAmountGoalMeta,
+  formatSavingRateGoalMeta,
   getColorForPercentage
 } from '../utils/finance';
 import MonthDrilldownPanel from '../components/MonthDrilldownPanel';
@@ -343,6 +345,8 @@ const ChartsPage = () => {
   const avgSavings = filteredData.length ? totalSavings / filteredData.length : 0;
   const totalSavingRate = filteredData.reduce((sum, month) => sum + month.savingRate, 0);
   const avgSavingRate = filteredData.length ? totalSavingRate / filteredData.length : 0;
+  const avgSavingsGoalMeta = formatSavingsAmountGoalMeta(avgSavings, 'CHF');
+  const avgSavingRateGoalMeta = formatSavingRateGoalMeta(avgSavingRate);
 
   return (
     <ChartPageStates
@@ -366,13 +370,13 @@ const ChartsPage = () => {
                     <span
                       style={{
                         fontWeight: 600,
-                        color: getColorForPercentage((avgSavings / SAVINGS_GOAL_CHF) * 100)
+                        color: avgSavingsGoalMeta.color
                       }}
                     >
                       {formatCurrency(avgSavings, 'CHF')}
                     </span>
                     <span className="chart-meta-subtle">
-                      ({((avgSavings / SAVINGS_GOAL_CHF) * 100).toFixed(0)}% of goal)
+                      ({avgSavingsGoalMeta.label})
                     </span>
                   </div>
                   <div>
@@ -389,13 +393,13 @@ const ChartsPage = () => {
                     <span
                       style={{
                         fontWeight: 600,
-                        color: getColorForPercentage((avgSavingRate / SAVINGS_RATE_GOAL) * 100)
+                        color: avgSavingRateGoalMeta.color
                       }}
                     >
                       {avgSavingRate.toFixed(1)}%
                     </span>
                     <span className="chart-meta-subtle">
-                      ({((avgSavingRate / SAVINGS_RATE_GOAL) * 100).toFixed(0)}% of goal)
+                      ({avgSavingRateGoalMeta.percentOfGoal}% of goal)
                     </span>
                   </div>
                   <div>
@@ -572,8 +576,7 @@ const ChartsPage = () => {
               {chartView === 'absolute' ? (
                 <Bar dataKey="savings" radius={[8, 8, 0, 0]} name="Savings">
                   {filteredData.map((entry, index) => {
-                    const percentage = (entry.savings / SAVINGS_GOAL_CHF) * 100;
-                    const baseColor = getColorForPercentage(percentage);
+                    const baseColor = formatSavingsAmountGoalMeta(entry.savings, 'CHF').color;
 
                     const isSelected = isSelecting && selectionStart !== null && selectionEnd !== null &&
                       index >= Math.min(selectionStart, selectionEnd) &&

@@ -40,6 +40,26 @@ export const formatSavingRateGoalMeta = (rate, goal = SAVINGS_RATE_GOAL) => ({
   percentOfGoal: ((rate / goal) * 100).toFixed(0)
 });
 
+export const percentOf = (value, base) => {
+  if (!base || base <= 0) return 0;
+  return (Math.abs(value) / base) * 100;
+};
+
+export const formatPercentOf = (value, base, decimals = 0) => {
+  if (!base || base <= 0) return '—';
+  return `${percentOf(value, base).toFixed(decimals)}%`;
+};
+
+export const formatSavingsAmountGoalMeta = (amount, currency) => {
+  const goal = getSavingsGoalForCurrency(currency);
+  const percentOfGoal = goal > 0 ? ((amount / goal) * 100).toFixed(0) : '0';
+  return {
+    color: getColorForPercentage(Number(percentOfGoal)),
+    percentOfGoal,
+    label: `${percentOfGoal}% of goal`
+  };
+};
+
 // Format currency with proper symbol and locale
 export const formatCurrency = (amount, currency = 'CHF') => {
   if (!Number.isFinite(amount)) return `${currency} 0.00`;

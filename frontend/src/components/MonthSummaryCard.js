@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { formatMonth } from '../utils';
 import { getCategoryNames } from '../utils/categoryHelpers';
@@ -7,13 +7,14 @@ import {
   mergeSavingsCategories,
   sumCategoryAmounts
 } from '../utils/categoryHelpers';
-import { buildRecurringMatchKeys } from '../utils/predictionHelpers';
+import { buildRecurringMatchKeys, computeAllocationPredictions } from '../utils/predictionHelpers';
 import { EMPTY_PAIR_SLICE, getInternalTransferTransactions } from '../utils/pairIndexHelpers';
 import { useCategoryTransactionIndex, usePreferenceState } from '../hooks';
+import { PredictionMenuProvider } from '../context/PredictionMenuContext';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
 import CollapsibleBreakdownSection from './CollapsibleBreakdownSection';
-import MonthMetricsSection from './MonthMetricsSection';
+import MonthAllocationBar from './MonthAllocationBar';
 import MonthCategoryBreakdown from './MonthCategoryBreakdown';
 import MonthInternalTransfersSection from './MonthInternalTransfersSection';
 import TransactionListItem from './TransactionListItem';
@@ -43,11 +44,11 @@ const MonthSummaryCard = ({
   );
 
   const [categoryModal, setCategoryModal] = React.useState(null);
-  const [predictionMenu, setPredictionMenu] = React.useState(null);
   const [predictionModal, setPredictionModal] = React.useState(null);
   const [expandedCategories, setExpandedCategories] = React.useState({});
   const [expandedSections, setExpandedSections] = React.useState({});
   const [expandedPairs, setExpandedPairs] = React.useState({});
+  const [showInternalTransfers, setShowInternalTransfers] = React.useState(false);
 
   const expenseBreakdown = useMemo(
     () => computeMonthExpenseBreakdown(month, essentialCategories),
@@ -71,15 +72,7 @@ const MonthSummaryCard = ({
   );
 
   const savingsCategoryTotal = sumCategoryAmounts(savingsCategories);
-  const otherExpenseAmount = month?.expenseCategories?.Other || 0;
-  const { nonEssentialWithoutOther, nonEssentialWithoutOtherTotal } = useMemo(() => {
-    const copy = { ...nonEssentialExpenses };
-    delete copy.Other;
-    return {
-      nonEssentialWithoutOther: copy,
-      nonEssentialWithoutOtherTotal: sumCategoryAmounts(copy)
-    };
-  }, [nonEssentialExpenses]);
+  const hasExpenseSplit = essentialTotal > 0 || nonEssentialTotal > 0 || savingsCategoryTotal > 0;
 
   const expenseCategoryNames = useMemo(
     () => getCategoryNames(availableCategories?.expense),
@@ -106,13 +99,73 @@ const MonthSummaryCard = ({
   const { getCount, getTransactions, sortConfig } = categoryIndex;
   const { sortField, sortDirection } = sortConfig;
 
-  const predictedEssentialAverage = isCurrentMonth ? (averageEssentialSpending || 0) : 0;
-  const predictedEssentialDifference = Math.max(predictedEssentialAverage - essentialTotal, 0);
-  const effectiveEssential = predictedEssentialAverage > 0 ? Math.max(essentialTotal, predictedEssentialAverage) : essentialTotal;
-  const totalPredictedExpenses = effectiveEssential + nonEssentialTotal;
-  const predictedSavings = income - totalPredictedExpenses;
-  const savingsMetricValue = isCurrentMonth && predictedSavings !== savingsForDisplay ? predictedSavings : savingsForDisplay;
-  const metricMaxValue = Math.max(income, splitExpensesTotal, Math.abs(savingsMetricValue));
+  const allocationPredictions = useMemo(
+    () => computeAllocationPredictions({
+      isCurrentMonth,
+      averageEssentialSpending,
+      essentialTotal,
+      nonEssentialTotal,
+      splitExpensesTotal,
+      income,
+      savingsForDisplay
+    }),
+    [
+      isCurrentMonth,
+      averageEssentialSpending,
+      essentialTotal,
+      nonEssentialTotal,
+      splitExpensesTotal,
+      income,
+      savingsForDisplay
+    ]
+  );
+
+  const {
+    predictedEssentialAverage,
+    predictedEssentialDifference,
+    showPredictedGap,
+    barEffectiveEssential,
+    expenseBarTotal,
+    savingsMetricValue
+  } = allocationPredictions;
+
+  const [activeSection, setActiveSection] = React.useState(null);
+
+  const handleSectionClick = useCallback((section) => {
+    setActiveSection((prev) => (prev === section ? null : section));
+  }, []);
+
+  useEffect(() => {
+    if (!activeSection) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (event.target.closest('.month-allocation-segment, .month-allocation-header--clickable')) {
+        return;
+      }
+      if (event.target.closest('.month-breakdown-panel')) {
+        return;
+      }
+      setActiveSection(null);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [activeSection]);
+
+  const sectionAvailability = useMemo(() => ({
+    essential: Object.keys(essentialExpenses).length > 0,
+    nonEssential: Object.keys(nonEssentialExpenses).length > 0,
+    savings: Object.keys(savingsCategories).length > 0,
+    income: income > 0
+  }), [essentialExpenses, nonEssentialExpenses, savingsCategories, income]);
+
+  const handleShowInternalTransfers = useCallback(() => {
+    setShowInternalTransfers(true);
+    setExpandedSections((prev) => ({
+      ...prev,
+      [`${month.month}-internal-transfers-section`]: true
+    }));
+  }, [month.month]);
 
   const toggleCategory = useCallback((categoryKey) => {
     setExpandedCategories((prev) => ({
@@ -154,8 +207,6 @@ const MonthSummaryCard = ({
       expenseCategoryNames={expenseCategoryNames}
       dismissible={dismissible}
       onCategoryEdit={handleCategoryEdit}
-      predictionMenu={predictionMenu}
-      onPredictionMenuChange={setPredictionMenu}
       onSkipPrediction={onSkipPrediction}
       onCustomizePrediction={setPredictionModal}
       onDeletePrediction={onDeletePrediction}
@@ -168,7 +219,6 @@ const MonthSummaryCard = ({
     incomeCategoryNames,
     expenseCategoryNames,
     handleCategoryEdit,
-    predictionMenu,
     onSkipPrediction,
     onDeletePrediction
   ]);
@@ -207,68 +257,95 @@ const MonthSummaryCard = ({
         </div>
       </div>
 
-      <MonthMetricsSection
-        income={income}
-        essentialTotal={essentialTotal}
-        nonEssentialTotal={nonEssentialTotal}
-        savingsCategoryTotal={savingsCategoryTotal}
-        splitExpensesTotal={splitExpensesTotal}
-        savingsMetricValue={savingsMetricValue}
-        metricMaxValue={metricMaxValue}
-        defaultCurrency={defaultCurrency}
-        isCurrentMonth={isCurrentMonth}
-        predictedEssentialAverage={predictedEssentialAverage}
-        predictedEssentialDifference={predictedEssentialDifference}
-      />
+      <PredictionMenuProvider>
+        <div className="month-allocation-region">
+          <MonthAllocationBar
+            income={income}
+            essentialTotal={essentialTotal}
+            nonEssentialTotal={nonEssentialTotal}
+            hasExpenseSplit={hasExpenseSplit}
+            splitExpensesTotal={splitExpensesTotal}
+            savingsValue={savingsMetricValue}
+            currency={defaultCurrency}
+            isCurrentMonth={isCurrentMonth}
+            predictedEssentialAverage={predictedEssentialAverage}
+            predictedEssentialDifference={predictedEssentialDifference}
+            showPredictedGap={showPredictedGap}
+            barEffectiveEssential={barEffectiveEssential}
+            expenseBarTotal={expenseBarTotal}
+            activeSection={activeSection}
+            onSectionClick={handleSectionClick}
+            sectionAvailability={sectionAvailability}
+          />
 
-      <MonthCategoryBreakdown
-        month={month}
-        defaultCurrency={defaultCurrency}
-        isCurrentMonth={isCurrentMonth}
-        expandedCategories={expandedCategories}
-        expandedSections={expandedSections}
-        setExpandedSections={setExpandedSections}
-        toggleCategory={toggleCategory}
-        essentialExpenses={essentialExpenses}
-        essentialTotal={essentialTotal}
-        nonEssentialWithoutOther={nonEssentialWithoutOther}
-        nonEssentialWithoutOtherTotal={nonEssentialWithoutOtherTotal}
-        otherExpenseAmount={otherExpenseAmount}
-        savingsCategories={savingsCategories}
-        savingsCategoryTotal={savingsCategoryTotal}
-        predictedEssentialAverage={predictedEssentialAverage}
-        getCount={getCount}
-        getTransactions={getTransactions}
-        renderTransactionItem={renderTransactionItem}
-        sortField={sortField}
-        sortDirection={sortDirection}
-        onSortToggle={handleSortToggle}
-      />
+          <MonthCategoryBreakdown
+            month={month}
+            defaultCurrency={defaultCurrency}
+            isCurrentMonth={isCurrentMonth}
+            activeSection={activeSection}
+            incomeTotal={income}
+            expandedCategories={expandedCategories}
+            toggleCategory={toggleCategory}
+            essentialExpenses={essentialExpenses}
+            essentialTotal={essentialTotal}
+            nonEssentialExpenses={nonEssentialExpenses}
+            nonEssentialTotal={nonEssentialTotal}
+            savingsCategories={savingsCategories}
+            savingsCategoryTotal={savingsCategoryTotal}
+            predictedEssentialAverage={predictedEssentialAverage}
+            getCount={getCount}
+            getTransactions={getTransactions}
+            renderTransactionItem={renderTransactionItem}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            onSortToggle={handleSortToggle}
+          />
+        </div>
 
-      {internalTransferTotal > 0 && (
-        <CollapsibleBreakdownSection
-          monthKey={month.month}
-          sectionId="internal-transfers-section"
-          title="Internal Transfers"
-          total={internalTransferTotal}
-          defaultCurrency={defaultCurrency}
-          expandedSections={expandedSections}
-          setExpandedSections={setExpandedSections}
-        >
-          <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px' }}>
-            <MonthInternalTransfersSection
+        {internalTransferTotal > 0 && !showInternalTransfers && (
+          <button
+            type="button"
+            className="month-internal-transfers-toggle"
+            onClick={handleShowInternalTransfers}
+          >
+            Show internal transfers
+          </button>
+        )}
+
+        {internalTransferTotal > 0 && showInternalTransfers && (
+          <>
+            <button
+              type="button"
+              className="month-internal-transfers-toggle"
+              onClick={() => setShowInternalTransfers(false)}
+            >
+              Hide internal transfers
+            </button>
+            <CollapsibleBreakdownSection
               monthKey={month.month}
+              sectionId="internal-transfers-section"
+              title="Internal Transfers"
+              total={internalTransferTotal}
               defaultCurrency={defaultCurrency}
-              internalTransferTransactions={internalTransferTransactions}
-              monthPairSlice={monthPairSlice}
-              sortConfig={sortConfig}
-              expandedPairs={expandedPairs}
-              onTogglePair={togglePair}
-              renderTransactionItem={renderTransactionItem}
-            />
-          </div>
-        </CollapsibleBreakdownSection>
-      )}
+              expandedSections={expandedSections}
+              setExpandedSections={setExpandedSections}
+            >
+              <div className="transaction-list-wrapper" style={{ marginLeft: '24px', marginTop: '8px' }}>
+                <MonthInternalTransfersSection
+                  monthKey={month.month}
+                  defaultCurrency={defaultCurrency}
+                  internalTransferTransactions={internalTransferTransactions}
+                  monthPairSlice={monthPairSlice}
+                  sortConfig={sortConfig}
+                  expandedPairs={expandedPairs}
+                  onTogglePair={togglePair}
+                  renderTransactionItem={renderTransactionItem}
+                />
+              </div>
+            </CollapsibleBreakdownSection>
+          </>
+        )}
+      </PredictionMenuProvider>
     </>
   );
 };
