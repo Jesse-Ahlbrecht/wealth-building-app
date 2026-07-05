@@ -87,6 +87,8 @@ class WealthDatabase:
 
     def __init__(self):
         self.db = get_database()
+        self._match_key_column_ensured = False
+        self._category_overrides_hash_index_ensured = False
 
     @staticmethod
     def _normalize_category_rule_text(value: str) -> str:
@@ -144,6 +146,17 @@ class WealthDatabase:
             CREATE INDEX IF NOT EXISTS idx_import_batches_tenant_account_dates
             ON import_batches(tenant_id, account_id, statement_start_date, statement_end_date)
         """)
+
+    def _ensure_account_match_key_column(self, cursor):
+        """Add the import match key column on demand for pre-existing databases.
+
+        Guarded by an in-process flag since this runs from hot paths
+        (get_accounts/create_account) and the ALTER is a no-op after the first run.
+        """
+        if self._match_key_column_ensured:
+            return
+        cursor.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS import_match_key VARCHAR(255)")
+        self._match_key_column_ensured = True
 
     def set_tenant_context(self, tenant_id: str) -> int:
         """
@@ -531,11 +544,12 @@ class WealthDatabase:
         tenant_db_id = self.set_tenant_context(tenant_id)
 
         with self.db.get_cursor() as cursor:
+            self._ensure_account_match_key_column(cursor)
             cursor.execute("""
                 SELECT id, account_name, account_type, balance, currency,
                        decrypt_tenant_data(encrypted_account_number, %s) as account_number,
                        decrypt_tenant_data(encrypted_routing_number, %s) as routing_number,
-                       institution, created_at, updated_at
+                       institution, created_at, updated_at, import_match_key
                 FROM accounts
                 WHERE active = TRUE AND tenant_id = %s
                 ORDER BY account_name
@@ -547,7 +561,7 @@ class WealthDatabase:
                     'id': row[0], 'account_name': row[1], 'account_type': row[2],
                     'balance': row[3], 'currency': row[4], 'account_number': row[5],
                     'routing_number': row[6], 'institution': row[7],
-                    'created_at': row[8], 'updated_at': row[9]
+                    'created_at': row[8], 'updated_at': row[9], 'import_match_key': row[10]
                 })
             return results
 
@@ -568,6 +582,74 @@ class WealthDatabase:
                     SET balance = %s, updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s AND tenant_id = %s
                 """, [balance, account_id, tenant_db_id])
+
+    def update_account_name(self, tenant_id: str, account_id: int, name: str) -> Optional[Dict[str, Any]]:
+        """Rename an account. The import_match_key is left untouched so future
+        imports keep matching this account regardless of the display name."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            cursor.execute("""
+                UPDATE accounts
+                SET account_name = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND tenant_id = %s
+                RETURNING id, account_name
+            """, [name, account_id, tenant_db_id])
+            result = cursor.fetchone()
+            if not result:
+                return None
+            return {'id': result[0], 'account_name': result[1]}
+
+    def _ensure_category_overrides_hash_index(self, cursor):
+        """Add the transaction_hash index on demand for pre-existing databases."""
+        if self._category_overrides_hash_index_ensured:
+            return
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_category_overrides_hash ON category_overrides(transaction_hash)")
+        self._category_overrides_hash_index_ensured = True
+
+    def delete_account(self, tenant_id: str, account_id: int) -> bool:
+        """Permanently delete an account and all of its transactions/imports."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            self._ensure_category_overrides_hash_index(cursor)
+            # Delete transactions and their category overrides in one round trip.
+            cursor.execute("""
+                WITH deleted_transactions AS (
+                    DELETE FROM transactions WHERE tenant_id = %s AND account_id = %s
+                    RETURNING transaction_hash
+                )
+                DELETE FROM category_overrides
+                WHERE tenant_id = %s AND transaction_hash IN (SELECT transaction_hash FROM deleted_transactions)
+            """, [tenant_db_id, account_id, tenant_db_id])
+            cursor.execute(
+                "DELETE FROM investment_holdings WHERE tenant_id = %s AND account_id = %s",
+                [tenant_db_id, account_id]
+            )
+            # file_attachments.account_id has no ON DELETE CASCADE; detach rather than delete
+            # the underlying documents.
+            cursor.execute(
+                "UPDATE file_attachments SET account_id = NULL WHERE tenant_id = %s AND account_id = %s",
+                [tenant_db_id, account_id]
+            )
+            # import_batches cascade-delete via their account_id foreign key.
+            cursor.execute(
+                "DELETE FROM accounts WHERE id = %s AND tenant_id = %s",
+                [account_id, tenant_db_id]
+            )
+            return cursor.rowcount > 0
+
+    def set_account_match_key(self, tenant_id: str, account_id: int, match_key: str):
+        """Backfill the stable import match key for an account created before this existed."""
+        tenant_db_id = self.set_tenant_context(tenant_id)
+
+        with self.db.get_cursor() as cursor:
+            self._ensure_account_match_key_column(cursor)
+            cursor.execute("""
+                UPDATE accounts
+                SET import_match_key = %s
+                WHERE id = %s AND tenant_id = %s
+            """, [match_key, account_id, tenant_db_id])
 
     def create_import_batch(self, tenant_id: str, batch_data: Dict[str, Any]) -> Dict[str, Any]:
         """Record metadata for a normalized import batch."""
@@ -660,6 +742,7 @@ class WealthDatabase:
         tenant_db_id = self.set_tenant_context(tenant_id)
 
         with self.db.get_cursor() as cursor:
+            self._ensure_account_match_key_column(cursor)
             # Encrypt sensitive data
             encrypted_account_number = None
             encrypted_routing_number = None
@@ -675,14 +758,14 @@ class WealthDatabase:
             cursor.execute("""
                 INSERT INTO accounts (
                     tenant_id, account_name, account_type, encrypted_account_number,
-                    encrypted_routing_number, balance, currency, institution, key_version
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'v1')
+                    encrypted_routing_number, balance, currency, institution, import_match_key, key_version
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'v1')
                 RETURNING id, account_name, account_type, balance, currency, institution, created_at
             """, [
                 tenant_db_id, account_data['name'], account_data['type'],
                 encrypted_account_number, encrypted_routing_number,
                 account_data.get('balance', 0), account_data.get('currency', 'EUR'),
-                account_data.get('institution')
+                account_data.get('institution'), account_data.get('match_key') or account_data['name']
             ])
 
             result = cursor.fetchone()

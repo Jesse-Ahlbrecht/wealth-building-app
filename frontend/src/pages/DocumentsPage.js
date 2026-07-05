@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { documentsAPI, importsAPI } from '../api';
+import { accountsAPI, documentsAPI, importsAPI } from '../api';
 import { formatDate } from '../utils';
 import { classifyImportFile, parseImportFile } from '../utils/importParsers';
 import { useAppContext } from '../context/AppContext';
@@ -15,60 +15,40 @@ const formatDateTime = (value) => {
   });
 };
 
-const daysBetween = (start, end) => {
-  const startDate = new Date(`${start}T00:00:00`);
-  const endDate = new Date(`${end}T00:00:00`);
-  return Math.max(1, Math.round((endDate - startDate) / 86400000) + 1);
-};
-
-const TimelineBar = ({ segments }) => {
-  if (!segments || segments.length === 0) {
-    return <div className="import-timeline-empty">No imported coverage yet.</div>;
+const accountCoverageSummary = (account) => {
+  const segments = account.segments || [];
+  if (segments.length === 0) {
+    return { rangeLabel: 'No coverage yet', gapCount: 0 };
   }
-
   const overallStart = segments.reduce((min, segment) => (segment.startDate < min ? segment.startDate : min), segments[0].startDate);
   const overallEnd = segments.reduce((max, segment) => (segment.endDate > max ? segment.endDate : max), segments[0].endDate);
-  const totalDays = daysBetween(overallStart, overallEnd);
-
-  return (
-    <div className="import-timeline">
-      <div className="import-timeline-track">
-        {segments.map((segment) => {
-          const left = ((daysBetween(overallStart, segment.startDate) - 1) / totalDays) * 100;
-          const width = (daysBetween(segment.startDate, segment.endDate) / totalDays) * 100;
-          return (
-            <div
-              key={`${segment.startDate}-${segment.endDate}`}
-              className="import-timeline-segment"
-              style={{ left: `${left}%`, width: `${Math.max(width, 1)}%` }}
-              title={`${formatDate(segment.startDate)} to ${formatDate(segment.endDate)}`}
-            />
-          );
-        })}
-      </div>
-      <div className="import-timeline-labels">
-        <span>{formatDate(overallStart)}</span>
-        <span>{formatDate(overallEnd)}</span>
-      </div>
-    </div>
-  );
+  return {
+    rangeLabel: `${formatDate(overallStart)} – ${formatDate(overallEnd)}`,
+    gapCount: account.gaps?.length || 0
+  };
 };
 
 const DocumentsPage = () => {
   const { loadBroker } = useAppContext();
   const { reloadIbkrDepositPairs } = useIbkrDepositPairs();
-  const [overview, setOverview] = useState({ accounts: [], recentImports: [] });
+  const [overview, setOverview] = useState({ accounts: [] });
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [editingAccountId, setEditingAccountId] = useState(null);
+  const [editingName, setEditingName] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [accountPendingDeletion, setAccountPendingDeletion] = useState(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const loadOverview = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       const response = await importsAPI.getOverview();
-      setOverview(response?.data || response || { accounts: [], recentImports: [] });
+      setOverview(response?.data || response || { accounts: [] });
     } catch (loadError) {
       console.error('Failed to load imports overview:', loadError);
       setError(loadError.message || 'Failed to load import coverage');
@@ -81,8 +61,14 @@ const DocumentsPage = () => {
     loadOverview();
   }, [loadOverview]);
 
-  const handleFilesSelected = useCallback(async (event) => {
-    const files = Array.from(event.target.files || []);
+  useEffect(() => {
+    if (!result) return undefined;
+    const timer = setTimeout(() => setResult(null), 6000);
+    return () => clearTimeout(timer);
+  }, [result]);
+
+  const importFiles = useCallback(async (fileList) => {
+    const files = Array.from(fileList || []);
     if (files.length === 0) return;
 
     setUploading(true);
@@ -134,9 +120,73 @@ const DocumentsPage = () => {
       setError(uploadError.message || 'Import failed');
     } finally {
       setUploading(false);
-      event.target.value = '';
     }
-  }, [loadOverview]);
+  }, [loadOverview, loadBroker, reloadIbkrDepositPairs]);
+
+  const handleFileInputChange = useCallback((event) => {
+    importFiles(event.target.files);
+    event.target.value = '';
+  }, [importFiles]);
+
+  const handleDrop = useCallback((event) => {
+    event.preventDefault();
+    setDragActive(false);
+    if (!uploading) importFiles(event.dataTransfer.files);
+  }, [importFiles, uploading]);
+
+  const handleDragOver = useCallback((event) => {
+    event.preventDefault();
+    if (!uploading) setDragActive(true);
+  }, [uploading]);
+
+  const handleDragLeave = useCallback(() => setDragActive(false), []);
+
+  const startEditingAccount = useCallback((account) => {
+    setEditingAccountId(account.id);
+    setEditingName(account.accountName);
+  }, []);
+
+  const cancelEditingAccount = useCallback(() => {
+    setEditingAccountId(null);
+    setEditingName('');
+  }, []);
+
+  const saveAccountName = useCallback(async () => {
+    const name = editingName.trim();
+    if (!name || !editingAccountId) {
+      cancelEditingAccount();
+      return;
+    }
+
+    setRenaming(true);
+    try {
+      await accountsAPI.renameAccount(editingAccountId, name);
+      await loadOverview();
+      cancelEditingAccount();
+    } catch (renameError) {
+      console.error('Failed to rename account:', renameError);
+      setError(renameError.message || 'Failed to rename account');
+    } finally {
+      setRenaming(false);
+    }
+  }, [editingAccountId, editingName, loadOverview, cancelEditingAccount]);
+
+  const confirmDeleteAccount = useCallback(async () => {
+    const account = accountPendingDeletion;
+    if (!account) return;
+
+    setDeletingAccount(true);
+    try {
+      await accountsAPI.deleteAccount(account.id);
+      await loadOverview();
+      setAccountPendingDeletion(null);
+    } catch (deleteError) {
+      console.error('Failed to delete account:', deleteError);
+      setError(deleteError.message || 'Failed to delete account');
+    } finally {
+      setDeletingAccount(false);
+    }
+  }, [accountPendingDeletion, loadOverview]);
 
   const accountsWithCoverage = useMemo(
     () => (overview?.accounts || []).slice().sort((left, right) => left.accountName.localeCompare(right.accountName)),
@@ -148,145 +198,147 @@ const DocumentsPage = () => {
       <section className="imports-hero">
         <div>
           <h3>Imports</h3>
-          <p>
-            Import statement files locally in the browser, upload normalized transactions,
-            and track coverage by account instead of managing raw files.
-          </p>
+          <p>DKB, YUH, Swisscard, Amazon Visa, and Interactive Brokers Flex CSVs are parsed locally in your browser.</p>
         </div>
-        <label className={`imports-upload-button ${uploading ? 'disabled' : ''}`}>
+        <label
+          className={`imports-dropzone ${uploading ? 'disabled' : ''} ${dragActive ? 'active' : ''}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           <input
             type="file"
             accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             multiple
-            onChange={handleFilesSelected}
+            onChange={handleFileInputChange}
             disabled={uploading}
           />
-          {uploading ? 'Importing…' : 'Import statements'}
+          <i className={`fa-solid ${uploading ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-up'}`}></i>
+          <span>{uploading ? 'Importing…' : 'Drop statements here or click to browse'}</span>
         </label>
-      </section>
-
-      <section className="imports-upload-card">
-        <div>
-          <h4>Supported imports</h4>
-          <p>DKB, YUH, Swisscard CSV exports, Amazon Visa Excel exports, and Interactive Brokers Activity Flex CSVs. Bank files are parsed client-side; broker files are stored encrypted and processed on the Broker page.</p>
-        </div>
-        <button type="button" className="documents-refresh-button" onClick={loadOverview} disabled={loading || uploading}>
-          {loading ? 'Refreshing…' : 'Refresh overview'}
-        </button>
       </section>
 
       {error && <div className="documents-loading">{error}</div>}
 
       {result && (
-        <section className="imports-result-card">
-          <h4>Last import</h4>
-          <ul>
-            {result.importedBatches.map((batch) => (
-              <li key={`${batch.accountName}-${batch.statementStartDate}-${batch.statementEndDate}`}>
-                {batch.accountName}: {batch.importedCount} imported, {batch.skippedCount} skipped
-                ({formatDate(batch.statementStartDate)} to {formatDate(batch.statementEndDate)})
-              </li>
-            ))}
-            {result.brokerUploads?.map((upload) => (
-              <li key={upload.name}>
-                {upload.name}: broker document uploaded ({upload.documentType})
-              </li>
-            ))}
-          </ul>
-          {result.issues?.length > 0 && (
-            <div className="imports-issues">
-              {result.issues.map((issue) => (
-                <p key={issue}>{issue}</p>
-              ))}
-            </div>
-          )}
+        <section className="imports-result-banner">
+          {result.importedBatches.map((batch) => (
+            <span key={`${batch.accountName}-${batch.statementStartDate}-${batch.statementEndDate}`}>
+              {batch.accountName}: {batch.importedCount} imported, {batch.skippedCount} skipped
+            </span>
+          ))}
+          {result.brokerUploads?.map((upload) => (
+            <span key={upload.name}>{upload.name}: broker document uploaded</span>
+          ))}
+          {result.issues?.map((issue) => (
+            <span key={issue} className="imports-result-issue">{issue}</span>
+          ))}
         </section>
       )}
 
-      <section className="imports-coverage-section">
-        <div className="documents-toolbar">
-          <div>
-            <h3>Coverage by Account</h3>
-            <p>Each account shows covered statement ranges and any missing gaps between imported periods.</p>
-          </div>
-        </div>
+      <section className="imports-accounts-section">
+        <h3>Accounts</h3>
 
         {loading ? (
-          <div className="documents-loading">Loading import coverage…</div>
+          <div className="documents-loading">Loading accounts…</div>
         ) : accountsWithCoverage.length === 0 ? (
-          <div className="documents-empty-state">No accounts yet. Import a statement to create your first account timeline.</div>
+          <div className="documents-empty-state">No accounts yet. Import a statement to create your first account.</div>
         ) : (
-          <div className="imports-coverage-grid">
-            {accountsWithCoverage.map((account) => (
-              <article key={account.accountName} className="imports-account-card">
-                <div className="imports-account-header">
-                  <div>
-                    <h4>{account.accountName}</h4>
-                    <p>{account.currency} · {account.accountType}</p>
+          <div className="imports-account-list">
+            {accountsWithCoverage.map((account) => {
+              const summary = accountCoverageSummary(account);
+              return (
+                <div key={account.accountName} className="imports-account-row">
+                  <div className="imports-account-row-name">
+                    {editingAccountId === account.id ? (
+                      <input
+                        type="text"
+                        className="imports-account-name-input"
+                        value={editingName}
+                        autoFocus
+                        disabled={renaming}
+                        onChange={(event) => setEditingName(event.target.value)}
+                        onBlur={saveAccountName}
+                        onKeyDown={(event) => {
+                          // Enter triggers blur, which saves via onBlur above.
+                          if (event.key === 'Enter') event.target.blur();
+                          if (event.key === 'Escape') cancelEditingAccount();
+                        }}
+                      />
+                    ) : (
+                      <strong
+                        className="imports-account-name-editable"
+                        onClick={() => startEditingAccount(account)}
+                        title="Click to rename"
+                      >
+                        {account.accountName}
+                      </strong>
+                    )}
+                    <span>{account.currency} · {account.accountType}</span>
                   </div>
-                  <div className="imports-account-meta">
-                    <span>{account.totalTransactions || 0} tx</span>
+                  <div className="imports-account-row-coverage">
+                    <span>{summary.rangeLabel}</span>
+                    {summary.gapCount > 0 && (
+                      <span className="imports-gap-warning">
+                        ⚠ {summary.gapCount} gap{summary.gapCount > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+                  <div className="imports-account-row-meta">
+                    <span>{account.totalTransactions || 0} transactions</span>
                     <span>Last import: {account.lastImportAt ? formatDateTime(account.lastImportAt) : '—'}</span>
                   </div>
+                  <button
+                    type="button"
+                    className="imports-account-delete-button"
+                    title="Delete account"
+                    onClick={() => setAccountPendingDeletion(account)}
+                  >
+                    <i className="fa-solid fa-trash"></i>
+                  </button>
                 </div>
-
-                <TimelineBar segments={account.segments} />
-
-                <div className="imports-segment-list">
-                  {account.segments?.map((segment) => (
-                    <div key={`${segment.startDate}-${segment.endDate}`} className="imports-range-pill">
-                      Covered: {formatDate(segment.startDate)} to {formatDate(segment.endDate)}
-                    </div>
-                  ))}
-                </div>
-
-                {account.gaps?.length > 0 ? (
-                  <div className="imports-gap-list">
-                    <h5>Potential gaps</h5>
-                    <ul>
-                      {account.gaps.map((gap) => (
-                        <li key={`${gap.startDate}-${gap.endDate}`}>
-                          {formatDate(gap.startDate)} to {formatDate(gap.endDate)} ({gap.days} days)
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <div className="imports-no-gaps">No gaps detected between imported statement ranges.</div>
-                )}
-              </article>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
 
-      <section className="imports-history-section">
-        <div className="documents-toolbar">
-          <div>
-            <h3>Recent Imports</h3>
-            <p>Metadata only: original files are no longer stored.</p>
-          </div>
-        </div>
-
-        {overview?.recentImports?.length > 0 ? (
-          <div className="imports-history-list">
-            {overview.recentImports.map((item) => (
-              <div key={item.id} className="imports-history-item">
-                <div>
-                  <strong>{item.accountName}</strong>
-                  <p>{item.filename || item.sourceType}</p>
-                </div>
-                <div>
-                  <span>{formatDate(item.statementStartDate)} to {formatDate(item.statementEndDate)}</span>
-                  <p>{item.importedCount} imported · {item.skippedCount} skipped</p>
+      {accountPendingDeletion && (
+        <div className="modal-overlay open" onClick={() => setAccountPendingDeletion(null)}>
+          <div className="modal-content open" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Delete account</h3>
+              <button type="button" className="modal-close" onClick={() => setAccountPendingDeletion(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p>
+                Permanently delete <strong>{accountPendingDeletion.accountName}</strong> and its{' '}
+                {accountPendingDeletion.totalTransactions || 0} transactions? This cannot be undone.
+              </p>
+              <div className="prediction-edit-actions">
+                <button
+                  type="button"
+                  className="document-delete-button"
+                  onClick={confirmDeleteAccount}
+                  disabled={deletingAccount}
+                >
+                  {deletingAccount ? 'Deleting…' : 'Delete permanently'}
+                </button>
+                <div className="prediction-edit-actions-right">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setAccountPendingDeletion(null)}
+                    disabled={deletingAccount}
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
-            ))}
+            </div>
           </div>
-        ) : (
-          <div className="documents-empty-state">No imports recorded yet.</div>
-        )}
-      </section>
+        </div>
+      )}
     </div>
   );
 };

@@ -94,6 +94,8 @@ const formatIsoDate = (value, format) => {
 
 const buildBatch = ({
   accountName,
+  matchKey,
+  legacyAccountName,
   currency,
   sourceType,
   filename,
@@ -104,6 +106,8 @@ const buildBatch = ({
   const sortedTransactions = [...transactions].sort((left, right) => left.date.localeCompare(right.date));
   return {
     accountName,
+    matchKey: matchKey || accountName,
+    legacyAccountName: legacyAccountName || null,
     currency,
     sourceType,
     filename,
@@ -292,6 +296,16 @@ const parseSwisscard = (text, filename, checksum) => {
   }));
 };
 
+const findCardholderName = (rows, headerIndex) => {
+  for (const row of rows.slice(0, headerIndex)) {
+    const label = normalizeCell(String(row[0] || ''));
+    if (/Karteninhaber/i.test(label)) {
+      return normalizeCell(String(row[1] || ''));
+    }
+  }
+  return '';
+};
+
 const parseAmazonVisaWorkbook = (arrayBuffer, filename, checksum) => {
   const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
   const firstSheetName = workbook.SheetNames[0];
@@ -313,6 +327,8 @@ const parseAmazonVisaWorkbook = (arrayBuffer, filename, checksum) => {
   if (headerIndex < 0) {
     throw new Error('Could not find Amazon Visa header row');
   }
+
+  const cardholderName = findCardholderName(rows, headerIndex);
 
   const header = rows[headerIndex].map((cell) => normalizeCell(String(cell)));
   const columnIndex = (name) => header.indexOf(name);
@@ -356,8 +372,14 @@ const parseAmazonVisaWorkbook = (arrayBuffer, filename, checksum) => {
     });
   });
 
+  // Only trust the cardholder name as a stable identity when the file has a single
+  // card number; if it covers multiple cards we can't tell which one they belong to.
+  const useCardholderName = Boolean(cardholderName) && grouped.size === 1;
+
   return Array.from(grouped.entries()).map(([accountName, transactions]) => buildBatch({
-    accountName,
+    accountName: useCardholderName ? 'Amazon Visa' : accountName,
+    matchKey: useCardholderName ? `amazon_visa:${cardholderName.toLowerCase()}` : accountName,
+    legacyAccountName: useCardholderName ? accountName : null,
     currency: 'EUR',
     sourceType: 'amazon_visa_xls',
     filename,

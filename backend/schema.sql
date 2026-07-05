@@ -71,6 +71,9 @@ CREATE TABLE accounts (
     balance DECIMAL(15,2),
     currency VARCHAR(3) DEFAULT 'EUR',
     institution VARCHAR(255),
+    -- Stable identity used to match future imports to this account, independent of
+    -- the user-editable account_name (e.g. card last-4 or cardholder name).
+    import_match_key VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     key_version VARCHAR(50) NOT NULL,
@@ -256,6 +259,7 @@ CREATE INDEX idx_transactions_tenant_date ON transactions(tenant_id, transaction
 CREATE INDEX idx_transactions_account ON transactions(account_id);
 CREATE INDEX idx_transactions_category ON transactions(category);
 CREATE INDEX idx_transactions_hash ON transactions(transaction_hash);
+CREATE INDEX idx_category_overrides_hash ON category_overrides(transaction_hash);
 CREATE INDEX idx_transactions_source_document ON transactions(source_document_id);
 CREATE INDEX idx_accounts_tenant ON accounts(tenant_id);
 CREATE INDEX idx_categories_tenant_type ON categories(tenant_id, category_type);

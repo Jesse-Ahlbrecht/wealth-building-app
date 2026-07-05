@@ -40,26 +40,60 @@ def _infer_account_type(account_name: str, source_type: str = '') -> str:
     return 'checking'
 
 
-def _get_or_create_account(tenant_id: str, account_name: str, currency: str, source_type: str = '', current_balance=None):
-    accounts = wealth_db.get_accounts(tenant_id)
-    for account in accounts:
-        if account['account_name'] == account_name:
-            if current_balance is not None:
-                wealth_db.update_account_balance(tenant_id, account['id'], float(current_balance), currency)
-            return account
+def _get_or_create_account(tenant_id: str, accounts: list, account_name: str, currency: str, source_type: str = '',
+                           current_balance=None, match_key: str = None, legacy_account_name: str = None):
+    """Find or create the account for an import batch, appending new accounts to `accounts` in place.
+
+    Matching is done primarily via `match_key`, a stable identity (e.g. cardholder
+    name) independent of the user-editable `account_name`, so renaming an account
+    or a reissued card number doesn't break future import matching. Accounts
+    created before this existed are matched by name once and then backfilled
+    with the match key. `legacy_account_name` covers a one-time naming scheme
+    change (e.g. digits -> cardholder name): if an account still has the old
+    auto-generated name, it's adopted and upgraded to the new name/match key
+    instead of creating a duplicate.
+    """
+    match_key = match_key or account_name
+
+    match = next((account for account in accounts if account.get('import_match_key') == match_key), None)
+
+    if not match:
+        match = next((account for account in accounts if account['account_name'] == account_name), None)
+        # Only backfill if this account has no match key of its own yet, so we
+        # don't clobber a different identity that happens to share this name.
+        if match and not match.get('import_match_key'):
+            wealth_db.set_account_match_key(tenant_id, match['id'], match_key)
+            match['import_match_key'] = match_key
+
+    if not match and legacy_account_name:
+        match = next((account for account in accounts if account['account_name'] == legacy_account_name), None)
+        if match:
+            wealth_db.set_account_match_key(tenant_id, match['id'], match_key)
+            wealth_db.update_account_name(tenant_id, match['id'], account_name)
+            match['import_match_key'] = match_key
+            match['account_name'] = account_name
+
+    if match:
+        if current_balance is not None:
+            wealth_db.update_account_balance(tenant_id, match['id'], float(current_balance), currency)
+        return match
 
     created = wealth_db.create_account(tenant_id, {
         'name': account_name,
         'type': _infer_account_type(account_name, source_type),
         'balance': float(current_balance) if current_balance is not None else 0,
-        'currency': currency
+        'currency': currency,
+        'match_key': match_key
     })
-    return {
+    new_account = {
         'id': created['id'],
         'account_name': created['account_name'],
         'currency': created['currency'],
-        'account_type': created['account_type']
+        'account_type': created['account_type'],
+        'import_match_key': match_key
     }
+    accounts.append(new_account)
+    return new_account
 
 
 def _merge_segments(batches):
@@ -120,7 +154,7 @@ def record_broker_import_coverage(tenant_id, document_type, filepath, filename, 
     if not dates:
         return None
 
-    account = _get_or_create_account(tenant_id, ACCOUNT_NAME, 'CHF', document_type)
+    account = _get_or_create_account(tenant_id, wealth_db.get_accounts(tenant_id), ACCOUNT_NAME, 'CHF', document_type)
     if checksum and wealth_db.import_batch_checksum_exists(tenant_id, account['id'], checksum):
         return None
 
@@ -187,6 +221,7 @@ def get_import_overview():
         coverage_by_account = {}
         for account in accounts:
             coverage_by_account[account['account_name']] = {
+                'id': account['id'],
                 'accountName': account['account_name'],
                 'currency': account['currency'],
                 'accountType': account['account_type'],
@@ -199,17 +234,9 @@ def get_import_overview():
             }
 
         for batch in batches:
-            entry = coverage_by_account.setdefault(batch['account_name'], {
-                'accountName': batch['account_name'],
-                'currency': batch['currency'],
-                'accountType': batch['account_type'],
-                'batches': [],
-                'segments': [],
-                'gaps': [],
-                'lastImportAt': None,
-                'lastStatementEndDate': None,
-                'totalTransactions': 0
-            })
+            # Every batch's account_name is guaranteed to be a key above: list_import_batches
+            # joins against accounts, and accounts are never deactivated in this app.
+            entry = coverage_by_account[batch['account_name']]
             entry['batches'].append({
                 'id': batch['id'],
                 'sourceType': batch['source_type'],
@@ -338,10 +365,13 @@ def import_transactions():
             currency = batch.get('currency') or transactions[0].get('currency') or 'CHF'
             account = _get_or_create_account(
                 tenant_id,
+                owned_accounts,
                 account_name,
                 currency,
                 batch.get('sourceType', ''),
-                batch.get('currentBalance')
+                batch.get('currentBalance'),
+                batch.get('matchKey'),
+                batch.get('legacyAccountName')
             )
 
             imported_count = 0

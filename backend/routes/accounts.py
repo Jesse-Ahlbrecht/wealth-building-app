@@ -12,10 +12,11 @@ import json
 import base64
 import traceback
 import tempfile
-from flask import Blueprint, g, jsonify
+from flask import Blueprint, g, jsonify, request
 from database import get_wealth_database
 from encryption import get_encryption_service, EncryptedData
 from middleware.auth_middleware import authenticate_request, require_auth
+from utils.response_helpers import success_response, error_response
 
 accounts_bp = Blueprint('accounts', __name__, url_prefix='/api')
 wealth_db = get_wealth_database()
@@ -254,4 +255,37 @@ def get_accounts():
         traceback.print_exc()
         # On error, return empty accounts (user will see onboarding)
         return jsonify({'accounts': [], 'totals': {}})
+
+
+@accounts_bp.route('/accounts/<int:account_id>', methods=['PUT'])
+@authenticate_request
+@require_auth
+def rename_account(account_id):
+    """Rename an account"""
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get('name') or '').strip()
+
+    if not name:
+        return error_response('Name is required', 400)
+
+    updated = wealth_db.update_account_name(tenant_id, account_id, name)
+    if not updated:
+        return error_response('Account not found', 404)
+
+    return success_response(updated)
+
+
+@accounts_bp.route('/accounts/<int:account_id>', methods=['DELETE'])
+@authenticate_request
+@require_auth
+def delete_account(account_id):
+    """Permanently delete an account and all of its transactions"""
+    tenant_id = g.session_claims.get('tenant', 'default') if g.session_claims else 'default'
+
+    deleted = wealth_db.delete_account(tenant_id, account_id)
+    if not deleted:
+        return error_response('Account not found', 404)
+
+    return success_response({'id': account_id})
 
