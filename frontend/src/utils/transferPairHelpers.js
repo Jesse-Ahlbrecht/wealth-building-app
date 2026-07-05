@@ -2,15 +2,6 @@ import { getMonthKeyFromDate } from './dateHelpers';
 
 export { getMonthKeyFromDate };
 
-export const filterTransferPairsForMonth = (transferPairs, monthKey) => {
-  if (!monthKey || !Array.isArray(transferPairs)) return [];
-  return transferPairs.filter(
-    (pair) =>
-      getMonthKeyFromDate(pair?.outflow?.date) === monthKey
-      || getMonthKeyFromDate(pair?.inflow?.date) === monthKey
-  );
-};
-
 export const getPairedHashesForMonth = (pairsInMonth) => {
   const hashes = new Set();
   pairsInMonth.forEach((pair) => {

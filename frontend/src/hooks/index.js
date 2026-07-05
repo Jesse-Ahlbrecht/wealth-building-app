@@ -12,8 +12,7 @@ export { useMonthPredictions } from './useMonthPredictions';
 export { usePreferenceState } from './usePreferenceState';
 export { useMonthDrilldownPanelProps } from './useMonthDrilldownPanelProps';
 export { useRecurringPayments } from './useRecurringPayments';
-export { useLazyPairData } from './useLazyPairData';
-export { useTransferPairs } from './useTransferPairs';
+export { useCategoryTransactionIndex } from './useCategoryTransactionIndex';
 export { useIbkrDepositPairs } from './useIbkrDepositPairs';
 export { useBrokerData } from './useBrokerData';
 

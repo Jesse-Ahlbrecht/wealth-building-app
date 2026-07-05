@@ -16,6 +16,7 @@ import logo from './assets/logo.svg';
 // Context Providers
 import { AuthProvider, useAuthContext } from './context/AuthContext';
 import { AppProvider, useAppContext } from './context/AppContext';
+import { PairDataProvider } from './context/PairDataContext';
 
 // Pages
 import CockpitPage from './pages/CockpitPage';
@@ -333,6 +334,7 @@ function AppContent() {
   }
 
   return (
+    <PairDataProvider>
     <div className="App">
       {/* Top Header */}
       <header className="top-header">
@@ -580,6 +582,7 @@ function AppContent() {
         </div>
       )}
     </div>
+    </PairDataProvider>
   );
 }
 

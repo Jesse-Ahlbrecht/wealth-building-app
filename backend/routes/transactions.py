@@ -11,7 +11,10 @@ from flask import Blueprint, g, jsonify
 from database import get_wealth_database
 from middleware.auth_middleware import authenticate_request, require_auth
 from utils.response_helpers import error_response
+from category_config import get_bank_savings_movement_categories
 from constants import TRANSACTION_QUERY_LIMIT
+from services.broker_savings import merge_broker_savings_into_summary
+from services.broker_service import load_broker_data
 from services.transfer_pairing import get_transfer_pairs, INTERNAL_TRANSFER
 from services.refund_pairing import build_refund_lookup
 from services.ibkr_deposit_pairing import get_ibkr_deposit_pairs

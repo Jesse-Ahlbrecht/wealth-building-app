@@ -1,5 +1,7 @@
 import { useCallback } from 'react';
 
+const EMPTY_PREDICTIONS = [];
+
 export function useMonthDrilldownPanelProps({
   selectedMonth,
   setSelectedMonth,
@@ -8,8 +10,6 @@ export function useMonthDrilldownPanelProps({
   availableCategories,
   predictions,
   recurringPayments,
-  transferPairData,
-  ibkrDepositPairData,
   averageEssentialSpending,
   handleSkipPrediction,
   handleDeletePrediction,
@@ -26,10 +26,8 @@ export function useMonthDrilldownPanelProps({
     defaultCurrency,
     essentialCategories,
     availableCategories,
-    predictions: predictions[selectedMonthKey] || [],
+    predictions: predictions[selectedMonthKey] ?? EMPTY_PREDICTIONS,
     recurringPayments,
-    transferPairData,
-    ibkrDepositPairData,
     averageEssentialSpending: averageEssentialSpending[selectedMonthKey] || 0,
     onSkipPrediction: handleSkipPrediction,
     onDeletePrediction: handleDeletePrediction,

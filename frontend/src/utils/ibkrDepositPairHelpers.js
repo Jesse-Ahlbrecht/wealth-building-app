@@ -1,19 +1,8 @@
-import { getMonthKeyFromDate } from './dateHelpers';
-
-const IBKR_KEYWORDS = ['interactive brokers', 'ibkr'];
+export const IBKR_KEYWORDS = ['interactive brokers', 'ibkr'];
 
 export const isIbkrBankTransfer = (txn) => {
   const text = `${txn?.recipient || ''} ${txn?.description || ''}`.toLowerCase();
   return IBKR_KEYWORDS.some((keyword) => text.includes(keyword));
-};
-
-export const filterIbkrDepositPairsForMonth = (pairs, monthKey) => {
-  if (!monthKey || !Array.isArray(pairs)) return [];
-  return pairs.filter(
-    (pair) =>
-      getMonthKeyFromDate(pair?.bank?.date) === monthKey
-      || getMonthKeyFromDate(pair?.deposit?.date) === monthKey
-  );
 };
 
 export const getPairedBankHashesForMonth = (pairsInMonth) => {

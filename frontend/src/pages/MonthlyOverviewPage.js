@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments, useTransferPairs, useIbkrDepositPairs, usePreferenceState } from '../hooks';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments, usePreferenceState } from '../hooks';
 import MonthSummaryCard from '../components/MonthSummaryCard';
 import ChartPageStates from '../components/ChartPageStates';
 import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
+
+const EMPTY_PREDICTIONS = [];
 
 const MonthlyOverviewPage = () => {
   const { defaultCurrency, preferences, updatePreferences } = useAppContext();
@@ -31,8 +33,6 @@ const MonthlyOverviewPage = () => {
     handleDeletePrediction
   } = useMonthPredictions(latestMonthKey);
   const { recurringPayments } = useRecurringPayments();
-  const { transferPairData } = useTransferPairs();
-  const { ibkrDepositPairData } = useIbkrDepositPairs();
 
   const latestMonth = sortedMonths[0];
   const previousMonths = sortedMonths.slice(1);
@@ -62,10 +62,8 @@ const MonthlyOverviewPage = () => {
               essentialCategories={essentialCategories}
               expenseSort={expenseSort}
               onExpenseSortChange={setExpenseSort}
-              predictions={predictions[latestMonthKey] || []}
+              predictions={predictions[latestMonthKey] ?? EMPTY_PREDICTIONS}
               recurringPayments={recurringPayments}
-              transferPairData={transferPairData}
-              ibkrDepositPairData={ibkrDepositPairData}
               averageEssentialSpending={averageEssentialSpending[latestMonthKey] || 0}
               onSkipPrediction={handleSkipPrediction}
               onDeletePrediction={handleDeletePrediction}
@@ -103,8 +101,6 @@ const MonthlyOverviewPage = () => {
                     expenseSort={expenseSort}
                     onExpenseSortChange={setExpenseSort}
                     recurringPayments={recurringPayments}
-                    transferPairData={transferPairData}
-              ibkrDepositPairData={ibkrDepositPairData}
                     availableCategories={availableCategories}
                     onTransactionCategoryUpdated={refreshSummary}
                     onCategoriesChanged={refreshCategories}

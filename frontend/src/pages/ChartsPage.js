@@ -25,7 +25,7 @@ import {
 import { formatCurrency } from '../utils';
 import { buildMonthlySavingsPoint, sortMonthsChronologically } from '../utils/chartDataHelpers';
 import { scrollToDrilldown, selectMonthFromChart } from '../utils/domHelpers';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments, useTransferPairs, useIbkrDepositPairs, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments, usePreferenceState, useMonthDrilldownPanelProps } from '../hooks';
 import {
   SAVINGS_GOAL_CHF,
   SAVINGS_RATE_GOAL,
@@ -64,8 +64,6 @@ const ChartsPage = () => {
     handleDeletePrediction
   } = useMonthPredictions(selectedMonthKey);
   const { recurringPayments } = useRecurringPayments();
-  const { transferPairData } = useTransferPairs();
-  const { ibkrDepositPairData } = useIbkrDepositPairs();
 
   // Drag selection state
   const chartContainerRef = useRef(null);
@@ -95,8 +93,6 @@ const ChartsPage = () => {
     availableCategories,
     predictions,
     recurringPayments,
-    transferPairData,
-    ibkrDepositPairData,
     averageEssentialSpending,
     handleSkipPrediction,
     handleDeletePrediction,

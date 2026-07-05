@@ -10,13 +10,14 @@ const CollapsibleBreakdownSection = ({
   expandedSections,
   setExpandedSections,
   children,
-  footer
+  footer,
+  className = ''
 }) => {
   const sectionKey = `${monthKey}-${sectionId}`;
   const isExpanded = expandedSections[sectionKey];
 
   return (
-    <div className="categories-section">
+    <div className={`categories-section ${className}`.trim()}>
       <div
         className="category-item category-section-header"
         onClick={() => {

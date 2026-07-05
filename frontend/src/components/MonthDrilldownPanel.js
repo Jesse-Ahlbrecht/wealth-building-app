@@ -9,8 +9,6 @@ const MonthDrilldownPanel = ({
   availableCategories,
   predictions = [],
   recurringPayments = [],
-  transferPairData = { pairs: [], unmatched: [] },
-  ibkrDepositPairData = { pairs: [], unmatchedBank: [], unmatchedDeposits: [] },
   averageEssentialSpending = 0,
   onSkipPrediction,
   onDeletePrediction,
@@ -39,8 +37,6 @@ const MonthDrilldownPanel = ({
           essentialCategories={essentialCategories}
           predictions={predictions}
           recurringPayments={recurringPayments}
-          transferPairData={transferPairData}
-          ibkrDepositPairData={ibkrDepositPairData}
           averageEssentialSpending={averageEssentialSpending}
           onSkipPrediction={onSkipPrediction}
           onDeletePrediction={onDeletePrediction}
