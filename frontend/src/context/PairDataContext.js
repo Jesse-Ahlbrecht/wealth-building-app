@@ -1,11 +1,15 @@
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { transactionsAPI } from '../api/transactions';
 import { useLazyPairData } from '../hooks/useLazyPairData';
-import { buildPairIndex, getMonthPairBundle } from '../utils/pairIndexHelpers';
+import {
+  buildPairIndex,
+  getInternalTransferTransactions,
+  getMonthPairBundle
+} from '../utils/pairIndexHelpers';
 
 const EMPTY_TRANSFER = { pairs: [], unmatched: [] };
 const EMPTY_IBKR = { pairs: [] };
-const EMPTY_TXNS = [];
+const LAZY_PAIR_OPTS = { autoLoad: false };
 
 const PairDataContext = createContext(null);
 const PairIndexContext = createContext(null);
@@ -16,16 +20,29 @@ const parsePairResponse = (raw, { includeUnmatched = false } = {}) => ({
 });
 
 export function PairDataProvider({ children }) {
-  const { data: transferPairData, reload: reloadTransferPairs } = useLazyPairData(
+  const { data: transferPairData, reload: reloadTransferPairs, load: loadTransferPairs } = useLazyPairData(
     transactionsAPI.getTransferPairs,
     (raw) => parsePairResponse(raw, { includeUnmatched: true }),
-    EMPTY_TRANSFER
+    EMPTY_TRANSFER,
+    LAZY_PAIR_OPTS
   );
-  const { data: ibkrDepositPairData, reload: reloadIbkrDepositPairs } = useLazyPairData(
+  const { data: ibkrDepositPairData, reload: reloadIbkrDepositPairs, load: loadIbkrDepositPairs } = useLazyPairData(
     transactionsAPI.getIbkrDepositPairs,
     parsePairResponse,
-    EMPTY_IBKR
+    EMPTY_IBKR,
+    LAZY_PAIR_OPTS
   );
+
+  const loadInFlightRef = useRef(null);
+  const ensureLoaded = useCallback(() => {
+    if (!loadInFlightRef.current) {
+      loadInFlightRef.current = Promise.all([loadTransferPairs(), loadIbkrDepositPairs()])
+        .finally(() => {
+          loadInFlightRef.current = null;
+        });
+    }
+    return loadInFlightRef.current;
+  }, [loadTransferPairs, loadIbkrDepositPairs]);
 
   const pairIndex = useMemo(
     () => buildPairIndex(transferPairData.pairs, ibkrDepositPairData.pairs),
@@ -34,8 +51,9 @@ export function PairDataProvider({ children }) {
 
   const reloadValue = useMemo(() => ({
     reloadTransferPairs,
-    reloadIbkrDepositPairs
-  }), [reloadTransferPairs, reloadIbkrDepositPairs]);
+    reloadIbkrDepositPairs,
+    ensureLoaded
+  }), [reloadTransferPairs, reloadIbkrDepositPairs, ensureLoaded]);
 
   return (
     <PairDataContext.Provider value={reloadValue}>
@@ -58,6 +76,15 @@ export function useReloadIbkrDepositPairs() {
   return usePairReloads().reloadIbkrDepositPairs;
 }
 
+function useEnsurePairData(active = true) {
+  const { ensureLoaded } = usePairReloads();
+  useEffect(() => {
+    if (active) {
+      ensureLoaded();
+    }
+  }, [active, ensureLoaded]);
+}
+
 function usePairIndex() {
   const pairIndex = useContext(PairIndexContext);
   if (!pairIndex) {
@@ -66,10 +93,30 @@ function usePairIndex() {
   return pairIndex;
 }
 
-export function useMonthPairBundle(monthKey, internalTransferTransactions = EMPTY_TXNS) {
+export function useMonthPairBundle(monthKey, internalTransferTransactions) {
+  useEnsurePairData(Boolean(monthKey));
   const pairIndex = usePairIndex();
   return useMemo(
-    () => getMonthPairBundle(pairIndex, monthKey, internalTransferTransactions),
+    () => (monthKey
+      ? getMonthPairBundle(pairIndex, monthKey, internalTransferTransactions)
+      : null),
     [pairIndex, monthKey, internalTransferTransactions]
   );
+}
+
+export function useMonthPairBundles(months) {
+  useEnsurePairData(Boolean(months?.length));
+  const pairIndex = usePairIndex();
+  return useMemo(() => {
+    const bundles = {};
+    (months || []).forEach((month) => {
+      if (!month?.month) return;
+      bundles[month.month] = getMonthPairBundle(
+        pairIndex,
+        month.month,
+        getInternalTransferTransactions(month)
+      );
+    });
+    return bundles;
+  }, [pairIndex, months]);
 }

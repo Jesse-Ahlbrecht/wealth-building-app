@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-export function useLazyPairData(fetchFn, parseResponse, emptyState) {
+export function useLazyPairData(fetchFn, parseResponse, emptyState, { autoLoad = true } = {}) {
   const [data, setData] = useState(emptyState);
   const loadedRef = useRef(false);
 
@@ -17,10 +17,12 @@ export function useLazyPairData(fetchFn, parseResponse, emptyState) {
   }, [fetchFn, parseResponse, emptyState]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (autoLoad) {
+      load();
+    }
+  }, [autoLoad, load]);
 
   const reload = useCallback(() => load({ force: true }), [load]);
 
-  return { data, reload };
+  return { data, reload, load };
 }

@@ -2,6 +2,22 @@ import { getMonthKeyFromDate } from './dateHelpers';
 import { getUnpairedInternalTransfersForMonth } from './transferPairHelpers';
 import { getUnpairedIbkrBankTransfersForMonth } from './ibkrDepositPairHelpers';
 
+const EMPTY_TXNS = [];
+
+export const EMPTY_PAIR_BUNDLE = {
+  transferPairsInMonth: [],
+  ibkrDepositPairsInMonth: [],
+  ibkrMatchByBankHash: new Map(),
+  unpairedInternalTransfers: [],
+  unpairedIbkrBankTransfers: []
+};
+
+export const getInternalTransferTransactions = (month) => (
+  month?.internalTransferTotal > 0
+    ? (month.internalTransferTransactions ?? EMPTY_TXNS)
+    : EMPTY_TXNS
+);
+
 const indexPairsByMonth = (pairs, getLegDates) => {
   const byMonth = {};
   (pairs || []).forEach((pair) => {
@@ -29,7 +45,7 @@ export const buildPairIndex = (transferPairs, ibkrPairs) => ({
   ])
 });
 
-export const getMonthPairBundle = (pairIndex, monthKey, internalTransferTransactions = []) => {
+export const getMonthPairBundle = (pairIndex, monthKey, internalTransferTransactions = EMPTY_TXNS) => {
   const transferPairsInMonth = pairIndex.transferByMonth[monthKey] || [];
   const ibkrDepositPairsInMonth = pairIndex.ibkrByMonth[monthKey] || [];
   const ibkrMatchByBankHash = new Map();

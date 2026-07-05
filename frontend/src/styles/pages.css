@@ -473,6 +473,19 @@
   background: var(--color-error-fill);
 }
 
+.metric-bar-fill-overlay {
+  height: 100%;
+  min-width: 2px;
+  border-radius: 0 8px 8px 0;
+  background: linear-gradient(90deg, rgba(220, 38, 38, 0.25), rgba(220, 38, 38, 0.15));
+}
+
+.metric-bar-fill-row {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
 .metric-bar-footer {
   font-size: 13px;
   color: var(--color-text-tertiary);

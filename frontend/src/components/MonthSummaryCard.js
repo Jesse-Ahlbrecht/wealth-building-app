@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { formatMonth } from '../utils';
 import { getCategoryNames } from '../utils/categoryHelpers';
 import {
@@ -7,7 +7,7 @@ import {
   sumCategoryAmounts
 } from '../utils/categoryHelpers';
 import { buildRecurringMatchKeys } from '../utils/predictionHelpers';
-import { useMonthPairBundle } from '../context/PairDataContext';
+import { EMPTY_PAIR_BUNDLE, getInternalTransferTransactions } from '../utils/pairIndexHelpers';
 import { useCategoryTransactionIndex } from '../hooks/useCategoryTransactionIndex';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
@@ -17,15 +17,12 @@ import MonthCategoryBreakdown from './MonthCategoryBreakdown';
 import MonthInternalTransfersSection from './MonthInternalTransfersSection';
 import TransactionListItem from './TransactionListItem';
 
-const EMPTY_INTERNAL_TXNS = [];
-
 const MonthSummaryCard = ({
   month,
   isCurrentMonth,
   defaultCurrency = 'CHF',
   essentialCategories = [],
-  expenseSort = 'amount_desc',
-  onExpenseSortChange = () => {},
+  monthPairs = EMPTY_PAIR_BUNDLE,
   predictions = [],
   recurringPayments = [],
   averageEssentialSpending = 0,
@@ -36,6 +33,8 @@ const MonthSummaryCard = ({
   onTransactionCategoryUpdated = () => {},
   onCategoriesChanged = () => {}
 }) => {
+  const [expenseSort, setExpenseSort] = useState('amount_desc');
+
   const [categoryModal, setCategoryModal] = React.useState(null);
   const [predictionMenu, setPredictionMenu] = React.useState(null);
   const [predictionModal, setPredictionModal] = React.useState(null);
@@ -89,11 +88,7 @@ const MonthSummaryCard = ({
   );
 
   const internalTransferTotal = month?.internalTransferTotal || 0;
-  const internalTransferTransactions = month?.internalTransferTransactions ?? EMPTY_INTERNAL_TXNS;
-  const monthPairs = useMonthPairBundle(
-    month?.month,
-    internalTransferTotal > 0 ? internalTransferTransactions : EMPTY_INTERNAL_TXNS
-  );
+  const internalTransferTransactions = getInternalTransferTransactions(month);
 
   const categoryIndex = useCategoryTransactionIndex({
     month,
@@ -128,8 +123,8 @@ const MonthSummaryCard = ({
 
   const handleSortToggle = useCallback((field) => {
     const nextDirection = sortField === field && sortDirection === 'desc' ? 'asc' : 'desc';
-    onExpenseSortChange(`${field}_${nextDirection}`);
-  }, [sortField, sortDirection, onExpenseSortChange]);
+    setExpenseSort(`${field}_${nextDirection}`);
+  }, [sortField, sortDirection]);
 
   const renderTransactionItem = (txn, idx, { dismissible = false } = {}) => (
     <TransactionListItem

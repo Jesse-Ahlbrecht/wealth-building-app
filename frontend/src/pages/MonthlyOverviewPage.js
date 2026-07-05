@@ -1,22 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments, usePreferenceState } from '../hooks';
+import { useMonthPairBundles } from '../context/PairDataContext';
+import { useCategoryData, useTransactionSummary, useMonthPredictions, useRecurringPayments } from '../hooks';
 import MonthSummaryCard from '../components/MonthSummaryCard';
 import ChartPageStates from '../components/ChartPageStates';
 import { sortMonthsReverseChronologically } from '../utils/chartDataHelpers';
+import { EMPTY_PAIR_BUNDLE } from '../utils/pairIndexHelpers';
 
 const EMPTY_PREDICTIONS = [];
 
 const MonthlyOverviewPage = () => {
-  const { defaultCurrency, preferences, updatePreferences } = useAppContext();
+  const { defaultCurrency } = useAppContext();
   const { essentialCategories, availableCategories, refreshCategories } = useCategoryData();
   const { summary, loading, error, loadSummary, refreshSummary } = useTransactionSummary();
-  const [expenseSort, setExpenseSort] = usePreferenceState(
-    'monthlyOverview_expenseSort',
-    'amount_desc',
-    preferences,
-    updatePreferences
-  );
   const [showPreviousMonths, setShowPreviousMonths] = useState(false);
 
   const sortedMonths = useMemo(
@@ -36,6 +32,12 @@ const MonthlyOverviewPage = () => {
 
   const latestMonth = sortedMonths[0];
   const previousMonths = sortedMonths.slice(1);
+
+  const visibleMonths = useMemo(
+    () => (showPreviousMonths ? sortedMonths : sortedMonths.slice(0, 1)),
+    [showPreviousMonths, sortedMonths]
+  );
+  const monthPairBundles = useMonthPairBundles(visibleMonths);
 
   return (
     <ChartPageStates
@@ -60,8 +62,7 @@ const MonthlyOverviewPage = () => {
               isCurrentMonth={true}
               defaultCurrency={defaultCurrency}
               essentialCategories={essentialCategories}
-              expenseSort={expenseSort}
-              onExpenseSortChange={setExpenseSort}
+              monthPairs={monthPairBundles[latestMonth.month] ?? EMPTY_PAIR_BUNDLE}
               predictions={predictions[latestMonthKey] ?? EMPTY_PREDICTIONS}
               recurringPayments={recurringPayments}
               averageEssentialSpending={averageEssentialSpending[latestMonthKey] || 0}
@@ -98,8 +99,7 @@ const MonthlyOverviewPage = () => {
                     isCurrentMonth={false}
                     defaultCurrency={defaultCurrency}
                     essentialCategories={essentialCategories}
-                    expenseSort={expenseSort}
-                    onExpenseSortChange={setExpenseSort}
+                    monthPairs={monthPairBundles[month.month] ?? EMPTY_PAIR_BUNDLE}
                     recurringPayments={recurringPayments}
                     availableCategories={availableCategories}
                     onTransactionCategoryUpdated={refreshSummary}

@@ -26,41 +26,22 @@ const MonthMetricsSection = ({
     />
     {(essentialTotal > 0 || nonEssentialTotal > 0 || savingsCategoryTotal > 0) ? (
       <>
-        <div className="metric-bar-item">
-          <div className="metric-bar-header">
-            <span className="metric-bar-label">Essential Expenses</span>
-            <div className="metric-bar-value negative">
-              {formatCurrency(essentialTotal, defaultCurrency)}
-              {isCurrentMonth && predictedEssentialAverage > 0 && (
-                <span className="metric-bar-meta" style={{ marginLeft: '8px', fontSize: '14px', opacity: 0.7 }}>
-                  (avg: {formatCurrency(predictedEssentialAverage, defaultCurrency)})
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="metric-bar-container">
-            <div style={{ display: 'flex', width: '100%', height: '100%' }}>
-              <div
-                className="metric-bar-fill negative"
-                style={{
-                  width: `${metricMaxValue > 0 ? (essentialTotal / metricMaxValue) * 100 : 0}%`,
-                  borderRadius: (isCurrentMonth && predictedEssentialDifference > 0) ? '8px 0 0 8px' : '8px'
-                }}
-              />
-              {isCurrentMonth && predictedEssentialDifference > 0 && (
-                <div
-                  style={{
-                    width: `${metricMaxValue > 0 ? (predictedEssentialDifference / metricMaxValue) * 100 : 0}%`,
-                    background: 'linear-gradient(90deg, rgba(220, 38, 38, 0.25), rgba(220, 38, 38, 0.15))',
-                    borderRadius: '0 8px 8px 0',
-                    minWidth: predictedEssentialDifference > 0 ? '2px' : '0'
-                  }}
-                  title={`Predicted essential gap: ${formatCurrency(predictedEssentialDifference, defaultCurrency)}`}
-                />
-              )}
-            </div>
-          </div>
-        </div>
+        <MetricBar
+          label="Essential Expenses"
+          value={essentialTotal}
+          maxValue={metricMaxValue}
+          currency={defaultCurrency}
+          type="negative"
+          valueMeta={isCurrentMonth && predictedEssentialAverage > 0 ? (
+            <span className="metric-bar-meta" style={{ marginLeft: '8px', fontSize: '14px', opacity: 0.7 }}>
+              (avg: {formatCurrency(predictedEssentialAverage, defaultCurrency)})
+            </span>
+          ) : null}
+          overlayValue={isCurrentMonth ? predictedEssentialDifference : 0}
+          overlayTitle={predictedEssentialDifference > 0
+            ? `Predicted essential gap: ${formatCurrency(predictedEssentialDifference, defaultCurrency)}`
+            : null}
+        />
         <MetricBar
           label="Non-Essential Expenses"
           value={nonEssentialTotal}
