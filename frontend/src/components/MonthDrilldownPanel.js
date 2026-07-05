@@ -1,6 +1,6 @@
 import React from 'react';
-import { useMonthPairBundle } from '../context/PairDataContext';
-import { EMPTY_PAIR_BUNDLE, getInternalTransferTransactions } from '../utils/pairIndexHelpers';
+import { useMonthPairSlice } from '../context/PairDataContext';
+import { EMPTY_PAIR_SLICE } from '../utils/pairIndexHelpers';
 import MonthSummaryCard from './MonthSummaryCard';
 
 const MonthDrilldownPanel = ({
@@ -18,10 +18,7 @@ const MonthDrilldownPanel = ({
   onTransactionCategoryUpdated,
   onCategoriesChanged
 }) => {
-  const monthPairs = useMonthPairBundle(
-    selectedMonth?.month,
-    getInternalTransferTransactions(selectedMonth)
-  );
+  const monthPairSlice = useMonthPairSlice(selectedMonth?.month);
 
   if (!selectedMonth) return null;
 
@@ -40,7 +37,7 @@ const MonthDrilldownPanel = ({
           isCurrentMonth={false}
           defaultCurrency={defaultCurrency}
           essentialCategories={essentialCategories}
-          monthPairs={monthPairs ?? EMPTY_PAIR_BUNDLE}
+          monthPairSlice={monthPairSlice ?? EMPTY_PAIR_SLICE}
           predictions={predictions}
           recurringPayments={recurringPayments}
           averageEssentialSpending={averageEssentialSpending}

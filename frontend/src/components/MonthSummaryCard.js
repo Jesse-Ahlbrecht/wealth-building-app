@@ -1,4 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
+import { useAppContext } from '../context/AppContext';
 import { formatMonth } from '../utils';
 import { getCategoryNames } from '../utils/categoryHelpers';
 import {
@@ -7,8 +8,8 @@ import {
   sumCategoryAmounts
 } from '../utils/categoryHelpers';
 import { buildRecurringMatchKeys } from '../utils/predictionHelpers';
-import { EMPTY_PAIR_BUNDLE, getInternalTransferTransactions } from '../utils/pairIndexHelpers';
-import { useCategoryTransactionIndex } from '../hooks/useCategoryTransactionIndex';
+import { EMPTY_PAIR_SLICE, getInternalTransferTransactions } from '../utils/pairIndexHelpers';
+import { useCategoryTransactionIndex, usePreferenceState } from '../hooks';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
 import CollapsibleBreakdownSection from './CollapsibleBreakdownSection';
@@ -22,7 +23,7 @@ const MonthSummaryCard = ({
   isCurrentMonth,
   defaultCurrency = 'CHF',
   essentialCategories = [],
-  monthPairs = EMPTY_PAIR_BUNDLE,
+  monthPairSlice = EMPTY_PAIR_SLICE,
   predictions = [],
   recurringPayments = [],
   averageEssentialSpending = 0,
@@ -33,7 +34,13 @@ const MonthSummaryCard = ({
   onTransactionCategoryUpdated = () => {},
   onCategoriesChanged = () => {}
 }) => {
-  const [expenseSort, setExpenseSort] = useState('amount_desc');
+  const { preferences, updatePreferences } = useAppContext();
+  const [expenseSort, setExpenseSort] = usePreferenceState(
+    `expenseSort_${month.month}`,
+    'amount_desc',
+    preferences,
+    updatePreferences
+  );
 
   const [categoryModal, setCategoryModal] = React.useState(null);
   const [predictionMenu, setPredictionMenu] = React.useState(null);
@@ -124,32 +131,47 @@ const MonthSummaryCard = ({
   const handleSortToggle = useCallback((field) => {
     const nextDirection = sortField === field && sortDirection === 'desc' ? 'asc' : 'desc';
     setExpenseSort(`${field}_${nextDirection}`);
-  }, [sortField, sortDirection]);
+  }, [sortField, sortDirection, setExpenseSort]);
 
-  const renderTransactionItem = (txn, idx, { dismissible = false } = {}) => (
+  const handleCategoryEdit = useCallback((transaction) => {
+    setCategoryModal({
+      transaction,
+      currentCategory: transaction.category || '',
+      monthKey: month.month
+    });
+  }, [month.month]);
+
+  const renderTransactionItem = useCallback((txn, idx, { dismissible = false } = {}) => (
     <TransactionListItem
       key={idx}
       txn={txn}
       idx={idx}
       defaultCurrency={defaultCurrency}
       recurringMatchKeys={recurringMatchKeys}
-      ibkrMatchByBankHash={monthPairs.ibkrMatchByBankHash}
+      ibkrMatchByBankHash={monthPairSlice.ibkrMatchByBankHash}
       monthKey={month.month}
       incomeCategoryNames={incomeCategoryNames}
       expenseCategoryNames={expenseCategoryNames}
       dismissible={dismissible}
-      onCategoryEdit={(transaction) => setCategoryModal({
-        transaction,
-        currentCategory: transaction.category || '',
-        monthKey: month.month
-      })}
+      onCategoryEdit={handleCategoryEdit}
       predictionMenu={predictionMenu}
       onPredictionMenuChange={setPredictionMenu}
       onSkipPrediction={onSkipPrediction}
       onCustomizePrediction={setPredictionModal}
       onDeletePrediction={onDeletePrediction}
     />
-  );
+  ), [
+    defaultCurrency,
+    recurringMatchKeys,
+    monthPairSlice.ibkrMatchByBankHash,
+    month.month,
+    incomeCategoryNames,
+    expenseCategoryNames,
+    handleCategoryEdit,
+    predictionMenu,
+    onSkipPrediction,
+    onDeletePrediction
+  ]);
 
   return (
     <>
@@ -238,7 +260,7 @@ const MonthSummaryCard = ({
               monthKey={month.month}
               defaultCurrency={defaultCurrency}
               internalTransferTransactions={internalTransferTransactions}
-              monthPairs={monthPairs}
+              monthPairSlice={monthPairSlice}
               sortConfig={sortConfig}
               expandedPairs={expandedPairs}
               onTogglePair={togglePair}

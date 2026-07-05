@@ -3,8 +3,7 @@ import { transactionsAPI } from '../api/transactions';
 import { useLazyPairData } from '../hooks/useLazyPairData';
 import {
   buildPairIndex,
-  getInternalTransferTransactions,
-  getMonthPairBundle
+  getMonthPairSlice
 } from '../utils/pairIndexHelpers';
 
 const EMPTY_TRANSFER = { pairs: [], unmatched: [] };
@@ -13,6 +12,7 @@ const LAZY_PAIR_OPTS = { autoLoad: false };
 
 const PairDataContext = createContext(null);
 const PairIndexContext = createContext(null);
+const PairsLoadedContext = createContext(false);
 
 const parsePairResponse = (raw, { includeUnmatched = false } = {}) => ({
   pairs: Array.isArray(raw?.pairs) ? raw.pairs : [],
@@ -20,13 +20,13 @@ const parsePairResponse = (raw, { includeUnmatched = false } = {}) => ({
 });
 
 export function PairDataProvider({ children }) {
-  const { data: transferPairData, reload: reloadTransferPairs, load: loadTransferPairs } = useLazyPairData(
+  const { data: transferPairData, reload: reloadTransferPairs, load: loadTransferPairs, isLoaded: transferLoaded } = useLazyPairData(
     transactionsAPI.getTransferPairs,
     (raw) => parsePairResponse(raw, { includeUnmatched: true }),
     EMPTY_TRANSFER,
     LAZY_PAIR_OPTS
   );
-  const { data: ibkrDepositPairData, reload: reloadIbkrDepositPairs, load: loadIbkrDepositPairs } = useLazyPairData(
+  const { data: ibkrDepositPairData, reload: reloadIbkrDepositPairs, load: loadIbkrDepositPairs, isLoaded: ibkrLoaded } = useLazyPairData(
     transactionsAPI.getIbkrDepositPairs,
     parsePairResponse,
     EMPTY_IBKR,
@@ -49,6 +49,8 @@ export function PairDataProvider({ children }) {
     [transferPairData.pairs, ibkrDepositPairData.pairs]
   );
 
+  const pairsLoaded = transferLoaded && ibkrLoaded;
+
   const reloadValue = useMemo(() => ({
     reloadTransferPairs,
     reloadIbkrDepositPairs,
@@ -57,9 +59,11 @@ export function PairDataProvider({ children }) {
 
   return (
     <PairDataContext.Provider value={reloadValue}>
-      <PairIndexContext.Provider value={pairIndex}>
-        {children}
-      </PairIndexContext.Provider>
+      <PairsLoadedContext.Provider value={pairsLoaded}>
+        <PairIndexContext.Provider value={pairIndex}>
+          {children}
+        </PairIndexContext.Provider>
+      </PairsLoadedContext.Provider>
     </PairDataContext.Provider>
   );
 }
@@ -74,6 +78,10 @@ export function usePairReloads() {
 
 export function useReloadIbkrDepositPairs() {
   return usePairReloads().reloadIbkrDepositPairs;
+}
+
+export function usePairsLoaded() {
+  return useContext(PairsLoadedContext);
 }
 
 function useEnsurePairData(active = true) {
@@ -93,30 +101,28 @@ function usePairIndex() {
   return pairIndex;
 }
 
-export function useMonthPairBundle(monthKey, internalTransferTransactions) {
+export { usePairIndex };
+
+export function useMonthPairSlice(monthKey) {
   useEnsurePairData(Boolean(monthKey));
   const pairIndex = usePairIndex();
   return useMemo(
-    () => (monthKey
-      ? getMonthPairBundle(pairIndex, monthKey, internalTransferTransactions)
-      : null),
-    [pairIndex, monthKey, internalTransferTransactions]
+    () => (monthKey ? getMonthPairSlice(pairIndex, monthKey) : null),
+    [pairIndex, monthKey]
   );
 }
 
-export function useMonthPairBundles(months) {
-  useEnsurePairData(Boolean(months?.length));
+export function useMonthPairSlices(monthKeys) {
+  useEnsurePairData(Boolean(monthKeys?.length));
   const pairIndex = usePairIndex();
+  const keysKey = (monthKeys || []).join(',');
   return useMemo(() => {
-    const bundles = {};
-    (months || []).forEach((month) => {
-      if (!month?.month) return;
-      bundles[month.month] = getMonthPairBundle(
-        pairIndex,
-        month.month,
-        getInternalTransferTransactions(month)
-      );
+    const slices = {};
+    (monthKeys || []).forEach((monthKey) => {
+      if (monthKey) {
+        slices[monthKey] = getMonthPairSlice(pairIndex, monthKey);
+      }
     });
-    return bundles;
-  }, [pairIndex, months]);
+    return slices;
+  }, [pairIndex, keysKey]);
 }

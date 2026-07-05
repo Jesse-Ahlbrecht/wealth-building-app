@@ -1,5 +1,10 @@
 import React, { useMemo } from 'react';
 import { isIbkrBankTransfer } from '../utils/ibkrDepositPairHelpers';
+import {
+  getInternalTxnFingerprint,
+  getMonthPairUnpaired
+} from '../utils/pairIndexHelpers';
+import { usePairIndex, usePairsLoaded } from '../context/PairDataContext';
 import { sortTransactions } from '../utils/transactionSortHelpers';
 import { IbkrDepositPairRow, InternalTransferPairRow } from './TransferPairGroup';
 
@@ -7,19 +12,26 @@ const MonthInternalTransfersSection = ({
   monthKey,
   defaultCurrency,
   internalTransferTransactions,
-  monthPairs,
+  monthPairSlice,
   sortConfig,
   expandedPairs,
   onTogglePair,
   renderTransactionItem
 }) => {
+  const pairIndex = usePairIndex();
+  const pairsLoaded = usePairsLoaded();
+  const txnFingerprint = getInternalTxnFingerprint(internalTransferTransactions);
+
   const {
     transferPairsInMonth,
     ibkrDepositPairsInMonth,
-    ibkrMatchByBankHash,
-    unpairedInternalTransfers,
-    unpairedIbkrBankTransfers
-  } = monthPairs;
+    ibkrMatchByBankHash
+  } = monthPairSlice;
+
+  const { unpairedInternalTransfers, unpairedIbkrBankTransfers } = useMemo(
+    () => getMonthPairUnpaired(pairIndex, monthKey, monthPairSlice, internalTransferTransactions),
+    [pairIndex, monthKey, monthPairSlice, txnFingerprint]
+  );
 
   const hasTransferPairs = transferPairsInMonth.length > 0;
 
@@ -41,6 +53,10 @@ const MonthInternalTransfersSection = ({
     ibkrMatchByBankHash,
     sortConfig
   ]);
+
+  if (!pairsLoaded) {
+    return <div className="loading" style={{ padding: '12px 0' }}>Loading transfer pairs...</div>;
+  }
 
   return (
     <>

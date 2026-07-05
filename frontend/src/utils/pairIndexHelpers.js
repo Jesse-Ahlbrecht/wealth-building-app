@@ -4,10 +4,14 @@ import { getUnpairedIbkrBankTransfersForMonth } from './ibkrDepositPairHelpers';
 
 const EMPTY_TXNS = [];
 
-export const EMPTY_PAIR_BUNDLE = {
+export const EMPTY_PAIR_SLICE = {
   transferPairsInMonth: [],
   ibkrDepositPairsInMonth: [],
-  ibkrMatchByBankHash: new Map(),
+  ibkrMatchByBankHash: new Map()
+};
+
+export const EMPTY_PAIR_BUNDLE = {
+  ...EMPTY_PAIR_SLICE,
   unpairedInternalTransfers: [],
   unpairedIbkrBankTransfers: []
 };
@@ -17,6 +21,25 @@ export const getInternalTransferTransactions = (month) => (
     ? (month.internalTransferTransactions ?? EMPTY_TXNS)
     : EMPTY_TXNS
 );
+
+export const getInternalTxnFingerprint = (internalTransferTransactions = EMPTY_TXNS) => {
+  if (!internalTransferTransactions.length) return '';
+  return internalTransferTransactions
+    .map((txn) => txn.transaction_hash || `${txn.date}|${txn.amount}|${txn.recipient}`)
+    .join('\n');
+};
+
+let cachedPairIndex = null;
+const sliceCache = new Map();
+const unpairedCache = new Map();
+
+const resetCachesIfNeeded = (pairIndex) => {
+  if (cachedPairIndex !== pairIndex) {
+    cachedPairIndex = pairIndex;
+    sliceCache.clear();
+    unpairedCache.clear();
+  }
+};
 
 const indexPairsByMonth = (pairs, getLegDates) => {
   const byMonth = {};
@@ -45,7 +68,11 @@ export const buildPairIndex = (transferPairs, ibkrPairs) => ({
   ])
 });
 
-export const getMonthPairBundle = (pairIndex, monthKey, internalTransferTransactions = EMPTY_TXNS) => {
+export const getMonthPairSlice = (pairIndex, monthKey) => {
+  resetCachesIfNeeded(pairIndex);
+  if (sliceCache.has(monthKey)) {
+    return sliceCache.get(monthKey);
+  }
   const transferPairsInMonth = pairIndex.transferByMonth[monthKey] || [];
   const ibkrDepositPairsInMonth = pairIndex.ibkrByMonth[monthKey] || [];
   const ibkrMatchByBankHash = new Map();
@@ -54,17 +81,35 @@ export const getMonthPairBundle = (pairIndex, monthKey, internalTransferTransact
       ibkrMatchByBankHash.set(pair.bank.transaction_hash, pair);
     }
   });
-  return {
-    transferPairsInMonth,
-    ibkrDepositPairsInMonth,
-    ibkrMatchByBankHash,
+  const slice = { transferPairsInMonth, ibkrDepositPairsInMonth, ibkrMatchByBankHash };
+  sliceCache.set(monthKey, slice);
+  return slice;
+};
+
+export const getMonthPairUnpaired = (pairIndex, monthKey, slice, internalTransferTransactions = EMPTY_TXNS) => {
+  resetCachesIfNeeded(pairIndex);
+  const cacheKey = `${monthKey}:${getInternalTxnFingerprint(internalTransferTransactions)}`;
+  if (unpairedCache.has(cacheKey)) {
+    return unpairedCache.get(cacheKey);
+  }
+  const unpaired = {
     unpairedInternalTransfers: getUnpairedInternalTransfersForMonth(
       internalTransferTransactions,
-      transferPairsInMonth
+      slice.transferPairsInMonth
     ),
     unpairedIbkrBankTransfers: getUnpairedIbkrBankTransfersForMonth(
       internalTransferTransactions,
-      ibkrDepositPairsInMonth
+      slice.ibkrDepositPairsInMonth
     )
+  };
+  unpairedCache.set(cacheKey, unpaired);
+  return unpaired;
+};
+
+export const getMonthPairBundle = (pairIndex, monthKey, internalTransferTransactions = EMPTY_TXNS) => {
+  const slice = getMonthPairSlice(pairIndex, monthKey);
+  return {
+    ...slice,
+    ...getMonthPairUnpaired(pairIndex, monthKey, slice, internalTransferTransactions)
   };
 };
