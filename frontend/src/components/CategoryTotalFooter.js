@@ -1,7 +1,16 @@
 import React from 'react';
 import { formatCurrency } from '../utils';
+import { formatPercentOf } from '../utils/finance';
 
-const CategoryTotalFooter = ({ label, total, defaultCurrency, subtitle, indent = false }) => (
+const CategoryTotalFooter = ({
+  label,
+  total,
+  defaultCurrency,
+  subtitle,
+  indent = false,
+  valueMode = 'absolute',
+  incomeTotal = 0
+}) => (
   <div style={{
     marginTop: '12px',
     paddingTop: '12px',
@@ -14,7 +23,9 @@ const CategoryTotalFooter = ({ label, total, defaultCurrency, subtitle, indent =
         {subtitle}
       </span>
       <span className="stat-value" style={{ fontWeight: '700' }}>
-        {formatCurrency(total, defaultCurrency)}
+        {valueMode === 'percentage'
+          ? formatPercentOf(total, incomeTotal)
+          : formatCurrency(total, defaultCurrency)}
       </span>
     </div>
   </div>

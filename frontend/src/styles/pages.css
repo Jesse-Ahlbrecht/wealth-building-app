@@ -1287,9 +1287,54 @@
   flex-wrap: wrap;
 }
 
+.cockpit-control-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.cockpit-control-bar__filters {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.cockpit-control-bar .time-range-selector {
+  padding: 3px;
+  gap: 2px;
+  border-radius: 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.cockpit-control-bar .time-range-btn {
+  padding: 7px 14px;
+  border-radius: 8px;
+  color: var(--color-text-tertiary);
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.cockpit-control-bar .time-range-btn:hover {
+  color: var(--color-text-primary);
+  background: transparent;
+}
+
+.cockpit-control-bar .time-range-btn.active {
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  box-shadow: 0 1px 3px var(--color-shadow-sm);
+  font-weight: 600;
+}
+
 .cockpit-view-toggle {
   display: inline-flex;
-  margin-bottom: 20px;
+  margin-bottom: 0;
   padding: 3px;
   gap: 2px;
   border-radius: 10px;
@@ -1489,17 +1534,35 @@
 
 .chart-wrapper .recharts-bar-rectangle {
   cursor: pointer;
-  transition: filter 0.2s ease;
-  filter: hue-rotate(0deg);
+  transition: opacity 0.15s ease;
   outline: none;
 }
 
-.chart-wrapper .recharts-bar-rectangle:hover {
-  filter: hue-rotate(5deg);
+.chart-wrapper--bars .recharts-bar-rectangle:hover,
+.chart-wrapper--bars .recharts-bar-rectangle:active {
+  filter: none;
 }
 
-.chart-wrapper .recharts-bar-rectangle:active {
-  filter: hue-rotate(3deg);
+.chart-wrapper:not(.chart-wrapper--bars) .recharts-bar-rectangle {
+  transition: filter 0.2s ease;
+  filter: hue-rotate(0deg);
+}
+
+.chart-wrapper:not(.chart-wrapper--bars) .recharts-bar-rectangle:hover {
+  filter: brightness(1.06);
+}
+
+.chart-wrapper:not(.chart-wrapper--bars) .recharts-bar-rectangle:active {
+  filter: brightness(1.04);
+}
+
+.chart-wrapper .recharts-legend-item-text {
+  color: var(--color-text-secondary) !important;
+  font-size: 12px !important;
+}
+
+.chart-wrapper .recharts-default-legend {
+  margin-top: 0 !important;
 }
 
 /* Recharts Tooltip Dark Theme Support */

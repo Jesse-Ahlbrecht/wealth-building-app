@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatCurrency } from '../utils';
+import { formatPercentOf } from '../utils/finance';
 import ExpenseSortControls from './ExpenseSortControls';
 
 const CategoryRows = ({
@@ -17,7 +18,9 @@ const CategoryRows = ({
   sortField,
   sortDirection,
   onSortToggle,
-  footer
+  footer,
+  valueMode = 'absolute',
+  incomeTotal = 0
 }) => {
   const entries = Object.entries(categories || {});
   if (entries.length === 0) return null;
@@ -57,7 +60,9 @@ const CategoryRows = ({
                   </div>
                 </div>
                 <div className="category-amount">
-                  {formatCurrency(amount, defaultCurrency)}
+                  {valueMode === 'percentage'
+                    ? formatPercentOf(amount, incomeTotal)
+                    : formatCurrency(amount, defaultCurrency)}
                 </div>
               </div>
               {isExpanded && transactionCount > 0 && (

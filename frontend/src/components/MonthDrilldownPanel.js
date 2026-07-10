@@ -16,7 +16,10 @@ const MonthDrilldownPanel = ({
   onDeletePrediction,
   onPredictionChanged,
   onTransactionCategoryUpdated,
-  onCategoriesChanged
+  onCategoriesChanged,
+  valueMode = 'absolute',
+  activeSection: controlledActiveSection,
+  onActiveSectionChange
 }) => {
   const monthPairSlice = useMonthPairSlice(selectedMonth?.month);
 
@@ -47,6 +50,9 @@ const MonthDrilldownPanel = ({
           availableCategories={availableCategories}
           onTransactionCategoryUpdated={onTransactionCategoryUpdated}
           onCategoriesChanged={onCategoriesChanged}
+          valueMode={valueMode}
+          activeSection={controlledActiveSection}
+          onActiveSectionChange={onActiveSectionChange}
         />
       </div>
     </div>

@@ -33,7 +33,10 @@ const MonthSummaryCard = ({
   onPredictionChanged = () => {},
   availableCategories = { income: [], expense: [] },
   onTransactionCategoryUpdated = () => {},
-  onCategoriesChanged = () => {}
+  onCategoriesChanged = () => {},
+  valueMode = 'absolute',
+  activeSection: controlledActiveSection,
+  onActiveSectionChange
 }) => {
   const { preferences, updatePreferences } = useAppContext();
   const [expenseSort, setExpenseSort] = usePreferenceState(
@@ -130,13 +133,25 @@ const MonthSummaryCard = ({
   } = allocationPredictions;
 
   const [activeSection, setActiveSection] = React.useState(null);
+  const isSectionControlled = controlledActiveSection !== undefined;
+  const resolvedActiveSection = isSectionControlled ? controlledActiveSection : activeSection;
 
   const handleSectionClick = useCallback((section) => {
-    setActiveSection((prev) => (prev === section ? null : section));
-  }, []);
+    const next = resolvedActiveSection === section ? null : section;
+    if (isSectionControlled) {
+      onActiveSectionChange?.(next);
+    } else {
+      setActiveSection(next);
+    }
+  }, [isSectionControlled, onActiveSectionChange, resolvedActiveSection]);
 
   useEffect(() => {
-    if (!activeSection) return undefined;
+    setActiveSection(null);
+    setExpandedCategories({});
+  }, [valueMode]);
+
+  useEffect(() => {
+    if (!resolvedActiveSection) return undefined;
 
     const handlePointerDown = (event) => {
       if (event.target.closest('.month-allocation-segment, .month-allocation-header--clickable')) {
@@ -145,12 +160,16 @@ const MonthSummaryCard = ({
       if (event.target.closest('.month-breakdown-panel')) {
         return;
       }
-      setActiveSection(null);
+      if (isSectionControlled) {
+        onActiveSectionChange?.(null);
+      } else {
+        setActiveSection(null);
+      }
     };
 
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [activeSection]);
+  }, [resolvedActiveSection, isSectionControlled, onActiveSectionChange]);
 
   const sectionAvailability = useMemo(() => ({
     essential: Object.keys(essentialExpenses).length > 0,
@@ -273,7 +292,7 @@ const MonthSummaryCard = ({
             showPredictedGap={showPredictedGap}
             barEffectiveEssential={barEffectiveEssential}
             expenseBarTotal={expenseBarTotal}
-            activeSection={activeSection}
+            activeSection={resolvedActiveSection}
             onSectionClick={handleSectionClick}
             sectionAvailability={sectionAvailability}
           />
@@ -282,7 +301,7 @@ const MonthSummaryCard = ({
             month={month}
             defaultCurrency={defaultCurrency}
             isCurrentMonth={isCurrentMonth}
-            activeSection={activeSection}
+            activeSection={resolvedActiveSection}
             incomeTotal={income}
             expandedCategories={expandedCategories}
             toggleCategory={toggleCategory}
@@ -299,6 +318,7 @@ const MonthSummaryCard = ({
             sortField={sortField}
             sortDirection={sortDirection}
             onSortToggle={handleSortToggle}
+            valueMode={valueMode}
           />
         </div>
 

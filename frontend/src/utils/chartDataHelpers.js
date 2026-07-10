@@ -28,12 +28,9 @@ export const buildMonthlySavingsPoint = (month, essentialCategories = [], essent
   };
 };
 
-export const buildCockpitChartData = (
-  summary,
-  essentialCategories,
-  monthCount = 12
-) => {
-  const lastMonths = getLastNMonths(summary, monthCount);
+const pctOf = (value, base) => (base > 0 ? (value / base) * 100 : 0);
+
+export const buildCockpitChartData = (months, essentialCategories) => {
   const essentialSet = buildEssentialCategorySet(essentialCategories);
 
   let cumulative = 0;
@@ -41,9 +38,10 @@ export const buildCockpitChartData = (
   let cumulativeNonEssential = 0;
   let cumulativeIncome = 0;
   let cumulativeSavingsCategories = 0;
+  let totalMonthlySavingsCategories = 0;
   let totalIncome = 0;
 
-  const data = lastMonths.map((month) => {
+  const data = months.map((month) => {
     const {
       expenseSavingsCategories,
       essentialTotal: monthlyEssential,
@@ -63,9 +61,12 @@ export const buildCockpitChartData = (
     cumulativeEssential += monthlyEssential;
     cumulativeNonEssential += monthlyNonEssential;
     cumulativeSavingsCategories += monthlySavingsCategories;
+    totalMonthlySavingsCategories += monthlySavingsCategories;
     const monthlySavingsAllocation = Math.max(income - monthlyEssential - monthlyNonEssential, 0);
     const cumulativeSavingsAllocation =
       cumulativeIncome - cumulativeEssential - cumulativeNonEssential;
+    const cumulativeSpending = cumulativeEssential + cumulativeNonEssential;
+    const cumulativeSavingRate = pctOf(cumulative, cumulativeIncome);
 
     return {
       month: formatMonth(month.month),
@@ -73,21 +74,35 @@ export const buildCockpitChartData = (
       monthlySavings,
       cumulativeSavings: cumulative,
       savingRate,
+      cumulativeSavingRate,
       monthlyIncome: income,
       cumulativeIncome,
       monthlyEssential,
       monthlyNonEssential,
-      monthlySavingsCategories,
       monthlySavingsAllocation,
       cumulativeEssential,
       cumulativeNonEssential,
-      cumulativeSavingsCategories,
       cumulativeSavingsAllocation: Math.max(cumulativeSavingsAllocation, 0),
-      cumulativeSpending: cumulativeEssential + cumulativeNonEssential
+      cumulativeSpending,
+      monthlyEssentialPct: pctOf(monthlyEssential, income),
+      monthlyNonEssentialPct: pctOf(monthlyNonEssential, income),
+      monthlySavingsAllocationPct: pctOf(monthlySavingsAllocation, income),
+      cumulativeEssentialPct: pctOf(cumulativeEssential, cumulativeIncome),
+      cumulativeNonEssentialPct: pctOf(cumulativeNonEssential, cumulativeIncome),
+      cumulativeSavingsAllocationPct: pctOf(
+        Math.max(cumulativeSavingsAllocation, 0),
+        cumulativeIncome
+      ),
+      cumulativeSpendingPct: pctOf(cumulativeSpending, cumulativeIncome)
     };
   });
 
   const last = data[data.length - 1];
+  const totalMonthlyEssential = data.reduce((sum, point) => sum + point.monthlyEssential, 0);
+  const totalMonthlyNonEssential = data.reduce((sum, point) => sum + point.monthlyNonEssential, 0);
+  const totalMonthlySavings = data.reduce((sum, point) => sum + point.monthlySavings, 0);
+  const avgMonthlySavings = data.length > 0 ? totalMonthlySavings / data.length : 0;
+
   return {
     chartData: data,
     totalCumulative: last?.cumulativeSavings ?? 0,
@@ -98,7 +113,11 @@ export const buildCockpitChartData = (
     totalCumulativeEssential: last?.cumulativeEssential ?? 0,
     totalCumulativeNonEssential: last?.cumulativeNonEssential ?? 0,
     totalCumulativeIncome: last?.cumulativeIncome ?? 0,
-    totalCumulativeSavingsCategories: last?.cumulativeSavingsCategories ?? 0,
-    totalCumulativeSpending: last?.cumulativeSpending ?? 0
+    totalCumulativeSavingsCategories: cumulativeSavingsCategories,
+    totalMonthlyEssential,
+    totalMonthlyNonEssential,
+    totalMonthlySavingsCategories,
+    totalMonthlySavings,
+    avgMonthlySavings
   };
 };

@@ -23,7 +23,8 @@ const MonthCategoryBreakdown = ({
   renderTransactionItem,
   sortField,
   sortDirection,
-  onSortToggle
+  onSortToggle,
+  valueMode = 'absolute'
 }) => {
   const monthKey = month.month;
 
@@ -37,7 +38,9 @@ const MonthCategoryBreakdown = ({
     renderTransactionItem,
     sortField,
     sortDirection,
-    onSortToggle
+    onSortToggle,
+    valueMode,
+    incomeTotal
   }), [
     monthKey,
     defaultCurrency,
@@ -48,7 +51,9 @@ const MonthCategoryBreakdown = ({
     renderTransactionItem,
     sortField,
     sortDirection,
-    onSortToggle
+    onSortToggle,
+    valueMode,
+    incomeTotal
   ]);
 
   const essentialAvgSubtitle = isCurrentMonth && predictedEssentialAverage > 0 ? (
@@ -132,6 +137,8 @@ const MonthCategoryBreakdown = ({
         defaultCurrency={defaultCurrency}
         subtitle={section.subtitle}
         indent={section.indent}
+        valueMode={valueMode}
+        incomeTotal={incomeTotal}
       />
     </div>
   );

@@ -15,4 +15,5 @@ export { useRecurringPayments } from './useRecurringPayments';
 export { useCategoryTransactionIndex } from './useCategoryTransactionIndex';
 export { useIbkrDepositPairs } from './useIbkrDepositPairs';
 export { useBrokerData } from './useBrokerData';
+export { useDateRangeSelection } from './useDateRangeSelection';
 

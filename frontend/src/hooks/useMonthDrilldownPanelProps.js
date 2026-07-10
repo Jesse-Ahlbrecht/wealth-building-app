@@ -1,5 +1,3 @@
-import { useCallback } from 'react';
-
 const EMPTY_PREDICTIONS = [];
 
 export function useMonthDrilldownPanelProps({
@@ -15,14 +13,13 @@ export function useMonthDrilldownPanelProps({
   handleDeletePrediction,
   reloadPredictions,
   refreshSummary,
-  refreshCategories
+  refreshCategories,
+  valueMode = 'absolute'
 }) {
   const selectedMonthKey = selectedMonth?.month;
-  const onClose = useCallback(() => setSelectedMonth(null), [setSelectedMonth]);
 
   return {
     selectedMonth,
-    onClose,
     defaultCurrency,
     essentialCategories,
     availableCategories,
@@ -33,6 +30,7 @@ export function useMonthDrilldownPanelProps({
     onDeletePrediction: handleDeletePrediction,
     onPredictionChanged: reloadPredictions,
     onTransactionCategoryUpdated: refreshSummary,
-    onCategoriesChanged: refreshCategories
+    onCategoriesChanged: refreshCategories,
+    valueMode
   };
 }
