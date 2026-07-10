@@ -1,6 +1,7 @@
 import React from 'react';
 import { formatCurrency } from '../utils';
 import { formatPercentOf } from '../utils/finance';
+import { useCockpitDisplay } from '../context/CockpitDisplayContext';
 import ExpenseSortControls from './ExpenseSortControls';
 
 const CategoryRows = ({
@@ -19,9 +20,9 @@ const CategoryRows = ({
   sortDirection,
   onSortToggle,
   footer,
-  valueMode = 'absolute',
   incomeTotal = 0
 }) => {
+  const { valueMode } = useCockpitDisplay();
   const entries = Object.entries(categories || {});
   if (entries.length === 0) return null;
   const maxAmount = Math.max(...entries.map(([, amount]) => amount));

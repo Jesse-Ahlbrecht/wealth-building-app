@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -19,11 +19,11 @@ import {
   INCOME_BAR_SEGMENT_CONFIGS,
   savedBarShape,
   SPENDING_BAR_SEGMENT_CONFIGS,
-  STACKED_BAR_FILL_OPACITY
+  STACKED_BAR_FILL_OPACITY,
+  syncBarSegmentStyles
 } from '../utils/cockpitBarShapes';
 import {
   COCKPIT_COLORS,
-  COCKPIT_VIEW_KEYS,
   CockpitTooltip,
   getCockpitViewConfig,
   getIncomeSeriesKeys,
@@ -33,8 +33,7 @@ import {
 } from '../utils/cockpitChartConfig';
 import CockpitViewToggle from '../components/CockpitViewToggle';
 import DateRangeToggle from '../components/DateRangeToggle';
-import CumulativeModeToggle from '../components/CumulativeModeToggle';
-import ValueModeToggle from '../components/ValueModeToggle';
+import SegmentedControl from '../components/SegmentedControl';
 import {
   useCategoryData,
   useTransactionSummary,
@@ -47,27 +46,36 @@ import {
 import ChartPageStates from '../components/ChartPageStates';
 import MonthDrilldownPanel from '../components/MonthDrilldownPanel';
 import { useAppContext } from '../context/AppContext';
+import { CockpitDisplayProvider } from '../context/CockpitDisplayContext';
+import {
+  CHART_ACTIVE_DOT,
+  CHART_MARGIN,
+  CHART_TOOLTIP_STYLE
+} from '../utils/chartConstants';
+import { migrateCockpitChartView } from '../utils/cockpitPreferences';
 import {
   formatSavingsAmountGoalMeta,
   getColorForPercentage,
   SAVINGS_RATE_GOAL
 } from '../utils/finance';
 
-const CHART_MARGIN = { top: 20, right: 30, left: 20, bottom: 20 };
-const TOOLTIP_STYLE = {
-  backgroundColor: 'var(--color-bg-card)',
-  border: '1px solid var(--color-border-primary)',
-  borderRadius: '8px',
-  padding: '12px',
-  color: 'var(--color-text-primary)',
-  boxShadow: '0 4px 12px var(--color-shadow-md)'
-};
-const ACTIVE_DOT = { r: 7, stroke: '#fff', strokeWidth: 2 };
+const ACTIVE_DOT = CHART_ACTIVE_DOT;
+const TOOLTIP_STYLE = CHART_TOOLTIP_STYLE;
 const STROKE_OPACITY = 0.85;
 const BAR_CATEGORY_GAP = '32%';
 const BAR_MAX_SIZE = 36;
 const BAR_GRID_STROKE = 'var(--color-border-secondary)';
 const BAR_GRID_OPACITY = 0.45;
+
+const CUMULATIVE_MODE_OPTIONS = [
+  { value: 'cumulative', label: 'Cumulative' },
+  { value: 'normal', label: 'Normal' }
+];
+
+const VALUE_MODE_OPTIONS = [
+  { value: 'absolute', label: 'Absolute' },
+  { value: 'percentage', label: 'Percentage' }
+];
 
 const cockpitAreaGradientDefs = (
   <defs>
@@ -93,12 +101,6 @@ const cockpitAreaGradientDefs = (
     </linearGradient>
   </defs>
 );
-
-const normalizeChartView = (view) => {
-  if (view === 'cumulative' || view === 'rate') return 'saved';
-  if (COCKPIT_VIEW_KEYS.includes(view)) return view;
-  return 'saved';
-};
 
 const MonthDot = ({ cx, cy, payload, selectedMonthKey, color, selectedColor }) => {
   if (cx == null || cy == null) return null;
@@ -158,7 +160,13 @@ const CockpitPage = () => {
     updatePreferences
   );
 
-  const chartView = normalizeChartView(rawChartView);
+  const chartView = migrateCockpitChartView(rawChartView);
+
+  useEffect(() => {
+    if (rawChartView !== chartView) {
+      setChartView(chartView);
+    }
+  }, [rawChartView, chartView, setChartView]);
   const selectedMonthKey = selectedMonth?.month;
   const {
     predictions,
@@ -174,8 +182,13 @@ const CockpitPage = () => {
     [summary]
   );
 
-  const [hoveredSegment, setHoveredSegment] = useState(null);
   const [activeDrilldownSection, setActiveDrilldownSection] = useState(null);
+  const barInteractionRef = useRef({
+    hoveredIndex: null,
+    hoveredSegment: null,
+    selectedMonthKey: null,
+    focusedSection: null
+  });
 
   const handleMonthClickFromDrag = useCallback((monthData) => {
     selectMonthFromChart(
@@ -193,14 +206,12 @@ const CockpitPage = () => {
     selectedRange,
     isSelecting,
     hasMoved,
-    hoveredIndex,
     showCustomHelp,
     chartContainerRef,
     customButtonRef,
     handleTimeRangeChange,
     handleCustomClick,
-    handleMouseDown,
-    setHoveredIndex
+    handleMouseDown
   } = useDateRangeSelection(sortedMonths, {
     onMonthClick: handleMonthClickFromDrag,
     rerenderDeps: [cumulativeMode]
@@ -267,9 +278,23 @@ const CockpitPage = () => {
     handleDeletePrediction,
     reloadPredictions,
     refreshSummary,
-    refreshCategories,
-    valueMode
+    refreshCategories
   });
+
+  const syncBarStyles = useCallback(() => {
+    syncBarSegmentStyles(chartContainerRef.current, barInteractionRef);
+  }, [chartContainerRef]);
+
+  useEffect(() => {
+    barInteractionRef.current.selectedMonthKey = selectedMonthKey;
+    barInteractionRef.current.focusedSection = activeDrilldownSection;
+    syncBarStyles();
+  }, [selectedMonthKey, activeDrilldownSection, syncBarStyles]);
+
+  useLayoutEffect(() => {
+    if (!isBarChart) return;
+    syncBarStyles();
+  }, [isBarChart, chartData, chartView, syncBarStyles]);
 
   const capStackedBarYAxis = isBarChart && view.yAxisIsRate
     && (chartView === 'income' || chartView === 'spending');
@@ -352,31 +377,25 @@ const CockpitPage = () => {
     return formatSavingsAmountGoalMeta(entry.monthlySavings, defaultCurrency).color;
   }, [valueMode, defaultCurrency]);
 
-  const barInteraction = useMemo(() => ({
-    hoveredIndex,
-    hoveredSegment,
-    selectedMonthKey,
-    focusedSection: activeDrilldownSection
-  }), [hoveredIndex, hoveredSegment, selectedMonthKey, activeDrilldownSection]);
-
   const incomeBarShapes = useMemo(
-    () => buildStackedBarShapes(barInteraction, INCOME_BAR_SEGMENT_CONFIGS),
-    [barInteraction]
+    () => buildStackedBarShapes(INCOME_BAR_SEGMENT_CONFIGS),
+    []
   );
   const spendingBarShapes = useMemo(
-    () => buildStackedBarShapes(barInteraction, SPENDING_BAR_SEGMENT_CONFIGS),
-    [barInteraction]
+    () => buildStackedBarShapes(SPENDING_BAR_SEGMENT_CONFIGS),
+    []
   );
   const savedBarShapeRenderer = useMemo(
-    () => savedBarShape({ ...barInteraction, getBaseColor: savedBarGetColor }),
-    [barInteraction, savedBarGetColor]
+    () => savedBarShape({ getBaseColor: savedBarGetColor }),
+    [savedBarGetColor]
   );
 
   const barSegmentHandlers = useMemo(() => {
     const makeHandlers = (section) => ({
       onMouseEnter: (_data, index) => {
-        setHoveredIndex(index);
-        setHoveredSegment(section);
+        barInteractionRef.current.hoveredIndex = index;
+        barInteractionRef.current.hoveredSegment = section;
+        syncBarSegmentStyles(chartContainerRef.current, barInteractionRef);
       },
       onClick: handleBarSegmentClick(section)
     });
@@ -385,7 +404,7 @@ const CockpitPage = () => {
       nonEssential: makeHandlers('nonEssential'),
       savings: makeHandlers('savings')
     };
-  }, [handleBarSegmentClick, setHoveredIndex]);
+  }, [handleBarSegmentClick, chartContainerRef]);
 
   const renderAreaChart = () => (
     <AreaChart data={chartData} margin={CHART_MARGIN} onClick={handleChartClick}>
@@ -469,8 +488,9 @@ const CockpitPage = () => {
 
   const barChartHandlers = {
     onMouseLeave: () => {
-      setHoveredIndex(null);
-      setHoveredSegment(null);
+      barInteractionRef.current.hoveredIndex = null;
+      barInteractionRef.current.hoveredSegment = null;
+      syncBarSegmentStyles(chartContainerRef.current, barInteractionRef);
     }
   };
 
@@ -549,6 +569,7 @@ const CockpitPage = () => {
   );
 
   return (
+    <CockpitDisplayProvider valueMode={valueMode}>
     <ChartPageStates
       loading={loading}
       error={error}
@@ -568,8 +589,18 @@ const CockpitPage = () => {
             onTimeRangeChange={handleTimeRangeChange}
             onCustomClick={handleCustomClick}
           />
-          <CumulativeModeToggle value={cumulativeMode} onChange={setCumulativeMode} />
-          <ValueModeToggle value={valueMode} onChange={setValueMode} />
+          <SegmentedControl
+            value={cumulativeMode}
+            onChange={setCumulativeMode}
+            options={CUMULATIVE_MODE_OPTIONS}
+            ariaLabel="Cumulative mode"
+          />
+          <SegmentedControl
+            value={valueMode}
+            onChange={setValueMode}
+            options={VALUE_MODE_OPTIONS}
+            ariaLabel="Value mode"
+          />
         </div>
       </div>
       <div className="charts-container charts-layout">
@@ -606,6 +637,7 @@ const CockpitPage = () => {
         />
       </div>
     </ChartPageStates>
+    </CockpitDisplayProvider>
   );
 };
 

@@ -13,8 +13,7 @@ export function useMonthDrilldownPanelProps({
   handleDeletePrediction,
   reloadPredictions,
   refreshSummary,
-  refreshCategories,
-  valueMode = 'absolute'
+  refreshCategories
 }) {
   const selectedMonthKey = selectedMonth?.month;
 
@@ -30,7 +29,6 @@ export function useMonthDrilldownPanelProps({
     onDeletePrediction: handleDeletePrediction,
     onPredictionChanged: reloadPredictions,
     onTransactionCategoryUpdated: refreshSummary,
-    onCategoriesChanged: refreshCategories,
-    valueMode
+    onCategoriesChanged: refreshCategories
   };
 }

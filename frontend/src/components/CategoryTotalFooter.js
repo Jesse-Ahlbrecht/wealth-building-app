@@ -1,6 +1,7 @@
 import React from 'react';
 import { formatCurrency } from '../utils';
 import { formatPercentOf } from '../utils/finance';
+import { useCockpitDisplay } from '../context/CockpitDisplayContext';
 
 const CategoryTotalFooter = ({
   label,
@@ -8,9 +9,10 @@ const CategoryTotalFooter = ({
   defaultCurrency,
   subtitle,
   indent = false,
-  valueMode = 'absolute',
   incomeTotal = 0
-}) => (
+}) => {
+  const { valueMode } = useCockpitDisplay();
+  return (
   <div style={{
     marginTop: '12px',
     paddingTop: '12px',
@@ -29,6 +31,7 @@ const CategoryTotalFooter = ({
       </span>
     </div>
   </div>
-);
+  );
+};
 
 export default CategoryTotalFooter;

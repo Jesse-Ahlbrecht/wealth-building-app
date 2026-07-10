@@ -1,4 +1,10 @@
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
+import {
+  CHART_MARGIN_LEFT,
+  CHART_MARGIN_RIGHT,
+  CHART_MARGIN_TOP,
+  CHART_MARGIN_BOTTOM
+} from '../utils/chartConstants';
 
 export function useDateRangeSelection(data, { onMonthClick, rerenderDeps = [] } = {}) {
   const chartContainerRef = useRef(null);
@@ -67,14 +73,10 @@ export function useDateRangeSelection(data, { onMonthClick, rerenderDeps = [] } 
       return;
     }
 
-    const marginLeft = 20;
-    const marginRight = 30;
-    const marginTop = 20;
-    const marginBottom = 20;
-    const plotAreaLeft = wrapperRect.left + marginLeft;
-    const plotAreaRight = wrapperRect.right - marginRight;
-    const plotAreaTop = wrapperRect.top + marginTop;
-    const plotAreaBottom = wrapperRect.bottom - marginBottom;
+    const plotAreaLeft = wrapperRect.left + CHART_MARGIN_LEFT;
+    const plotAreaRight = wrapperRect.right - CHART_MARGIN_RIGHT;
+    const plotAreaTop = wrapperRect.top + CHART_MARGIN_TOP;
+    const plotAreaBottom = wrapperRect.bottom - CHART_MARGIN_BOTTOM;
 
     plotMetricsRef.current = {
       plotAreaLeft,

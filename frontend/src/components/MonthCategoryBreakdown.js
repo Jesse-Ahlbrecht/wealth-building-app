@@ -23,8 +23,7 @@ const MonthCategoryBreakdown = ({
   renderTransactionItem,
   sortField,
   sortDirection,
-  onSortToggle,
-  valueMode = 'absolute'
+  onSortToggle
 }) => {
   const monthKey = month.month;
 
@@ -39,7 +38,6 @@ const MonthCategoryBreakdown = ({
     sortField,
     sortDirection,
     onSortToggle,
-    valueMode,
     incomeTotal
   }), [
     monthKey,
@@ -52,7 +50,6 @@ const MonthCategoryBreakdown = ({
     sortField,
     sortDirection,
     onSortToggle,
-    valueMode,
     incomeTotal
   ]);
 
@@ -137,7 +134,6 @@ const MonthCategoryBreakdown = ({
         defaultCurrency={defaultCurrency}
         subtitle={section.subtitle}
         indent={section.indent}
-        valueMode={valueMode}
         incomeTotal={incomeTotal}
       />
     </div>

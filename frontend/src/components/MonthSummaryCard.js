@@ -10,6 +10,7 @@ import {
 import { buildRecurringMatchKeys, computeAllocationPredictions } from '../utils/predictionHelpers';
 import { EMPTY_PAIR_SLICE, getInternalTransferTransactions } from '../utils/pairIndexHelpers';
 import { useCategoryTransactionIndex, usePreferenceState } from '../hooks';
+import { useCockpitDisplay } from '../context/CockpitDisplayContext';
 import { PredictionMenuProvider } from '../context/PredictionMenuContext';
 import CategoryEditModal from './CategoryEditModal';
 import PredictionEditModal from './PredictionEditModal';
@@ -34,11 +35,11 @@ const MonthSummaryCard = ({
   availableCategories = { income: [], expense: [] },
   onTransactionCategoryUpdated = () => {},
   onCategoriesChanged = () => {},
-  valueMode = 'absolute',
   activeSection: controlledActiveSection,
   onActiveSectionChange
 }) => {
   const { preferences, updatePreferences } = useAppContext();
+  const { valueMode } = useCockpitDisplay();
   const [expenseSort, setExpenseSort] = usePreferenceState(
     `expenseSort_${month.month}`,
     'amount_desc',
@@ -318,7 +319,6 @@ const MonthSummaryCard = ({
             sortField={sortField}
             sortDirection={sortDirection}
             onSortToggle={handleSortToggle}
-            valueMode={valueMode}
           />
         </div>
 

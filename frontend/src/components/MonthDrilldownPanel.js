@@ -17,7 +17,6 @@ const MonthDrilldownPanel = ({
   onPredictionChanged,
   onTransactionCategoryUpdated,
   onCategoriesChanged,
-  valueMode = 'absolute',
   activeSection: controlledActiveSection,
   onActiveSectionChange
 }) => {
@@ -50,7 +49,6 @@ const MonthDrilldownPanel = ({
           availableCategories={availableCategories}
           onTransactionCategoryUpdated={onTransactionCategoryUpdated}
           onCategoriesChanged={onCategoriesChanged}
-          valueMode={valueMode}
           activeSection={controlledActiveSection}
           onActiveSectionChange={onActiveSectionChange}
         />
